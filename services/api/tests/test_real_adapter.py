@@ -188,11 +188,11 @@ def test_allocate_vmid():
         token_id="u!t", token_secret="x",
     )
     client = _build_mock_client()
-    client.cluster.nextid.post.return_value = "9102"
+    client.cluster.nextid.get.return_value = "9102"
     _install_client(a, client)
 
     assert asyncio.run(a.allocate_vmid()) == 9102
-    client.cluster.nextid.post.assert_called_once_with()
+    client.cluster.nextid.get.assert_called_once_with()
 
 
 # --- clone_vm --------------------------------------------------------------
@@ -238,7 +238,7 @@ def test_clone_vm_without_newid_allocates_via_nextid():
         token_id="u!t", token_secret="x",
     )
     client = _build_mock_client()
-    client.cluster.nextid.post.return_value = "9123"
+    client.cluster.nextid.get.return_value = "9123"
     _install_client(a, client)
 
     spec = CloneSpec(
@@ -246,7 +246,7 @@ def test_clone_vm_without_newid_allocates_via_nextid():
     )
     result = asyncio.run(a.clone_vm(spec))
 
-    client.cluster.nextid.post.assert_called_once()
+    client.cluster.nextid.get.assert_called_once()
     assert result.vmid == 9123
 
 

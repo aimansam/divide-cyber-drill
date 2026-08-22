@@ -57,17 +57,41 @@ The token secret is a UUID like `4ea3414f-d3a4-47b5-a2ed-19018f416cc0`. It is
 ```env
 PROXMOX_HOST=https://192.168.0.10    # your PVE host (no trailing slash)
 PROXMOX_PORT=8006
-PROXMOX_USER=divide@pve              # NOTE: realm is `pve` not `pam` here
+PROXMOX_USER=divide@pve@pam           # full PVE user: divide + realm pve + realm pam
+                                     # (yes, the doubled-@ is correct for token auth)
 PROXMOX_TOKEN_ID=divide@pve@pam!drill-token
 PROXMOX_TOKEN_SECRET=<paste-uuid>
 PROXMOX_VERIFY_SSL=false             # true if PVE has a real cert
 ```
 
-**Important**: `PROXMOX_TOKEN_ID` must be `<user>@<realm>!<token-id>`,
-not just the token name. Proxmox GUI shows this string when you list tokens.
+**Important**: `PROXMOX_TOKEN_ID` must be `<full-user>!<token-name>`, where
+`<full-user>` is the user exactly as PVE shows it under **Datacenter → Users**
+(e.g. `divide@pve@pam`). Proxmox GUI shows the full string when you list
+tokens.
 
-`PROXMOX_USER` must be `<user>@<realm>` (no `!token-id` part). For PAM users
-the realm is `pve` in the env value (PVE normalizes `pam` → `pve` internally).
+`PROXMOX_USER` must be the **same** full user string (no `!token-name` part).
+
+### Why is `PROXMOX_USER` `divide@pve@pam` (with two `@`)?
+
+That looks like a typo but it isn't. PVE token users are
+`<unix-name>@<auth-source>@<realm>` — for a PAM-created user, both auth-source
+and realm default to `pam`. So `divide@pve@pam` is the canonical name.
+
+If you only set `PROXMOX_USER=divide@pve`, proxmoxer builds the auth header
+as `PVEAPIToken=divide@pve!drill-token=<secret>`, which PVE rejects with
+**401 Unauthorized**. The correct header is
+`PVEAPIToken=divide@pve@pam!drill-token=<secret>`.
+
+Quick verification:
+
+```bash
+TOKEN_ID='divide@pve@pam!drill-token'
+SECRET='<your-uuid>'
+curl -sk -w "\nHTTP %{http_code}\n" \
+    -H "Authorization: PVEAPIToken=${TOKEN_ID}=${SECRET}" \
+    https://192.168.0.10:8006/api2/json/version
+# {"data":{"version":"9.1.7",...}} → HTTP 200
+```
 
 ## 5. Validate
 

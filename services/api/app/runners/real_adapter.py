@@ -176,7 +176,11 @@ class RealProxmoxAdapter(ProxmoxAdapter):
 
     async def allocate_vmid(self) -> int:
         def _do() -> int:
-            return int(self._get_client().cluster.nextid.post())
+            # PVE 8+/9: `/cluster/nextid` is a GET, not POST. POST returns
+            # 501 Not Implemented on PVE 9.1.7. Older docs and the proxmoxer
+            # default assume POST, so we explicitly use GET for forward
+            # compatibility.
+            return int(self._get_client().cluster.nextid.get())
 
         return await self._call(_do)
 
