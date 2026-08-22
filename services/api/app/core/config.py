@@ -59,4 +59,17 @@ def get_settings() -> Settings:
     return Settings()
 
 
-settings = get_settings()
+class _SettingsProxy:
+    """Proxy that always delegates to `get_settings()`, so env-var changes
+    (e.g. in tests) are picked up without an import-time freeze.
+
+    Usage in code stays the same as a module-level `settings` instance:
+        from app.core.config import settings
+        host = settings.proxmox.host
+    """
+
+    def __getattr__(self, name: str):
+        return getattr(get_settings(), name)
+
+
+settings = _SettingsProxy()
