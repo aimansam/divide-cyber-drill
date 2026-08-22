@@ -53,6 +53,11 @@ class Settings(BaseSettings):
     # Proxmox
     proxmox: ProxmoxSettings = Field(default_factory=ProxmoxSettings)
 
+    # Scenario catalog
+    scenarios_dir: str = "/workdir/examples/scenarios"
+    sync_on_startup: bool = True
+    extra_scenarios_dirs: list[str] = Field(default_factory=list)
+
 
 @lru_cache
 def get_settings() -> Settings:

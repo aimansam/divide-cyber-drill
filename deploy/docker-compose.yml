@@ -7,8 +7,8 @@ name: divide-cyber-drill
 services:
   api:
     build:
-      context: ../services/api
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: services/api/Dockerfile
     image: divide/api:dev
     container_name: divide-api
     restart: unless-stopped
@@ -23,6 +23,10 @@ services:
       DIVIDE_MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-divide}
       DIVIDE_MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-dividedividedivide}
       DIVIDE_MINIO_BUCKET: ${MINIO_BUCKET:-divide-artifacts}
+      # Scenario catalog. The repo's examples/ is mounted read-only so the
+      # API can sync them into the DB on startup.
+      DIVIDE_SCENARIOS_DIR: ${DIVIDE_SCENARIOS_DIR:-/workdir/examples/scenarios}
+      DIVIDE_SYNC_ON_STARTUP: ${DIVIDE_SYNC_ON_STARTUP:-true}
       PROXMOX_HOST: ${PROXMOX_HOST:-}
       PROXMOX_PORT: ${PROXMOX_PORT:-8006}
       PROXMOX_USER: ${PROXMOX_USER:-divide@pve}
@@ -37,6 +41,10 @@ services:
       minio:
         condition: service_started
     networks: [divide-net]
+    volumes:
+      # Repo root mounted read-only so the api container can read scenario
+      # YAMLs from /workdir/examples/scenarios at startup.
+      - ${DIVIDE_REPO_ROOT:-..}:/workdir:ro
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8000/healthz"]
       interval: 15s

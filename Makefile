@@ -8,7 +8,7 @@ API_DIR := services/api
 
 .DEFAULT_GOAL := help
 
-.PHONY: help up down logs ps restart build pull lint format test smoke proxmox-ping diag clean validate-scenarios migrate db-upgrade db-downgrade db-revision smoke-run
+.PHONY: help up down logs ps restart build pull lint format test smoke proxmox-ping diag clean validate-scenarios migrate db-upgrade db-downgrade db-revision smoke-run sync-scenarios
 
 help: ## Show this help.
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -84,6 +84,9 @@ clean: ## Stop stack and remove build artifacts (volumes preserved).
 
 validate-scenarios: ## Validate all scenario YAML files against divide/v1 schema.
 	$(PYTHON) tools/validate_scenario.py examples/scenarios/ scenarios/
+
+sync-scenarios: ## Sync scenario YAML files into the DB (DIVIDE_DB_URL required).
+	DIVIDE_DB_URL=sqlite+aiosqlite:///./divide.db PYTHONPATH=$(API_DIR) $(PYTHON) tools/sync_scenarios.py
 
 smoke-run: ## End-to-end smoke (in-memory DB + MockProxmoxAdapter).
 	PYTHONPATH=$(API_DIR) $(PYTHON) tools/run_smoke.py

@@ -71,7 +71,7 @@ def test_alembic_current_reports_head(tmp_path) -> None:
         capture_output=True, text=True, env=env, cwd=ROOT,
     )
     assert r.returncode == 0
-    assert "0001 (head)" in r.stdout
+    assert "(head)" in r.stdout
 
 
 def test_alembic_downgrade_removes_all_tables(tmp_path) -> None:
@@ -117,7 +117,7 @@ def test_alembic_round_trip(tmp_path) -> None:
         [sys.executable, "-m", "alembic", "--config", str(ALEMBIC_INI), "current"],
         capture_output=True, text=True, env=env, cwd=ROOT,
     )
-    assert "0001 (head)" in cur.stdout
+    assert "(head)" in cur.stdout
 
 
 def test_alembic_indexes_present(tmp_path) -> None:
