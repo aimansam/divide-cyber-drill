@@ -19,13 +19,16 @@ RUN pip install --upgrade pip hatchling && \
     "pydantic-settings>=2.6.0" \
     "sqlalchemy[asyncio]>=2.0.36" \
     "asyncpg>=0.30.0" \
+    "alembic>=1.13.3" \
     "redis[hiredis]>=5.2.0" \
     "httpx>=0.27.2" \
     "proxmoxer>=2.2.0" \
     "requests>=2.32.3" \
     "pyyaml>=6.0.2" \
+    "jsonschema>=4.18,<5" \
     "structlog>=24.4.0" \
-    "tenacity>=9.0.0"
+    "tenacity>=9.0.0" \
+    "psycopg2-binary>=2.9.9"
 
 # --- runtime stage ---
 FROM python:3.12-slim-bookworm
@@ -43,11 +46,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=builder /wheels /wheels
 RUN pip install --no-index --find-links=/wheels \
     fastapi uvicorn pydantic pydantic-settings \
-    sqlalchemy asyncpg redis httpx proxmoxer requests pyyaml structlog tenacity \
+    sqlalchemy asyncpg alembic redis httpx proxmoxer requests pyyaml \
+    jsonschema structlog tenacity psycopg2-binary \
     && rm -rf /wheels /root/.cache
 
 COPY app ./app
 COPY scripts ./scripts
+COPY alembic ./alembic
+COPY alembic.ini ./alembic.ini
 USER divide
 
 EXPOSE 8000
