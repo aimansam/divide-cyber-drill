@@ -5,6 +5,7 @@
 > **Status:** Phase 0 — Foundations **DONE**. Stages 2, 2.5, 2.7, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12 **DONE**.
 > PVE auth unblocked (PROXMOX_USER fix + PVE 9 GET /cluster/nextid).
 > First live drill is one `pveum acl` away.
+> See **[docs/TEST-PRODUCT.md](TEST-PRODUCT.md)** for L1/L2/L3 "test product" criteria and ETA per level.
 > **Target platform:** Proxmox VE (main host).
 > **Control plane runtime:** Docker Compose on a dedicated VM/LXC.
 > **Repo root:** `/DATA/Storage/docker/divide-cyber-drill`

@@ -41,6 +41,12 @@ Full spec (every field, every enum): [`docs/SCENARIO-SPEC.md`](docs/SCENARIO-SPE
 divide-cyber-drill/
 ├── docs/
 │   ├── PLAN.md                  # full design + architecture
+│   ├── LIVE-DRILL-RUNBOOK.md    # operator runbook for the first live drill
+│   ├── PROXMOX-SETUP.md         # PVE host setup (ACLs, tokens, ISO)
+│   ├── OBSERVABILITY.md         # Prometheus + Grafana wiring
+│   ├── SCENARIO-SPEC.md         # full scenario YAML spec
+│   ├── SCENARIO-SYNC.md         # YAML → DB catalog sync
+│   ├── TEST-PRODUCT.md          # L1/L2/L3 ship criteria + ETAs
 │   └── images/                  # 6 architecture diagrams (auto-generated)
 ├── deploy/
 │   ├── docker-compose.yml       # control-plane stack
