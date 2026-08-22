@@ -139,7 +139,11 @@ class Run(Base, TimestampMixin):
         ForeignKey("scenarios.id", ondelete="RESTRICT"), nullable=False
     )
     status: Mapped[RunStatus] = mapped_column(
-        Enum(RunStatus, name="run_status"),
+        Enum(
+            RunStatus,
+            name="run_status",
+            values_callable=lambda e: [v.value for v in e],
+        ),
         nullable=False,
         default=RunStatus.PENDING,
     )
@@ -191,7 +195,11 @@ class Asset(Base, TimestampMixin):
     kind: Mapped[str] = mapped_column(String(16), nullable=False, default="vm")
     template: Mapped[str] = mapped_column(String(64), nullable=False)
     status: Mapped[AssetStatus] = mapped_column(
-        Enum(AssetStatus, name="asset_status"),
+        Enum(
+            AssetStatus,
+            name="asset_status",
+            values_callable=lambda e: [v.value for v in e],
+        ),
         nullable=False,
         default=AssetStatus.PLANNED,
     )
@@ -224,7 +232,12 @@ class AuditLog(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
     action: Mapped[AuditAction] = mapped_column(
-        Enum(AuditAction, name="audit_action"), nullable=False
+        Enum(
+            AuditAction,
+            name="audit_action",
+            values_callable=lambda e: [v.value for v in e],
+        ),
+        nullable=False
     )
     actor: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # Optional polymorphic links. Both nullable; the combination lets us
