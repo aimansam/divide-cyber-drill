@@ -2,7 +2,7 @@
 
 ## Design & Architecture Plan
 
-> **Status:** Phase 0 — Foundations **DONE**. Stages 2, 2.5, 2.7, 3, 4, 5, 6, 7, 8, 9, 10, 11 **DONE**.
+> **Status:** Phase 0 — Foundations **DONE**. Stages 2, 2.5, 2.7, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12 **DONE**.
 > PVE auth unblocked (PROXMOX_USER fix + PVE 9 GET /cluster/nextid).
 > First live drill is one `pveum acl` away.
 > **Target platform:** Proxmox VE (main host).
@@ -390,7 +390,19 @@ On drill completion, report-builder extracts IOCs (IPs, domains, URLs, hashes) f
 - Tests: 163 → 169 (+6). Lint clean.
 - Live verified: preflight now reports **7/9** (ACL stale-cache FAIL + template missing FAIL). Once `service pveproxy restart` runs on the PVE host, ACL check will PASS and preflight will report **8/9** (template is the only remaining blocker).
 
-**Phase 1 — One-VM drill end-to-end** (after Stage 11 — waiting on template upload)
+**Stage 12 — Verify-after-drill tool** ✅
+- New `tools/verify_drill.py` — post-drill sanity check that inspects DB state + audit log + `/metrics` and reports PASS/FAIL on four axes:
+  1. `run.status` matches expectation (`succeeded` / `failed` / `cancelled` / `running`)
+  2. Assets are torn down (or spawned, for not-yet-stopped drills)
+  3. Audit log contains the expected actions (`run.started`, `run.completed`, `run.failed`, `run.cancelled`)
+  4. `/metrics` shows `divide_runs_total > 0` and `divide_runs_active == 0`
+- Tolerates both `{"items": [...]}` and bare-list shapes from the API; gracefully skips audit check if `/drills/{id}/audit` 404s; gracefully skips asset teardown check if asset detail isn't exposed by the list endpoint.
+- `--json` mode for CI.
+- New `tests/test_verify_drill.py` — 21 tests covering each check function + `_fetch_metrics` label-stripping + `_fetch_run` shape tolerance. Tests: 169 → 190 (+21). Lint clean.
+- New `make verify-drill` target — ergonomic wrapper accepting `RUN_ID=`, `RUN_EXPECT=`, `RUN_JSON=1`, `RUN_NO_DESTROY=1`.
+- Live verified: `make verify-drill RUN_EXPECT=failed RUN_NO_DESTROY=1` correctly reports run #7 (the prior template-missing failure) as PASS on the status check.
+
+**Phase 1 — One-VM drill end-to-end** (after Stage 12 — waiting on PVEproxy restart + template upload)
 - Single Ubuntu drill VM (vsftpd 2.3.4) — happy path with real PVE
 - Templates: `tpl-ubuntu-2204` + Kali template
 - Portal: list scenarios, start drill, see console, see artifact (PCAP), stop drill

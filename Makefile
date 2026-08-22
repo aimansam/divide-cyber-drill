@@ -106,6 +106,9 @@ live-drill: ## Run a drill end-to-end against live PVE. Args: SCENARIO=first-liv
 	@test -n "$$SCENARIO" || SCENARIO=first-live-drill; \
 	$(COMPOSE) exec api python /workdir/tools/live_drill.py --scenario "$$SCENARIO" --timeout $${TIMEOUT:-300}
 
+verify-drill: ## Verify the most recent (or RUN_ID=N) drill against expected status. Args: RUN_ID= RUN_EXPECT=succeeded RUN_JSON=1.
+	$(PYTHON) tools/verify_drill.py --expect $${RUN_EXPECT:-succeeded} $${RUN_ID:+--run-id $$RUN_ID} $${RUN_JSON:+--json} $${RUN_NO_DESTROY:+--no-destroyed-check}
+
 watch-drill: ## Watch the next drill via Prometheus; exits when outcome moves. Args: OUTCOME=succeeded CANCEL_AFTER=...
 	@test -n "$$OUTCOME" || OUTCOME=succeeded; \
 	$(PYTHON) tools/watch_drill.py --outcome "$$OUTCOME" $${CANCEL_AFTER:+--cancel-after $$CANCEL_AFTER} --timeout $${TIMEOUT:-600}
