@@ -22,3 +22,17 @@ repos:
     hooks:
       - id: yamllint
         args: [-d, {line-length: {max: 120}}]
+
+  - repo: local
+    hooks:
+      - id: validate-scenarios
+        name: Validate scenario YAML against divide/v1 schema
+        entry: python3 tools/validate_scenario.py
+        language: system
+        files: '(examples|scenarios)/.*\.scenario\.ya?ml$'
+        pass_filenames: true
+      - id: pyflakes-scenario-tools
+        name: pyflakes on scenario tools and tests
+        entry: python3 -m pyflakes tools/validate_scenario.py tests/test_scenario_schema.py
+        language: system
+        pass_filenames: false

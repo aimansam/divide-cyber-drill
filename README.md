@@ -13,6 +13,28 @@ endpoints. **No Proxmox calls happen yet.**
 
 ---
 
+## Scenarios
+
+Cyber drills are described declaratively as **Scenario** YAML files. Two
+reference examples ship in [`examples/scenarios/`](examples/scenarios/):
+
+- `phish-to-ransom.scenario.yaml` — phishing → AD compromise → ransomware (intermediate, 90 min)
+- `lateral-movement-baseline.scenario.yaml` — SMB/WinRM pivot, blue-team focus (beginner, 45 min)
+
+Files validate against [`schemas/scenario.schema.json`](schemas/scenario.schema.json)
+(JSON Schema 2020-12). The validator runs in CI and on every commit via
+pre-commit.
+
+```bash
+# Validate a single file
+make validate-scenarios
+
+# Or directly:
+python tools/validate_scenario.py examples/scenarios/phish-to-ransom.scenario.yaml
+```
+
+Full spec (every field, every enum): [`docs/SCENARIO-SPEC.md`](docs/SCENARIO-SPEC.md).
+
 ## What's in here
 
 ```
