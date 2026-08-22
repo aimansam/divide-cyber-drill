@@ -186,6 +186,22 @@ def list_templates(node: str | None = None) -> list[dict]:
     return out
 
 
+def list_acl() -> list[dict]:
+    """List the full access control table — every (path, user/group/token, role)
+    triple that grants permissions on the cluster.
+
+    Note: with API-token auth, the token is treated as a separate principal
+    (``divide@pve@pam!drill-token``). For our flow the token inherits the
+    user's roles; we don't grant roles on the token directly. So the check
+    for write-permissions is really: does the *user* ``divide@pve@pam``
+    have ``PVEVMAdmin`` (or broader) on ``/v2/vm`` or ``/`` with propagate?
+
+    Each entry is a dict with keys: ``path``, ``ugid``, ``roleid``, ``type``,
+    ``propagate``.
+    """
+    return _call("acl", lambda: get_proxmox_client().access.acl.get())
+
+
 def _int_or_none(v: Any) -> int | None:
     if v is None or v == "":
         return None

@@ -223,6 +223,112 @@ def check_template_exists(client, name, report):
         )
 
 
+# --- Roles the runner can use to clone / start / stop / destroy VMs. ---
+# PVEVMAdmin is the minimum. PVEAdmin and PVEUserAdmin are supersets.
+WRITE_ROLES = frozenset({"PVEVMAdmin", "PVEAdmin", "PVEUserAdmin"})
+
+
+def check_acl_for_writes(
+    client, report, user: str = "divide@pve@pam"
+) -> None:
+    """Confirm `user` has a write-role on `/v2/vm` (or `/` with propagate=1).
+
+    Without this grant, every clone/start/stop/destroy will 403 with
+    "Permission check failed". Catching it here means we fail the
+    preflight cleanly instead of discovering it mid-drill.
+
+    Caches the ACL result so we don't hit the API twice (the runner
+    tests will too).
+    """
+    try:
+        r = client.get(
+            "/api/v1/proxmox/acl",
+            params={"user": user},
+            timeout=10.0,
+        )
+        if r.status_code != 200:
+            detail = r.text[:120]
+            report.add(
+                f"ACL grants PVEVMAdmin on /v2/vm to {user}",
+                False,
+                f"HTTP {r.status_code}: {detail}",
+                "Re-grant on the PVE host: pveum acl modify /v2/vm "
+                "--users divide@pve@pam --roles PVEVMAdmin",
+            )
+            return
+        body = r.json()
+        items = body.get("items") or []
+    except Exception as exc:
+        report.add(
+            f"ACL grants PVEVMAdmin on /v2/vm to {user}",
+            False,
+            f"request failed: {exc}",
+        )
+        return
+
+    if not items:
+        report.add(
+            f"ACL grants PVEVMAdmin on /v2/vm to {user}",
+            False,
+            f"no ACL entries for {user} (empty result — cache may be stale on PVE proxy)",
+            "On PVE host: pveum acl list (expect one entry for /v2/vm). "
+            "If pveum shows entries but API returns empty, restart pveproxy: "
+            "service pveproxy restart",
+        )
+        return
+
+    # Look for a direct /v2/vm grant, OR a / grant with propagate=1 and a
+    # write role.
+    direct_vm_grant = next(
+        (
+            a
+            for a in items
+            if a.get("path") == "/v2/vm" and a.get("roleid") in WRITE_ROLES
+        ),
+        None,
+    )
+    propagated_root_grant = next(
+        (
+            a
+            for a in items
+            if a.get("path") == "/"
+            and a.get("roleid") in WRITE_ROLES
+            and int(a.get("propagate", 0)) == 1
+        ),
+        None,
+    )
+
+    if direct_vm_grant:
+        report.add(
+            f"ACL grants PVEVMAdmin on /v2/vm to {user}",
+            True,
+            f"path={direct_vm_grant['path']} role={direct_vm_grant['roleid']} "
+            f"propagate={direct_vm_grant.get('propagate', 0)}",
+        )
+        return
+
+    if propagated_root_grant:
+        report.add(
+            f"ACL grants PVEVMAdmin on /v2/vm to {user}",
+            True,
+            f"via propagate from {propagated_root_grant['path']!r} "
+            f"(role={propagated_root_grant['roleid']}, propagate=1)",
+        )
+        return
+
+    # We have ACL entries but none grant write on /v2/vm.
+    summary = ", ".join(
+        f"{a.get('path')}/{a.get('roleid')}" for a in items[:5]
+    )
+    report.add(
+        f"ACL grants PVEVMAdmin on /v2/vm to {user}",
+        False,
+        f"no write-role grant for {user}. Entries: [{summary}]",
+        "On PVE host: pveum acl modify /v2/vm --users divide@pve@pam "
+        "--roles PVEVMAdmin",
+    )
+
+
 def check_scenario_in_db(client, name, report):
     try:
         r = client.get("/api/v1/scenarios", timeout=5.0)
@@ -395,6 +501,7 @@ def main():
         check_prom_env(client, report)
         if any(r.name.startswith("PROXMOX") and r.passed for r in report.results):
             check_pve_nodes(client, report)
+            check_acl_for_writes(client, report)
             check_template_exists(client, args.template, report)
         else:
             report.add(
@@ -402,6 +509,11 @@ def main():
                 False,
                 "skipped (PROXMOX not configured)",
                 "Fix the PROXMOX check first.",
+            )
+            report.add(
+                "ACL grants PVEVMAdmin on /v2/vm to divide@pve@pam",
+                False,
+                "skipped (PROXMOX not configured)",
             )
             report.add(
                 f"Template {args.template!r} exists on PVE",

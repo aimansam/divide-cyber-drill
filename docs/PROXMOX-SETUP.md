@@ -175,17 +175,22 @@ Read-only endpoints (Stage 2) work with `PVEAuditor`. Write operations
 
 ```bash
 # Add PVEVMAdmin for the divide user at the /v2/vm path.
-pveum acl modify /v2/vm --userid divide@pve@pam --role PVEVMAdmin
+pveum acl modify /v2/vm --users divide@pve@pam --roles PVEVMAdmin
 
 # Or, for a broader token (also lets the control plane manage storage
 # pools + cluster config), grant PVEAdmin at /:
-pveum acl modify / --userid divide@pve@pam --role PVEAdmin
+pveum acl modify / --users divide@pve@pam --roles PVEAdmin
 ```
+
+> **PVE version note:** the flags are `--users` and `--roles` (plural)
+> on PVE 8 and 9. PVE 7 and earlier used `--userid` and `--role`
+> (singular). If your `pveum` rejects the plural form, run
+> `pveum acl modify --help` to see what's accepted.
 
 Verify:
 
 ```bash
-pveum acl list /
+pveum acl list
 # Expect an entry: path=/v2/vm ugid=divide@pve@pam roleid=PVEVMAdmin
 ```
 

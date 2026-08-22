@@ -19,6 +19,7 @@ from app.services.proxmox import (
     ProxmoxAPIError,
     ProxmoxNotConfiguredError,
     get_version,
+    list_acl,
     list_nodes,
     list_storage,
     list_templates,
@@ -106,3 +107,29 @@ async def list_proxmox_templates(
     except ProxmoxAPIError as exc:
         raise HTTPException(status_code=502, detail=f"Proxmox unreachable: {exc}") from exc
     return {"items": items, "total": len(items), "node": node}
+
+
+@router.get("/acl", summary="List Proxmox ACL entries")
+async def list_proxmox_acl(
+    user: str | None = Query(
+        default=None,
+        description="Filter by ugid (e.g. 'divide@pve@pam'). Default: all entries.",
+    ),
+) -> dict[str, Any]:
+    """Return the full ACL table. Each entry has path/ugid/roleid/type/propagate.
+
+    Use this to verify write-permission grants before running a drill.
+    The runner needs at least PVEVMAdmin on /v2/vm (or PVEAdmin on /
+    with propagate=1) for the divide user.
+    """
+    if not _is_configured():
+        raise HTTPException(status_code=503, detail="Proxmox not configured")
+    try:
+        items = list_acl()
+    except ProxmoxNotConfiguredError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ProxmoxAPIError as exc:
+        raise HTTPException(status_code=502, detail=f"Proxmox unreachable: {exc}") from exc
+    if user:
+        items = [a for a in items if a.get("ugid") == user]
+    return {"items": items, "total": len(items), "user_filter": user}

@@ -2,7 +2,7 @@
 
 ## Design & Architecture Plan
 
-> **Status:** Phase 0 — Foundations **DONE**. Stages 2, 2.5, 2.7, 3, 4, 5, 6, 7, 8, 9, 10 **DONE**.
+> **Status:** Phase 0 — Foundations **DONE**. Stages 2, 2.5, 2.7, 3, 4, 5, 6, 7, 8, 9, 10, 11 **DONE**.
 > PVE auth unblocked (PROXMOX_USER fix + PVE 9 GET /cluster/nextid).
 > First live drill is one `pveum acl` away.
 > **Target platform:** Proxmox VE (main host).
@@ -380,7 +380,17 @@ On drill completion, report-builder extracts IOCs (IPs, domains, URLs, hashes) f
 - 9 new tests (5 preflight + 4 watch_drill). Tests: 154 → 163 (+9).
 - Live verified against current stack: preflight reports 7/8 (template is the one expected FAIL).
 
-**Phase 1 — One-VM drill end-to-end** (after Stage 10 — waiting on PVE ACL + template upload)
+**Stage 11 — ACL docs + preflight check** ✅
+- `pveum acl modify` flags corrected in two docs: `--userid` → `--users`, `--role` → `--roles`. The old forms were rejected by PVE 8+/9 with "Unknown option: userid".
+- Added PVE-version note to both `docs/LIVE-DRILL-RUNBOOK.md` and `docs/PROXMOX-SETUP.md` §8 explaining the flag change and pointing at `pveum acl modify --help` for the right spelling on the operator's PVE.
+- New API endpoint: `GET /api/v1/proxmox/acl[?user=…]` (in `services/api/app/routers/proxmox.py`). Returns the full ACL table (path, ugid, roleid, type, propagate). Optional `?user=` filter.
+- New `list_acl()` in `services/api/app/services/proxmox.py`. Cached like every other PVE call.
+- New preflight check: `check_acl_for_writes()` confirms `divide@pve@pam` has a write-role on `/v2/vm` (direct grant) or `/` with propagate=1 (inherited). Recognizes `PVEVMAdmin`, `PVEAdmin`, `PVEUserAdmin` as sufficient. Distinct FAIL messages for: no grant, wrong role, stale pveproxy cache.
+- 6 new preflight tests covering all four PASS paths + the two FAIL paths + the 502 error path.
+- Tests: 163 → 169 (+6). Lint clean.
+- Live verified: preflight now reports **7/9** (ACL stale-cache FAIL + template missing FAIL). Once `service pveproxy restart` runs on the PVE host, ACL check will PASS and preflight will report **8/9** (template is the only remaining blocker).
+
+**Phase 1 — One-VM drill end-to-end** (after Stage 11 — waiting on template upload)
 - Single Ubuntu drill VM (vsftpd 2.3.4) — happy path with real PVE
 - Templates: `tpl-ubuntu-2204` + Kali template
 - Portal: list scenarios, start drill, see console, see artifact (PCAP), stop drill

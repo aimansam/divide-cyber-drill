@@ -6,7 +6,10 @@ against a live PVE host.
 
 > **TL;DR**
 >
-> 1. `pveum acl modify /v2/vm --userid divide@pve@pam --role PVEVMAdmin` (PVE host shell)
+> 1. `pveum acl modify /v2/vm --users divide@pve@pam --roles PVEVMAdmin` (PVE host shell)
+>    _(On PVE 8+/9 the flags are `--users`/`--roles` plural. Older PVE
+>    used `--userid`/`--role` — if your `pveum` rejects these, check
+>    `pveum acl modify --help` for the right spelling.)_
 > 2. `make upload-template NAME=tpl-debian-cloudinit ISO=local:iso/<debian>.iso` (dev box)
 > 3. Install Debian in the new VM via PVE GUI (incl. `qemu-guest-agent`)
 > 4. `make upload-template NAME=tpl-debian-cloudinit` (converts VM to template)
@@ -23,7 +26,7 @@ against a live PVE host.
 | Docker compose stack up | dev box | `docker compose -f deploy/docker-compose.yml ps` |
 | Proxmox PVE 8.x or 9.x reachable | dev box | `curl -k https://<pve>:8006/api2/json/version` returns JSON |
 | Token user `divide@pve@pam!drill-token` exists on PVE | PVE host | `pveum user list` + `pveum user token list divide@pve@pam` |
-| Token privileges: `PVEVMAdmin` on `/v2/vm` | PVE host | `pveum acl list --userid divide@pve@pam` |
+| Token privileges: `PVEVMAdmin` on `/v2/vm` | PVE host | `pveum acl list` (filter for `divide@pve@pam`) |
 | Debian netinst ISO uploaded to PVE | PVE GUI | Datacenter → pve → local → ISO Images → Upload |
 | Outbound network from dev box to PVE on :8006 | network | `nc -zv <pve> 8006` |
 
@@ -37,20 +40,33 @@ start, stop, and destroy VMs. Without this, the runner will fail with a
 
 ```bash
 # On the PVE host shell
-pveum acl modify /v2/vm --userid divide@pve@pam --role PVEVMAdmin
+pveum acl modify /v2/vm --users divide@pve@pam --roles PVEVMAdmin
 
 # Confirm
-pveum acl list --userid divide@pve@pam
+pveum acl list
 ```
 
-**Expected output:**
+**Expected output (filtered for the divide user):**
 
 ```
-~ pveum acl list --userid divide@pve@pam
-"/v2/vm" --userid divide@pve@pam --role PVEVMAdmin
+~ pveum acl list
+┌──────┬────────────┬──────┬────────────────┬───────────┐
+│ path │ roleid     │ type │ ugid           │ propagate │
+╞══════╪════════════╪══════╪════════════════╪═══════════╡
+│ /v2/vm │ PVEVMAdmin │ user │ divide@pve@pam │ 1         │
+└──────┴────────────┴──────┴────────────────┴───────────┘
 ```
+
+(Or, equivalently, `PVEAdmin` on `/` with propagate=1 — broader, also
+covers `/v2/vm`. See `docs/PROXMOX-SETUP.md` §8 for the trade-off.)
 
 If you don't see that line, the grant didn't take. Re-run the command.
+
+> **Heads up — PVE version note:** The flags changed in PVE 8. If
+> `pveum acl modify` says `Unknown option: userid`, you're on a version
+> that uses `--users` (plural) instead. PVE 7 and earlier used
+> `--userid` and `--role` (singular). `pveum acl modify --help` shows
+> what's accepted on your PVE.
 
 **Troubleshooting:**
 
