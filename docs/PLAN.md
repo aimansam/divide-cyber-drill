@@ -2,7 +2,7 @@
 
 ## Design & Architecture Plan
 
-> **Status:** Phase 0 — Foundations **DONE**. Stages 2, 2.5, 2.7, 3, 4, 5, 6 **DONE**.
+> **Status:** Phase 0 — Foundations **DONE**. Stages 2, 2.5, 2.7, 3, 4, 5, 6, 7 **DONE**.
 > PVE auth unblocked (PROXMOX_USER fix + PVE 9 GET /cluster/nextid).
 > First live drill is one `pveum acl` away.
 > **Target platform:** Proxmox VE (main host).
@@ -342,7 +342,15 @@ On drill completion, report-builder extracts IOCs (IPs, domains, URLs, hashes) f
 - Tests: 125 → 131 (+6).
 - **Status:** ready. Final gate is the user granting PVEVMAdmin on `/v2/vm` for `divide@pve@pam` from PVE, then running `make upload-template` + `make live-drill`.
 
-**Phase 1 — One-VM drill end-to-end** (after Stage 6)
+**Stage 7 — Drill cancellation** ✅
+- `Runner.cancel_run(run_id, reason=, actor=, session=)` — trainee-initiated abort. Validates run is `PENDING`/`RUNNING` (else `RunnerError`). Best-effort stop + destroy every spawned asset (uses `force=True` so half-broken VMs still tear down). Sets `Run.status=CANCELLED`, `ended_at`, `error=reason`. Writes `RUN_CANCELLED` audit with reason + actor in details.
+- `POST /api/v1/drills/{run_id}/cancel` — optional body `{reason?, actor?}`. Returns 200 on success, 404 if run missing, 409 if run is already terminal. Response shape: `{run_id, status, reason, assets}`.
+- `Runner.stop_run` semantics clarified in docstring (operator-initiated → `SUCCEEDED`); `cancel_run` is the trainee path → `CANCELLED`. Two distinct terminal states, same teardown code.
+- `drills` router no longer hard-codes `MockProxmoxAdapter()` — now uses `build_runner()`, so the API automatically uses `RealProxmoxAdapter` when `PROXMOX_*` env is set (previously this would have silently broken the first live drill even though the runner was correct).
+- 9 new tests (6 runner cancel paths + 3 router cancel paths).
+- Tests: 131 → 140 (+9). Live verified: `POST /drills/1/cancel` returns 409 for already-terminal runs, 404 for missing.
+
+**Phase 1 — One-VM drill end-to-end** (after Stage 7)
 - Single Ubuntu drill VM (vsftpd 2.3.4) — happy path with real PVE
 - Templates: `tpl-ubuntu-2204` + Kali template
 - Portal: list scenarios, start drill, see console, see artifact (PCAP), stop drill
