@@ -1,0 +1,65 @@
+apiVersion: divide/v1
+kind: Scenario
+metadata:
+  name: first-live-drill
+  title: "First Live Drill (Smoke)"
+  version: 1
+  difficulty: beginner
+  duration_min: 10
+  tags:
+    - smoke
+    - first-live-drill
+  authors:
+    - handle: divide-team
+      name: div:ide core
+
+spec:
+  objectives:
+    red:
+      - "Smoke-test the runner against a real PVE clone."
+      - "Confirm asset reaches RUNNING state within 60s of POST /drills."
+    blue:
+      - "Observe the drill_vm boot and reach the network."
+
+  networks:
+    - name: drill_vlan
+      cidr: 10.50.0.0/24
+
+  assets:
+    - role: drill_vm
+      kind: vm
+      template: tpl-debian-cloudinit
+      count: 1
+      networks: [drill_vlan]
+      resources:
+        cores: 2
+        ram_mb: 2048
+        disk_gb: 20
+
+  telemetry:
+    sinks:
+      - type: minio
+        bucket: divide-artifacts
+
+  artifacts:
+    sink_to: minio
+    bucket: divide-artifacts
+    retention_days: 7
+
+  win_conditions:
+    red:
+      - "drill_vm reaches running state within 60s of POST /drills."
+    blue:
+      - "drill_vm IP is reported in /api/v1/drills/{id} response."
+
+  scoring:
+    blue:
+      rules:
+        - id: boot_observed
+          weight: 100
+      pass_threshold: 50
+    red:
+      rules:
+        - id: pivot_success
+          weight: 100
+      pass_threshold: 50

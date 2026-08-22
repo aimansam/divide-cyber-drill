@@ -469,6 +469,26 @@ def test_401_unauthorized_is_wrapped():
         asyncio.run(a.list_nodes())
 
 
+def test_403_permission_check_includes_acl_hint():
+    """403s should surface with a PVEVMAdmin hint so operators don't debug
+    in the dark. This is the failure mode you'll hit if the token only has
+    PVEAuditor and you attempt a clone/start/stop/destroy."""
+    a = RealProxmoxAdapter(
+        host="pve", port=8006, user="u",
+        token_id="u!t", token_secret="x",
+    )
+    client = _build_mock_client()
+    client.nodes.get.side_effect = Exception(
+        "403 Forbidden: Permission check failed"
+    )
+    _install_client(a, client)
+
+    with pytest.raises(ProxmoxAPIError) as exc_info:
+        asyncio.run(a.list_nodes())
+    assert "PVEVMAdmin" in str(exc_info.value)
+    assert "PROXMOX-SETUP" in str(exc_info.value)
+
+
 def test_timeout_surfaces_as_proxmox_api_error():
     """A hung PVE call must never leak asyncio.TimeoutError to the runner."""
 

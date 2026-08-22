@@ -139,7 +139,8 @@ class RealProxmoxAdapter(ProxmoxAdapter):
         """Run a sync proxmoxer call in a worker thread with a timeout.
 
         Any exception raised by `fn` (proxmoxer or anything else) is wrapped
-        as `ProxmoxAPIError` so callers have a single error type.
+        as `ProxmoxAPIError` so callers have a single error type. 403s get a
+        short ACL hint appended so the operator knows to grant PVEVMAdmin.
         """
         try:
             return await asyncio.wait_for(
@@ -153,6 +154,12 @@ class RealProxmoxAdapter(ProxmoxAdapter):
                 f"proxmoxer call timed out after {self._timeout_s}s"
             ) from exc
         except Exception as exc:  # noqa: BLE001
+            msg = str(exc)
+            if "403" in msg or "Permission check failed" in msg:
+                raise ProxmoxAPIError(
+                    f"{type(exc).__name__}: {exc} — token needs PVEVMAdmin "
+                    f"(or PVEAdmin) on /v2/vm; see docs/PROXMOX-SETUP.md §6"
+                ) from exc
             raise ProxmoxAPIError(f"{type(exc).__name__}: {exc}") from exc
 
     # --- inventory -------------------------------------------------------

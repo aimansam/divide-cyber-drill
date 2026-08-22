@@ -8,7 +8,7 @@ API_DIR := services/api
 
 .DEFAULT_GOAL := help
 
-.PHONY: help up down logs ps restart build pull lint format test test-live-pg smoke proxmox-ping diag clean validate-scenarios migrate db-upgrade db-downgrade db-revision smoke-run sync-scenarios
+.PHONY: help up down logs ps restart build pull lint format test test-live-pg smoke proxmox-ping diag clean validate-scenarios migrate db-upgrade db-downgrade db-revision smoke-run sync-scenarios upload-template live-drill
 
 help: ## Show this help.
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -91,6 +91,15 @@ validate-scenarios: ## Validate all scenario YAML files against divide/v1 schema
 
 sync-scenarios: ## Sync scenario YAML files into the DB (DIVIDE_DB_URL required).
 	DIVIDE_DB_URL=sqlite+aiosqlite:///./divide.db PYTHONPATH=$(API_DIR) $(PYTHON) tools/sync_scenarios.py
+
+upload-template: ## Upload + register a cloud-init VM template on PVE. Args: NAME=... ISO=local:iso/...
+	@test -n "$$NAME" || { echo "Usage: make upload-template NAME=tpl-debian-cloudinit ISO=local:iso/debian-XX-netinst.iso"; exit 2; }
+	@test -n "$$ISO" || { echo "Set ISO=local:iso/<file>.iso (the Debian netinst ISO already on PVE is fine)"; exit 2; }
+	$(COMPOSE) exec api python /workdir/tools/upload_cloudinit_template.py --name "$$NAME" --iso "$$ISO"
+
+live-drill: ## Run a drill end-to-end against live PVE. Args: SCENARIO=first-live-drill TIMEOUT=300.
+	@test -n "$$SCENARIO" || SCENARIO=first-live-drill; \
+	$(COMPOSE) exec api python /workdir/tools/live_drill.py --scenario "$$SCENARIO" --timeout $${TIMEOUT:-300}
 
 smoke-run: ## End-to-end smoke (in-memory DB + MockProxmoxAdapter).
 	PYTHONPATH=$(API_DIR) $(PYTHON) tools/run_smoke.py
