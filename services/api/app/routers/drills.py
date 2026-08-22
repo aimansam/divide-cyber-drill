@@ -1,7 +1,10 @@
 """Drill lifecycle endpoints.
 
-Phase 1: accepts POST to start a run, returns the new run id. Uses the
-in-memory MockProxmoxAdapter until RealProxmoxAdapter lands.
+Phase 1: accepts POST to start a run, returns the new run id. The
+adapter is selected by :func:`app.runners.build_runner` — when
+PROXMOX_* env vars are set the factory returns ``RealProxmoxAdapter``;
+otherwise it falls back to ``MockProxmoxAdapter`` so dev / CI / tests
+keep working without PVE creds.
 
 The DB is persistent. State is read from Postgres, not from in-memory
 process state, so the API can be restarted without losing runs.
@@ -13,20 +16,23 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import models as db_models
+from app.db.models import RunStatus
 from app.db.session import get_session
-from app.runners.mock_adapter import MockProxmoxAdapter
-from app.runners.runner import Runner, RunnerError, RunRequest
+from app.runners.runner import Runner, RunnerError, RunRequest, build_runner
 
 router = APIRouter()
 
 
 def _get_runner() -> Runner:
-    """Until RealProxmoxAdapter lands, every API request uses the mock.
-    Each request gets a fresh mock (no shared state) so the catalog is
-    always empty from the mock's perspective. Replace this with a singleton
-    RealProxmoxAdapter once PVE auth works.
+    """Pick the right adapter via the env-driven factory.
+
+    Returns a fresh ``Runner`` per request. The adapter itself is
+    cheap to construct (just config + lazy proxmoxer client), so we
+    don't bother caching it across requests. If we later need shared
+    state (e.g. a connection pool), this is the place to swap in a
+    module-level singleton.
     """
-    return Runner(MockProxmoxAdapter())
+    return build_runner()
 
 
 @router.post("", summary="Start a drill (mock adapter, no PVE)")
@@ -93,6 +99,60 @@ async def stop_drill(
     return {
         "run_id": run.id,
         "status": run.status.value,
+        "assets": [
+            {"role": a.role, "status": a.status.value, "pve_vmid": a.pve_vmid}
+            for a in run.assets
+        ],
+    }
+
+
+@router.post(
+    "/{run_id}/cancel",
+    summary="Cancel a running drill (trainee-initiated abort)",
+)
+async def cancel_drill(
+    run_id: int,
+    body: dict | None = None,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Abort a run mid-flight.
+
+    Body is optional; only ``reason`` and ``actor`` are read:
+      * ``reason`` (str, default "user-requested") — recorded on the
+        Run row + audit entry. Surfaces in the UI as the cancel cause.
+      * ``actor`` (str, optional) — who cancelled (e.g. "trainee-7").
+
+    Status codes:
+      * 200 — run cancelled; assets best-effort torn down.
+      * 404 — run not found.
+      * 409 — run is already in a terminal state (succeeded / failed /
+        cancelled / timeout). Caller must check the run state first.
+    """
+    body = body or {}
+    reason = body.get("reason") or "user-requested"
+    actor = body.get("actor")
+    runner = _get_runner()
+    try:
+        run = await runner.cancel_run(
+            run_id, reason=reason, actor=actor, session=session
+        )
+    except RunnerError as exc:
+        # Distinguish "not found" from "already terminal" so the UI
+        # can react sensibly (re-fetch vs display toast).
+        msg = str(exc)
+        if "not found" in msg:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=msg,
+            ) from exc
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=msg,
+        ) from exc
+    return {
+        "run_id": run.id,
+        "status": run.status.value,
+        "reason": run.error,
         "assets": [
             {"role": a.role, "status": a.status.value, "pve_vmid": a.pve_vmid}
             for a in run.assets

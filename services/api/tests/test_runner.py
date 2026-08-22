@@ -333,3 +333,204 @@ async def test_get_vm_state_missing_raises() -> None:
     adapter = MockProxmoxAdapter()
     with pytest.raises(KeyError):
         await adapter.get_vm_state(12345, "pve")
+
+
+
+
+# --- cancel_run -----------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_cancel_run_tears_down_and_marks_cancelled(session: AsyncSession) -> None:
+    """A run in RUNNING must cancel cleanly: assets stopped + destroyed,
+    run flips to CANCELLED, audit row records actor + reason.
+
+    We construct the run/asset state directly (rather than via start_run)
+    because start_run completes synchronously with the mock — by the time
+    it returns, status is SUCCEEDED. The runner's lifecycle model
+    assumes a non-terminal state when cancel arrives; in production the
+    portal would call cancel mid-flight via the background task model.
+    """
+    s = _scenario_with("cancelled", [_asset("red_attacker"), _asset("victim")])
+    session.add(s)
+    await session.flush()
+    run = models.Run(
+        scenario_id=s.id,
+        status=RunStatus.RUNNING,
+        started_by="unit",
+    )
+    session.add(run)
+    await session.flush()
+    # Two assets with VMIDs (pretend spawn already happened).
+    for role, vmid in [("red_attacker", 9100), ("victim", 9101)]:
+        session.add(
+            models.Asset(
+                run_id=run.id,
+                role=role,
+                kind="vm",
+                template="tpl-x",
+                status=AssetStatus.RUNNING,
+                pve_vmid=vmid,
+                pve_node="pve",
+            )
+        )
+    await session.commit()
+
+    adapter = MockProxmoxAdapter()
+    runner = Runner(adapter=adapter)
+    cancelled = await runner.cancel_run(
+        run.id, reason="trainee pressed abort", actor="trainee-7", session=session
+    )
+
+    assert cancelled.id == run.id
+    assert cancelled.status == RunStatus.CANCELLED
+    assert cancelled.error == "trainee pressed abort"
+    for a in cancelled.assets:
+        assert a.status == AssetStatus.STOPPED
+    # Adapter saw stop (forced) + destroy for every spawned asset.
+    assert len(adapter.stopped) == 2
+    assert all(force for (_v, _n, force) in adapter.stopped)
+    assert len(adapter.destroyed) == 2
+
+    # Audit row recorded with actor + reason.
+    audits = (
+        await session.execute(
+            select(models.AuditLog).where(models.AuditLog.run_id == run.id)
+        )
+    ).scalars().all()
+    actions = {a.action for a in audits}
+    assert AuditAction.RUN_CANCELLED in actions
+    cancel_audit = next(a for a in audits if a.action == AuditAction.RUN_CANCELLED)
+    assert cancel_audit.actor == "trainee-7"
+    assert cancel_audit.details["reason"] == "trainee pressed abort"
+
+
+@pytest.mark.asyncio
+async def test_cancel_run_on_unknown_run_raises(session: AsyncSession) -> None:
+    adapter = MockProxmoxAdapter()
+    runner = Runner(adapter=adapter)
+    with pytest.raises(RunnerError, match="not found"):
+        await runner.cancel_run(9999, session=session)
+
+
+@pytest.mark.asyncio
+async def test_cancel_run_on_terminal_run_raises(session: AsyncSession) -> None:
+    """A run that has already reached a terminal state cannot be cancelled."""
+    s = _scenario_with("already_done", [_asset("red_attacker")])
+    session.add(s)
+    await session.flush()
+    run = models.Run(
+        scenario_id=s.id,
+        status=RunStatus.SUCCEEDED,
+        started_by="unit",
+    )
+    session.add(run)
+    await session.commit()
+
+    adapter = MockProxmoxAdapter()
+    runner = Runner(adapter=adapter)
+    with pytest.raises(RunnerError, match="terminal state"):
+        await runner.cancel_run(run.id, session=session)
+
+
+@pytest.mark.asyncio
+async def test_cancel_run_isolates_from_stop_run_semantics(
+    session: AsyncSession,
+) -> None:
+    """cancel_run -> CANCELLED, stop_run -> SUCCEEDED. Same teardown,
+    different terminal state — proves the two paths don't alias."""
+    s = _scenario_with("lifecycle_test", [_asset("red_attacker")])
+    session.add(s)
+    await session.flush()
+
+    # cancel path
+    run_cancel = models.Run(
+        scenario_id=s.id, status=RunStatus.RUNNING, started_by="unit"
+    )
+    session.add(run_cancel)
+    await session.flush()
+    session.add(
+        models.Asset(
+            run_id=run_cancel.id, role="red_attacker", kind="vm",
+            template="tpl-x", status=AssetStatus.RUNNING,
+            pve_vmid=9100, pve_node="pve",
+        )
+    )
+    await session.commit()
+
+    adapter1 = MockProxmoxAdapter()
+    runner1 = Runner(adapter=adapter1)
+    out_cancel = await runner1.cancel_run(run_cancel.id, session=session)
+    assert out_cancel.status == RunStatus.CANCELLED
+
+    # stop path (separate run)
+    run_stop = models.Run(
+        scenario_id=s.id, status=RunStatus.RUNNING, started_by="unit"
+    )
+    session.add(run_stop)
+    await session.flush()
+    session.add(
+        models.Asset(
+            run_id=run_stop.id, role="red_attacker", kind="vm",
+            template="tpl-x", status=AssetStatus.RUNNING,
+            pve_vmid=9200, pve_node="pve",
+        )
+    )
+    await session.commit()
+
+    adapter2 = MockProxmoxAdapter()
+    runner2 = Runner(adapter=adapter2)
+    out_stop = await runner2.stop_run(run_stop.id, session=session)
+    assert out_stop.status == RunStatus.SUCCEEDED
+
+
+@pytest.mark.asyncio
+async def test_cancel_run_handles_no_assets_yet(session: AsyncSession) -> None:
+    """A run in PENDING (no spawned assets yet) must cancel cleanly
+    without any adapter calls."""
+    s = _scenario_with("pending", [_asset("red_attacker")])
+    session.add(s)
+    await session.commit()
+
+    run = models.Run(
+        scenario_id=s.id, status=RunStatus.PENDING, started_by="unit"
+    )
+    session.add(run)
+    await session.commit()
+
+    adapter = MockProxmoxAdapter()
+    runner = Runner(adapter=adapter)
+    cancelled = await runner.cancel_run(
+        run.id, reason="aborted before start", session=session
+    )
+    assert cancelled.status == RunStatus.CANCELLED
+    assert adapter.stopped == []
+    assert adapter.destroyed == []
+
+
+@pytest.mark.asyncio
+async def test_cancel_run_records_error_as_reason(session: AsyncSession) -> None:
+    """Run.error stores the cancel reason so the UI can show 'why'."""
+    s = _scenario_with("why_cancelled", [_asset("red_attacker")])
+    session.add(s)
+    await session.flush()
+    run = models.Run(
+        scenario_id=s.id, status=RunStatus.RUNNING, started_by="unit"
+    )
+    session.add(run)
+    await session.flush()
+    session.add(
+        models.Asset(
+            run_id=run.id, role="red_attacker", kind="vm",
+            template="tpl-x", status=AssetStatus.PLANNED,
+            pve_vmid=None, pve_node=None,
+        )
+    )
+    await session.commit()
+
+    adapter = MockProxmoxAdapter()
+    runner = Runner(adapter=adapter)
+    out = await runner.cancel_run(
+        run.id, reason="scoring threshold already met", session=session
+    )
+    assert out.error == "scoring threshold already met"

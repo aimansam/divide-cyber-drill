@@ -184,6 +184,10 @@ class Runner:
     ) -> models.Run:
         """Stop every asset in a run and destroy them. Idempotent.
 
+        Sets ``Run.status = SUCCEEDED`` (operator-initiated "the drill is
+        done — clean up"). For trainee-initiated aborts use
+        :meth:`cancel_run`, which sets ``CANCELLED`` instead.
+
         Pass `session` to participate in a caller's transaction; if None,
         the runner owns the session lifecycle via the global sessionmaker.
         """
@@ -192,6 +196,36 @@ class Runner:
         sm = _sessionmaker()
         async with sm() as session:
             return await self._stop_run_impl(run_id, reason, actor, session)
+
+    async def cancel_run(
+        self,
+        run_id: int,
+        reason: str = "user-requested",
+        session: AsyncSession | None = None,
+        actor: str | None = None,
+    ) -> models.Run:
+        """Abort a running drill. Symmetric with :meth:`stop_run`.
+
+        Behaviour:
+          * Validates the run exists and is in a non-terminal state
+            (``PENDING`` or ``RUNNING``). If already terminal, raises
+            :class:`RunnerError` (the router maps to 409 Conflict).
+          * Stops and destroys every asset that was spawned (best-effort,
+            matching the spawn failure path).
+          * Sets ``Run.status = CANCELLED``, ``ended_at = now``,
+            ``error = reason`` (so the audit + UI can show why).
+          * Writes an audit ``RUN_CANCELLED`` entry with the reason +
+            actor in details.
+
+        Idempotent on the adapter side (destroy is 404-tolerant), but the
+        DB transition is not — a second cancel on an already-cancelled
+        run raises.
+        """
+        if session is not None:
+            return await self._cancel_run_impl(run_id, reason, actor, session)
+        sm = _sessionmaker()
+        async with sm() as session:
+            return await self._cancel_run_impl(run_id, reason, actor, session)
 
     async def _stop_run_impl(
         self,
@@ -234,6 +268,68 @@ class Runner:
             actor=actor,
             run_id=run.id,
             details={"reason": reason},
+        )
+        await session.commit()
+        await session.refresh(run, attribute_names=["assets"])
+        return run
+
+    async def _cancel_run_impl(
+        self,
+        run_id: int,
+        reason: str,
+        actor: str | None,
+        session: AsyncSession,
+    ) -> models.Run:
+        run = (
+            await session.execute(select(models.Run).where(models.Run.id == run_id))
+        ).scalar_one_or_none()
+        if run is None:
+            raise RunnerError(f"run id={run_id} not found")
+        if run.status not in (RunStatus.PENDING, RunStatus.RUNNING):
+            raise RunnerError(
+                f"run id={run_id} is in terminal state "
+                f"{run.status.value!r}; cannot cancel"
+            )
+
+        assets = (
+            await session.execute(
+                select(models.Asset).where(models.Asset.run_id == run_id)
+            )
+        ).scalars().all()
+
+        # Best-effort teardown — never raise from here; we want the run
+        # row + audit entry to land even if the adapter is half-broken.
+        for asset in assets:
+            if asset.pve_vmid is not None and asset.pve_node:
+                try:
+                    await self._adapter.stop_vm(
+                        asset.pve_vmid, asset.pve_node, force=True
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    asset.status = AssetStatus.ORPHANED
+                    asset.error = f"stop failed during cancel: {exc}"
+                    continue
+                try:
+                    await self._adapter.destroy_vm(asset.pve_vmid, asset.pve_node)
+                except Exception as exc:  # noqa: BLE001
+                    asset.status = AssetStatus.ORPHANED
+                    asset.error = f"destroy failed during cancel: {exc}"
+                    continue
+                asset.status = AssetStatus.STOPPED
+            else:
+                # Asset never got as far as cloning — mark stopped so the
+                # UI shows the row in a sensible state.
+                asset.status = AssetStatus.STOPPED
+
+        run.status = RunStatus.CANCELLED
+        run.ended_at = datetime.now(timezone.utc)
+        run.error = reason
+        await self._audit(
+            session,
+            action=AuditAction.RUN_CANCELLED,
+            actor=actor,
+            run_id=run.id,
+            details={"reason": reason, "actor": actor},
         )
         await session.commit()
         await session.refresh(run, attribute_names=["assets"])
