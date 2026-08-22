@@ -25,11 +25,17 @@ jobs:
         run: ruff format --check .
       - name: MyPy
         run: mypy services/api/app
-      - name: Pytest
+      - name: Install scenario validation deps
+        run: pip install jsonschema pyyaml
+      - name: Validate scenario YAML
+        run: python tools/validate_scenario.py examples/scenarios/
+      - name: Pytest (API)
         run: pytest services/api/tests
         env:
           DIVIDE_DB_URL: sqlite+aiosqlite:///./test.sqlite
           DIVIDE_REDIS_URL: redis://localhost:6379/0
+      - name: Pytest (scenario schema)
+        run: pytest tests/test_scenario_schema.py
 
   diagrams:
     runs-on: ubuntu-latest

@@ -1,0 +1,88 @@
+apiVersion: divide/v1
+kind: Scenario
+metadata:
+  name: lateral-movement-baseline
+  title: "Lateral Movement Baseline (Blue Team)"
+  version: 1
+  difficulty: beginner
+  duration_min: 45
+  tags:
+    - lateral-movement
+    - blue-team
+    - baseline
+
+spec:
+  objectives:
+    red:
+      - "Pivot from the initial foothold to two additional hosts via SMB/WinRM."
+    blue:
+      - "Detect the lateral movement using Sysmon event 3 (network connect) correlation."
+      - "Identify the source host and block outbound SMB within 15 minutes."
+
+  assets:
+    - role: red_attacker
+      kind: vm
+      template: tpl-kali-cloudinit
+      count: 1
+      networks: [corp_vlan]
+      exposed: true
+
+    - role: victim_workstation
+      kind: vm
+      template: tpl-win11-enterprise
+      count: 3
+      networks: [corp_vlan]
+
+    - role: domain_controller
+      kind: vm
+      template: tpl-win2022-dc
+      count: 1
+      networks: [corp_vlan]
+
+  networks:
+    - name: corp_vlan
+      cidr: 192.168.50.0/24
+      isolation: tight
+      egress: blocked
+
+  telemetry:
+    sinks:
+      - type: wazuh
+        endpoint: wazuh-mgr:55000
+        channels: [sysmon, firewall]
+    alerting:
+      rules:
+        - severity: [high]
+          to: [slack]
+
+  scoring:
+    blue:
+      rules:
+        - id: detection_speed
+          weight: 50
+          target_min: 15
+        - id: source_identification
+          weight: 30
+        - id: containment
+          weight: 20
+      pass_threshold: 70
+    red:
+      rules:
+        - id: pivot_success
+          weight: 60
+        - id: objective_completion
+          weight: 40
+      pass_threshold: 50
+
+  win_conditions:
+    red:
+      - "Shell access obtained on two victim_workstation instances via SMB or WinRM."
+    blue:
+      - "Outbound SMB blocked on the source host within 15 minutes."
+
+  artifacts:
+    sink_to: minio
+    bucket: divide-runs
+    required_pcaps:
+      - corp_vlan
+    retention_days: 14

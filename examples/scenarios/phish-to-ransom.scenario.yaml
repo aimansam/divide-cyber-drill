@@ -1,0 +1,137 @@
+apiVersion: divide/v1
+kind: Scenario
+metadata:
+  name: phish-to-ransom
+  title: "Phishing to Ransomware"
+  version: 1
+  difficulty: intermediate
+  duration_min: 90
+  tags:
+    - ransomware
+    - active-directory
+    - phishing
+  authors:
+    - handle: divide-team
+      name: div:ide core
+
+spec:
+  objectives:
+    red:
+      - "Compromise at least one domain user via the phishing email."
+      - "Escalate to Domain Admin and perform a DCSync."
+      - "Deploy ransomware on two endpoints in the corp VLAN."
+    blue:
+      - "Detect the malicious attachment within 10 minutes of receipt."
+      - "Isolate compromised endpoints before encryption spreads."
+      - "Preserve forensic artifacts (PCAPs, EDR alerts) for review."
+
+  assets:
+    - role: red_attacker
+      kind: vm
+      template: tpl-kali-cloudinit
+      count: 1
+      networks: [attacker_vlan]
+      resources:
+        cores: 4
+        ram_mb: 8192
+      exposed: true
+      user_data: cloud-init/red.yaml
+
+    - role: victim_workstation
+      kind: vm
+      template: tpl-win11-enterprise
+      count: 3
+      networks: [corp_vlan]
+      resources:
+        cores: 2
+        ram_mb: 4096
+
+    - role: dc_server
+      kind: vm
+      template: tpl-win2022-dc
+      count: 1
+      networks: [corp_vlan, mgmt_vlan]
+      resources:
+        cores: 2
+        ram_mb: 6144
+
+    - role: file_server
+      kind: vm
+      template: tpl-win2022-member
+      count: 1
+      networks: [corp_vlan]
+      resources:
+        cores: 2
+        ram_mb: 4096
+
+  networks:
+    - name: attacker_vlan
+      cidr: 10.50.50.0/24
+      isolation: tight
+      egress: restricted
+    - name: corp_vlan
+      cidr: 10.10.10.0/24
+      isolation: tight
+      egress: blocked
+      dhcp: true
+    - name: mgmt_vlan
+      cidr: 10.10.99.0/24
+      isolation: tight
+      egress: blocked
+      dhcp: false
+
+  telemetry:
+    sinks:
+      - type: wazuh
+        endpoint: wazuh-mgr:55000
+        channels: [sysmon, edr_alerts, firewall]
+      - type: misp
+        endpoint: misp.local:443
+        channels: [iocs]
+      - type: minio
+        bucket: divide-runs
+    alerting:
+      rules:
+        - severity: [critical, high]
+          to: [slack]
+
+  scoring:
+    blue:
+      rules:
+        - id: detection_speed
+          weight: 40
+          target_min: 10
+        - id: containment_speed
+          weight: 30
+          target_min: 20
+        - id: false_positive_penalty
+          weight: 30
+      pass_threshold: 70
+    red:
+      rules:
+        - id: initial_access
+          weight: 25
+        - id: privilege_escalation
+          weight: 25
+        - id: lateral_movement
+          weight: 20
+        - id: objective_completion
+          weight: 30
+      pass_threshold: 60
+
+  win_conditions:
+    red:
+      - "DCSync of at least one Domain Admin account succeeds."
+      - "Ransomware note is observed on two or more endpoints in corp_vlan."
+    blue:
+      - "All compromised endpoints isolated within 30 minutes of initial detection."
+      - "No encryption events observed on file_server or dc_server."
+
+  artifacts:
+    sink_to: minio
+    bucket: divide-runs
+    required_pcaps:
+      - attacker_vlan
+      - corp_vlan
+      - mgmt_vlan
+    retention_days: 30
