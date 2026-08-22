@@ -8,14 +8,38 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import create_async_engine
 
+# --- live PG mode ---------------------------------------------------------
+#
+# Setting DIVIDE_TEST_LIVE_PG to a non-empty value switches the test suite
+# from SQLite to a real PostgreSQL. Useful for catching enum/JSONB/case
+# bugs that SQLite is permissive about. Tests that should only run under
+# live PG should be marked with ``@pytest.mark.live_pg``; they're skipped
+# otherwise so the default `pytest` run stays SQLite-only and fast.
+#
+# The URL defaults to the docker-compose dev DB; override via env if needed.
+LIVE_PG_URL_DEFAULT = "postgresql+asyncpg://divide:divide@localhost:5432/divide_test"
+
+
+def _live_pg_url() -> str | None:
+    val = os.environ.get("DIVIDE_TEST_LIVE_PG", "").strip()
+    if not val:
+        return None
+    if val in ("1", "true", "yes"):
+        return os.environ.get("DIVIDE_TEST_LIVE_PG_URL", LIVE_PG_URL_DEFAULT)
+    return val
+
 
 @pytest.fixture(scope="session", autouse=True)
 def _env(monkeypatch_session):
     """Set sane defaults for tests."""
     monkeypatch_session.setenv("DIVIDE_ENV", "dev")
     monkeypatch_session.setenv("DIVIDE_LOG_LEVEL", "WARNING")
-    # Use SQLite for tests — no Postgres needed for unit tests.
-    os.environ.setdefault("DIVIDE_DB_URL", "sqlite+aiosqlite:///./test.sqlite")
+    if _live_pg_url():
+        # Live PG mode — caller is responsible for pointing at a working DB.
+        monkeypatch_session.setenv("DIVIDE_DB_URL", _live_pg_url())
+    else:
+        # Use SQLite for tests — no Postgres needed for unit tests.
+        os.environ.setdefault("DIVIDE_DB_URL", "sqlite+aiosqlite:///./test.sqlite")
     yield
 
 
@@ -39,6 +63,21 @@ def _create_tables():
     """
     import subprocess
     import sys
+
+    live = _live_pg_url()
+
+    if live:
+        # Live PG mode — caller supplies the URL via DIVIDE_TEST_LIVE_PG.
+        # We trust it and skip the alembic step (assume migrations are
+        # already applied by the operator).
+        os.environ["DIVIDE_DB_URL"] = live
+        from app.services import db as db_module
+        from app.db import session as session_module
+
+        db_module._engine = None
+        session_module._session_maker = None
+        yield
+        return
 
     db_path = Path(__file__).resolve().parents[1] / "_pytest_state" / "test.sqlite"
     db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -82,6 +121,16 @@ def _create_tables():
         db_path.unlink()
     except OSError:  # pragma: no cover
         pass
+
+
+def pytest_collection_modifyitems(config, items):
+    """Skip live_pg tests unless DIVIDE_TEST_LIVE_PG is set."""
+    if _live_pg_url():
+        return  # live PG requested — let the tests run
+    skip_marker = pytest.mark.skip(reason="DIVIDE_TEST_LIVE_PG not set")
+    for item in items:
+        if "live_pg" in item.keywords:
+            item.add_marker(skip_marker)
 
 
 @pytest.fixture

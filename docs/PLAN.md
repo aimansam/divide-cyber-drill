@@ -2,8 +2,9 @@
 
 ## Design & Architecture Plan
 
-> **Status:** Phase 0 — Foundations **DONE**. Stage 2 (read-only Proxmox) and Stage 2.5
-> (Scenario spec) and Stage 2.7 (DB models) **DONE**. Stage 3 (runner) **in progress**.
+> **Status:** Phase 0 — Foundations **DONE**. Stages 2, 2.5, 2.7, 3, 4, 5 **DONE**.
+> RealProxmoxAdapter is shipped (code) but unverified against live PVE pending
+> token fix.
 > **Target platform:** Proxmox VE (main host).
 > **Control plane runtime:** Docker Compose on a dedicated VM/LXC.
 > **Repo root:** `/DATA/Storage/docker/divide-cyber-drill`
@@ -319,7 +320,19 @@ On drill completion, report-builder extracts IOCs (IPs, domains, URLs, hashes) f
 - 18 sync tests + 3 schema-resolution tests
 - Live verified: 2 scenarios synced on first API boot, all 4 endpoints work, archive/restore round-trip works
 
-**Phase 1 — One-VM drill end-to-end** (after Stage 3)
+**Stage 5 — RealProxmoxAdapter + live-PG tests** ✅
+- `app/runners/real_adapter.py` — `RealProxmoxAdapter` implementing the existing `ProxmoxAdapter` ABC via `proxmoxer` (sync, bridged through `asyncio.to_thread` + per-call timeout)
+- Mapping: list_nodes / find_template / allocate_vmid / clone_vm / start_vm / stop_vm / destroy_vm / get_vm_state — all against the live PVE REST endpoints
+- `from_settings(cls, p)` classmethod pulls auth from `app.core.config.ProxmoxSettings`
+- `destroy_vm` is idempotent on 404 (PVE "no such VM" → swallowed so teardown can re-run safely)
+- Errors from proxmoxer wrapped as `ProxmoxAPIError`; timeouts surface as `ProxmoxAPIError` (never `asyncio.TimeoutError` to the runner)
+- `app/runners/runner.py` `_default_adapter()` + `build_runner()` factory: env-gated real ↔ mock swap, no code change needed to flip
+- `app/runners/__init__.py` re-exports both adapters, factory, and dataclasses for ergonomic imports
+- Live-PG test infra: `pytest.mark.live_pg` marker + `DIVIDE_TEST_LIVE_PG` env var; `make test-live-pg` target; opt-in CI job (`live-pg-tests`) with Postgres service container
+- 33 real_adapter tests (mocked proxmoxer, no live PVE required) + 3 live_pg plumbing tests
+- Tests: 89 → 124 passing (+35). Default run still SQLite + mock; live mode is opt-in
+
+**Phase 1 — One-VM drill end-to-end** (after Stage 5)
 - Single Ubuntu drill VM (vsftpd 2.3.4) — happy path with real PVE
 - Templates: `tpl-ubuntu-2204` + Kali template
 - Portal: list scenarios, start drill, see console, see artifact (PCAP), stop drill

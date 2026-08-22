@@ -32,3 +32,6 @@ testpaths = ["services/api/tests"]
 pythonpath = ["services/api"]
 asyncio_mode = "auto"
 addopts = "-v --tb=short"
+markers = [
+    "live_pg: opt-in tests that require a live PostgreSQL via DIVIDE_TEST_LIVE_PG; skipped by default to keep CI fast and SQLite-only",
+]

@@ -8,7 +8,7 @@ API_DIR := services/api
 
 .DEFAULT_GOAL := help
 
-.PHONY: help up down logs ps restart build pull lint format test smoke proxmox-ping diag clean validate-scenarios migrate db-upgrade db-downgrade db-revision smoke-run sync-scenarios
+.PHONY: help up down logs ps restart build pull lint format test test-live-pg smoke proxmox-ping diag clean validate-scenarios migrate db-upgrade db-downgrade db-revision smoke-run sync-scenarios
 
 help: ## Show this help.
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -51,7 +51,11 @@ format: ## Auto-format with ruff.
 	$(PYTHON) -m ruff format .
 
 test: ## Run pytest suite.
-	$(PYTHON) -m pytest services/api/tests
+	$(PYTHON) -m pytest services/api/tests tests
+
+test-live-pg: ## Run live_pg tests against a real PostgreSQL (requires DIVIDE_TEST_LIVE_PG + reachable DB).
+	@test -n "$$DIVIDE_TEST_LIVE_PG" || { echo "Set DIVIDE_TEST_LIVE_PG=1 (and optionally DIVIDE_TEST_LIVE_PG_URL)"; exit 2; }
+	$(PYTHON) -m pytest -m live_pg services/api/tests
 
 smoke: ## Curl /healthz and /readyz on the local API.
 	@echo "== /healthz =="
