@@ -110,6 +110,12 @@ class Scenario(Base, TimestampMixin):
         JSON, nullable=False, default=list
     )
     source_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    # Soft-delete flag: set when the YAML backing this row is removed from
+    # disk. Historical Runs still reference this row via FK, so we never
+    # hard-delete a scenario. Set to NULL to re-activate.
+    archived_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     runs: Mapped[list["Run"]] = relationship(back_populates="scenario")
 

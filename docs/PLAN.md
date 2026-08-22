@@ -296,13 +296,28 @@ On drill completion, report-builder extracts IOCs (IPs, domains, URLs, hashes) f
 - Live migration verified against dev Postgres (5 tables created)
 - 15 model tests + 5 alembic tests
 
-**Stage 3 — Runner + drills** ⏳ (next)
+**Stage 3 — Runner + drills** ✅
 - Adapter interface for Proxmox (`ProxmoxAdapter`) with `RealProxmoxAdapter` + `MockProxmoxAdapter`
 - End-to-end happy path: YAML → DB Run row → DB Asset rows → mock clone → DB status transitions
-- Wire `app.routers/drills.py` to the runner (replaces 501 stub)
+- `POST /api/v1/drills` + `POST /api/v1/drills/{id}/stop` + `GET /api/v1/drills` wired
 - Smoke script: `python tools/run_smoke.py examples/scenarios/phish-to-ransom.scenario.yaml`
 - **Strict** lifecycle model (runner owns full VM lifecycle end-to-end)
-- Live verification deferred until PVE auth unblocked
+- 14 runner tests
+- Live verified: failed Run row + audit events written to dev Postgres
+
+**Stage 4 — Scenario sync + catalog API** ✅
+- `app/services/scenario_sync.py` — sync YAML files → DB rows (idempotent, schema-validated, soft-archive on YAML removal)
+- `app/routers/scenarios.py` — full CRUD: GET (list with `include_archived`), GET by name, POST (yaml or path), DELETE (archive), POST `/{name}/restore`
+- Auto-sync on API startup (opt-out via `DIVIDE_SYNC_ON_STARTUP=false`)
+- `tools/sync_scenarios.py` CLI + `make sync-scenarios` (runs migrations then sync; `--no-archive` flag)
+- `archived_at` column on `scenarios` (migration `0002`)
+- `Scenario` router checks: 400 (bad input), 409 (missing name), 422 (validation), 404 (not found), 410 Gone (archived)
+- `Drill` router checks archived before starting: 410 Gone for archived scenario
+- `_find_schema()` supports dev + container layouts + env override
+- Dockerfile: build context is repo root, schemas/ bundled into image
+- docker-compose: repo mounted read-only into `/workdir`, scenarios env vars
+- 18 sync tests + 3 schema-resolution tests
+- Live verified: 2 scenarios synced on first API boot, all 4 endpoints work, archive/restore round-trip works
 
 **Phase 1 — One-VM drill end-to-end** (after Stage 3)
 - Single Ubuntu drill VM (vsftpd 2.3.4) — happy path with real PVE

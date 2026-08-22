@@ -2,12 +2,11 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import create_async_engine
-
-from app.db.base import Base
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -31,18 +30,58 @@ def monkeypatch_session():
 
 @pytest.fixture(scope="session", autouse=True)
 def _create_tables():
-    """Create the schema once per test session so router tests have tables."""
-    test_db = os.environ.get("DIVIDE_DB_URL", "sqlite+aiosqlite:///./test.sqlite")
-    # Sync driver for table creation: drop the +aiosqlite suffix.
-    from sqlalchemy import create_engine as _create_sync
+    """Run all alembic migrations once per test session so router tests have
+    tables. We use a single file-based SQLite and tear it down at the end.
 
-    sync_url = test_db.replace("+aiosqlite", "")
-    sync_eng = _create_sync(sync_url)
-    # Import models so they register on Base.metadata before create_all.
-    from app.db import models  # noqa: F401
-    Base.metadata.create_all(sync_eng)
-    sync_eng.dispose()
+    Why alembic over ``Base.metadata.create_all``?
+    - Alembic is what runs in production.
+    - Models drift from migrations all the time; this catches it.
+    """
+    import subprocess
+    import sys
+
+    db_path = Path(__file__).resolve().parents[1] / "_pytest_state" / "test.sqlite"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    if db_path.exists():
+        db_path.unlink()
+
+    env = dict(os.environ)
+    env["DIVIDE_DB_URL"] = f"sqlite:///{db_path}"
+    env["PYTHONPATH"] = str(Path(__file__).resolve().parents[1]) + os.pathsep + env.get(
+        "PYTHONPATH", ""
+    )
+    # Use the alembic binary against the same DB.
+    alembic_ini = Path(__file__).resolve().parents[1] / "alembic.ini"
+    r = subprocess.run(
+        [sys.executable, "-m", "alembic", "--config", str(alembic_ini), "upgrade", "head"],
+        capture_output=True,
+        text=True,
+        env=env,
+        cwd=alembic_ini.parent,
+    )
+    if r.returncode != 0:  # pragma: no cover - debug aid
+        print("---STDOUT---")
+        print(r.stdout)
+        print("---STDERR---")
+        print(r.stderr)
+        raise RuntimeError("alembic upgrade head failed")
+
+    # Point the running app at the same DB.
+    os.environ["DIVIDE_DB_URL"] = f"sqlite+aiosqlite:///{db_path}"
+    # Reset the cached engine / sessionmaker so tests pick up the new URL.
+    from app.services import db as db_module
+
+    db_module._engine = None
+    from app.db import session as session_module
+
+    session_module._session_maker = None
+
     yield
+
+    try:
+        db_path.unlink()
+    except OSError:  # pragma: no cover
+        pass
 
 
 @pytest.fixture

@@ -40,6 +40,26 @@ async def start_drill(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="body must include integer `scenario_id`",
         )
+
+    # Pre-check: scenario must exist and not be archived. The runner
+    # would raise RunnerError too, but doing the check here lets us
+    # return a proper 404 / 410 instead of 422 for this clearer case.
+    scenario = (
+        await session.execute(
+            select(db_models.Scenario).where(db_models.Scenario.id == scenario_id)
+        )
+    ).scalar_one_or_none()
+    if scenario is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"scenario id={scenario_id} not found",
+        )
+    if scenario.archived_at is not None:
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail=f"scenario id={scenario_id} is archived; restore it first",
+        )
+
     runner = _get_runner()
     try:
         result = await runner.start_run(

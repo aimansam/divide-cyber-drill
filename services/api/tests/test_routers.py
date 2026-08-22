@@ -16,9 +16,10 @@ def test_list_scenarios_returns_empty(client):
     assert body["total"] == 0
 
 
-def test_create_scenario_returns_501(client):
+def test_create_scenario_requires_body(client):
+    """POST without `yaml` or `path` returns 400."""
     r = client.post("/api/v1/scenarios", json={})
-    assert r.status_code == 501
+    assert r.status_code == 400
 
 
 def test_list_drills_returns_empty(client):
@@ -36,11 +37,10 @@ def test_start_drill_returns_400_when_scenario_id_missing(client):
     assert r.status_code == 400
 
 
-def test_start_drill_returns_404_when_scenario_missing(client):
-    """When scenario_id refers to a non-existent scenario, 404 (RunnerError)."""
+def test_start_drill_returns_422_when_scenario_missing(client):
+    """When scenario_id refers to a non-existent scenario, 404."""
     r = client.post("/api/v1/drills", json={"scenario_id": 99999})
-    # RunnerError -> 422 (unprocessable). Not 501 (we're no longer a stub).
-    assert r.status_code == 422
+    assert r.status_code == 404
 
 
 def test_proxmox_health_returns_503_when_unconfigured(client):

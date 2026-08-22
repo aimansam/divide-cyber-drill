@@ -97,10 +97,14 @@ Once `make up` succeeds, open:
 |--------|-----------------------------|---------------|---------|
 | GET    | `/healthz`                  | live          | Liveness probe |
 | GET    | `/readyz`                   | live          | Readiness probe (checks Postgres + Redis) |
-| GET    | `/api/v1/scenarios`         | stub          | Returns `{"items": [], "total": 0}` |
-| POST   | `/api/v1/scenarios`         | stub (501)    | Not implemented — lands in Phase 1 |
-| GET    | `/api/v1/drills`            | stub          | Returns empty list |
-| POST   | `/api/v1/drills`            | stub (501)    | Not implemented — lands in Phase 1 |
+| GET    | `/api/v1/scenarios`         | live          | Lists scenarios from DB; auto-synced from `examples/scenarios/` |
+| POST   | `/api/v1/scenarios`         | live          | Import YAML body or path; validates + upserts |
+| GET    | `/api/v1/scenarios/{name}`  | live          | Get one scenario by name |
+| DELETE | `/api/v1/scenarios/{name}`  | live          | Soft-archive (sets `archived_at`) |
+| POST   | `/api/v1/scenarios/{name}/restore` | live   | Un-archive a previously archived scenario |
+| GET    | `/api/v1/drills`            | live          | Lists all runs in DB |
+| POST   | `/api/v1/drills`            | live          | Start a drill (`{"scenario_id": N, "started_by": "..."}`) |
+| POST   | `/api/v1/drills/{id}/stop`  | live          | Stop + destroy a drill's assets |
 | GET    | `/api/v1/proxmox/health`    | gated         | 503 unless `PROXMOX_HOST` + token are set |
 | GET    | `/api/v1/proxmox/nodes`     | gated         | Same |
 

@@ -10,7 +10,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
-COPY pyproject.toml ./
+COPY services/api/pyproject.toml ./
 RUN pip install --upgrade pip hatchling && \
     pip wheel --wheel-dir=/wheels \
     "fastapi>=0.115.0" \
@@ -50,10 +50,13 @@ RUN pip install --no-index --find-links=/wheels \
     jsonschema structlog tenacity psycopg2-binary \
     && rm -rf /wheels /root/.cache
 
-COPY app ./app
-COPY scripts ./scripts
-COPY alembic ./alembic
-COPY alembic.ini ./alembic.ini
+COPY services/api/app ./app
+COPY services/api/scripts ./scripts
+COPY services/api/alembic ./alembic
+COPY services/api/alembic.ini ./alembic.ini
+# JSON Schema is shared with the host. We bundle a copy at /app/schemas so
+# the schema-sync service works inside the container without a host mount.
+COPY schemas ./schemas
 USER divide
 
 EXPOSE 8000
