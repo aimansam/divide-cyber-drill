@@ -94,22 +94,123 @@ def _fetch_audit(client: httpx.Client, run_id: int) -> list[dict[str, Any]]:
     return []
 
 
-def _fetch_metrics(client: httpx.Client) -> dict[str, float]:
-    """Return {metric_name: value} for every divide_* counter/gauge.
-    Label values are dropped (we don't need them for sanity checks)."""
+def _fetch_metrics(client: httpx.Client) -> dict[tuple[str, frozenset], float]:
+    """Return {(name, frozenset(label_items)): value} for every divide_*
+    counter/gauge/histogram sample.
+
+    Labels are preserved so callers can query specific label combinations
+    (e.g. ``divide_runs_total{outcome="succeeded"}``) instead of collapsing
+    every label combo into one bucket. Histogram ``_bucket`` lines carry
+    an ``le=...`` label which is also preserved.
+
+    Unlabeled samples get an empty frozenset key.
+    """
     r = client.get("/metrics")
     r.raise_for_status()
-    out: dict[str, float] = {}
+    out: dict[tuple[str, frozenset], float] = {}
+    # Match: name{labels} value  OR  name value
+    labeled_re = re.compile(
+        r"^(divide_[a-zA-Z0-9_]+)\{([^}]*)\}\s+([0-9eE+\-.]+)\s*$"
+    )
+    unlabeled_re = re.compile(
+        r"^(divide_[a-zA-Z0-9_]+)\s+([0-9eE+\-.]+)\s*$"
+    )
     for line in r.text.splitlines():
         if not line.startswith("divide_") or line.startswith("#"):
             continue
-        m = re.match(
-            r"^(divide_[a-zA-Z0-9_]+)(?:\{[^}]*\})?\s+([0-9eE+\-.]+)\s*$", line
-        )
+        m = labeled_re.match(line)
         if m:
-            with contextlib.suppress(ValueError):
-                out[m.group(1)] = float(m.group(2))
+            name, labels_str, value_str = m.group(1), m.group(2), m.group(3)
+            # Parse labels: 'adapter="real",outcome="succeeded"'
+            labels = _parse_labels(labels_str)
+        else:
+            m = unlabeled_re.match(line)
+            if not m:
+                continue
+            name, value_str = m.group(1), m.group(2)
+            labels = frozenset()
+        with contextlib.suppress(ValueError):
+            out[(name, labels)] = float(value_str)
     return out
+
+
+def _parse_labels(s: str) -> frozenset:
+    """Parse a Prometheus label set like 'adapter="real",outcome="succeeded"'.
+
+    Returns a frozenset of (key, value) tuples so it's hashable and
+    order-independent. Values are kept as strings — callers compare
+    strings, not numbers (Prometheus labels are always strings)."""
+    out: set[tuple[str, str]] = set()
+    # Simple state machine: split on commas that aren't inside quotes.
+    for part in _split_labels(s):
+        if "=" not in part:
+            continue
+        k, v = part.split("=", 1)
+        k = k.strip()
+        v = v.strip()
+        if v.startswith('"') and v.endswith('"'):
+            v = v[1:-1]
+        out.add((k, v))
+    return frozenset(out)
+
+
+def _split_labels(s: str) -> list[str]:
+    """Split a label string on top-level commas (not inside quoted values)."""
+    parts: list[str] = []
+    buf: list[str] = []
+    in_quote = False
+    for ch in s:
+        if ch == '"':
+            in_quote = not in_quote
+            buf.append(ch)
+        elif ch == "," and not in_quote:
+            parts.append("".join(buf))
+            buf = []
+        else:
+            buf.append(ch)
+    if buf:
+        parts.append("".join(buf))
+    return parts
+
+
+def _get_metric(
+    metrics: dict[tuple[str, frozenset], float],
+    name: str,
+    **labels: str,
+) -> float | None:
+    """Look up a specific metric+label combination. Returns None if absent."""
+    wanted = frozenset(labels.items())
+    for (n, lab), value in metrics.items():
+        if n != name:
+            continue
+        # The stored label set may include extra labels (e.g. 'adapter' when
+        # you asked only for 'outcome'). Require the wanted labels to be
+        # present and equal; extras are fine.
+        wanted_pairs = dict(wanted)
+        stored_pairs = dict(lab)
+        if all(stored_pairs.get(k) == v for k, v in wanted_pairs.items()):
+            return value
+    return None
+
+
+def _sum_metric(
+    metrics: dict[tuple[str, frozenset], float],
+    name: str,
+    **labels: str,
+) -> float:
+    """Like _get_metric but sums across all label combinations matching
+    the filter. Useful for label-agnostic checks (e.g. total runs across
+    all adapters)."""
+    wanted_pairs = dict(frozenset(labels.items()))
+    total = 0.0
+    for (n, lab), value in metrics.items():
+        if n != name:
+            continue
+        stored_pairs = dict(lab)
+        if all(stored_pairs.get(k) == v for k, v in wanted_pairs.items()):
+            total += value
+    return total
+
 
 
 # ---------- checks ----------
@@ -190,19 +291,61 @@ def check_audit(actions: list[str], expect: str) -> tuple[bool, str]:
     return True, f"audit not checked for status {expect!r}"
 
 
-def check_metrics_counter(metrics: dict[str, float]) -> tuple[bool, str]:
-    """divide_runs_total should be > 0 and divide_runs_active should be 0
-    (no in-flight runs hanging after live_drill returned)."""
-    total = metrics.get("divide_runs_total")
-    active = metrics.get("divide_runs_active", 0)
-    if total is None:
-        return False, "divide_runs_total not found in /metrics"
+def check_metrics_counter(
+    metrics: dict[tuple[str, frozenset], float],
+    expect: str = "succeeded",
+) -> tuple[bool, str]:
+    """Label-aware metric check.
+
+    Asserts:
+      * ``divide_runs_total{outcome=<expect>, adapter="real"}`` is > 0
+        (a real drill hit this outcome since the API started).
+      * ``divide_runs_total{outcome="failed", adapter="real"}`` is 0
+        (no real drill failed since the API started -- if any did,
+        we'd want to investigate).
+      * ``divide_runs_active{adapter="real"}`` is 0 (no in-flight runs
+        hanging after live_drill returned).
+
+    We scope to ``adapter="real"`` because that's what production
+    drills use; the ``adapter="mock"`` counter exists for unit tests.
+    """
+    real = {"adapter": "real"}
+    # Specific outcome should be > 0.
+    outcome_value = _get_metric(metrics, "divide_runs_total",
+                                outcome=expect, **real)
+    if outcome_value is None:
+        # No samples with this outcome ever — could be a brand-new
+        # process or the zero-init pre-fill. Look across all adapters.
+        all_outcome = _sum_metric(metrics, "divide_runs_total", outcome=expect)
+        if all_outcome == 0:
+            return False, (
+                f"divide_runs_total{{outcome={expect!r}}} is 0 (or "
+                f"absent) -- no drill reached the {expect!r} state since "
+                f"the API started"
+            )
+        outcome_value = all_outcome
+
+    # Failed should be 0 (no regressions).
+    failed_value = _get_metric(metrics, "divide_runs_total",
+                               outcome="failed", **real) or 0.0
+    # Active should be 0 (no in-flight).
+    active = _get_metric(metrics, "divide_runs_active", **real) or 0.0
+
+    if failed_value > 0:
+        return False, (
+            f"divide_runs_total{{outcome=\"failed\", adapter=\"real\"}}="
+            f"{failed_value} -- {int(failed_value)} drill(s) failed since "
+            f"the API started. Investigate the runs table."
+        )
     if active > 0:
         return False, (
-            f"divide_runs_active={active} (expected 0 -- a drill is "
-            "still in-flight; live_drill should have waited)"
+            f"divide_runs_active{{adapter=\"real\"}}={active} -- a drill "
+            f"is still in-flight; live_drill should have waited"
         )
-    return True, f"divide_runs_total={total}, divide_runs_active={active}"
+    return True, (
+        f"divide_runs_total{{outcome={expect!r}, adapter=\"real\"}}="
+        f"{outcome_value}, divide_runs_active=0, failed=0"
+    )
 
 
 # ---------- reporting ----------
@@ -343,7 +486,7 @@ def main() -> int:
             results.append(("assets spawned", ok, detail))
     ok, detail = check_audit(audit_actions, args.expect)
     results.append(("audit log", ok, detail))
-    ok, detail = check_metrics_counter(metrics)
+    ok, detail = check_metrics_counter(metrics, expect=args.expect)
     results.append(("/metrics", ok, detail))
 
     _print_human(run_id, run, assets, results, json_mode=args.json)

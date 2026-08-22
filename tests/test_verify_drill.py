@@ -131,57 +131,115 @@ def test_check_audit_cancelled_requires_cancelled_action():
     assert "run.cancelled" in detail
 
 
-# ---------- check_metrics_counter ----------
+# ---------- check_metrics_counter (label-aware) ----------
 
 
-def test_check_metrics_counter_passes_with_active_zero():
+def _metric(name: str, value: float, **labels: str) -> dict:
+    """Helper to build a single-entry metrics dict.
+
+    Returns ``{ (name, frozenset(labels)): value }`` so tests can splat
+    them together: ``metrics = {**_metric("x", 1.0, k="v"), **_metric("y", 2.0)}``.
+    """
+    return {(name, frozenset(labels.items())): value}
+
+
+def test_check_metrics_counter_passes_when_expected_outcome_seen():
     mod = _load_module()
-    ok, detail = mod.check_metrics_counter(
-        {"divide_runs_total": 3.0, "divide_runs_active": 0}
-    )
+    metrics = {
+        **_metric("divide_runs_total", 3.0, outcome="succeeded", adapter="real"),
+        **_metric("divide_runs_active", 0.0, adapter="real"),
+    }
+    ok, detail = mod.check_metrics_counter(metrics, expect="succeeded")
     assert ok is True
+    assert "outcome=" in detail and "succeeded" in detail
     assert "3.0" in detail
 
 
 def test_check_metrics_counter_fails_when_metric_missing():
     mod = _load_module()
-    ok, detail = mod.check_metrics_counter({"divide_runs_active": 0})
+    ok, detail = mod.check_metrics_counter({}, expect="succeeded")
     assert ok is False
-    assert "not found" in detail
+    assert "0" in detail or "absent" in detail
 
 
-def test_check_metrics_counter_fails_when_runs_hanging():
+def test_check_metrics_counter_fails_when_active_nonzero():
     mod = _load_module()
-    ok, detail = mod.check_metrics_counter(
-        {"divide_runs_total": 5.0, "divide_runs_active": 2}
-    )
+    metrics = {
+        **_metric("divide_runs_total", 1.0, outcome="succeeded", adapter="real"),
+        **_metric("divide_runs_active", 2.0, adapter="real"),
+    }
+    ok, detail = mod.check_metrics_counter(metrics, expect="succeeded")
     assert ok is False
     assert "in-flight" in detail
 
 
-# ---------- _fetch_metrics: label stripping + parse ----------
+def test_check_metrics_counter_fails_when_failed_counter_nonzero():
+    """The new behavior: failed>0 is a regression signal."""
+    mod = _load_module()
+    metrics = {
+        **_metric("divide_runs_total", 0.0, outcome="succeeded", adapter="real"),
+        **_metric("divide_runs_total", 2.0, outcome="failed", adapter="real"),
+        **_metric("divide_runs_active", 0.0, adapter="real"),
+    }
+    ok, detail = mod.check_metrics_counter(metrics, expect="succeeded")
+    assert ok is False
+    assert "failed" in detail.lower()
 
 
-def test_fetch_metrics_strips_labels_and_parses_values():
+def test_check_metrics_counter_falls_back_to_all_adapters_when_real_missing():
+    """If adapter=real has no samples, sum across all adapters."""
+    mod = _load_module()
+    metrics = {
+        **_metric("divide_runs_total", 1.0, outcome="succeeded", adapter="mock"),
+        **_metric("divide_runs_active", 0.0, adapter="real"),
+    }
+    ok, detail = mod.check_metrics_counter(metrics, expect="succeeded")
+    assert ok is True
+    assert "1.0" in detail
+
+
+def test_check_metrics_counter_ignores_mock_adapter_for_failure_check():
+    """Mock adapter failures shouldn't fail the real-drill check."""
+    mod = _load_module()
+    metrics = {
+        **_metric("divide_runs_total", 5.0, outcome="succeeded", adapter="real"),
+        **_metric("divide_runs_total", 99.0, outcome="failed", adapter="mock"),
+        **_metric("divide_runs_active", 0.0, adapter="real"),
+    }
+    ok, _ = mod.check_metrics_counter(metrics, expect="succeeded")
+    assert ok is True
+
+
+
+# ---------- _fetch_metrics: label-preserving parse ----------
+
+
+def test_fetch_metrics_preserves_labels():
     mod = _load_module()
     from unittest.mock import MagicMock
 
     sample = (
-        "# HELP divide_runs_total X\n"
-        "divide_runs_total{adapter=\"real\",outcome=\"succeeded\"} 7.0\n"
-        "divide_runs_active 0.0\n"
-        "divide_run_duration_seconds_bucket{le=\"+Inf\"} 12.0\n"
+        '# HELP divide_runs_total X\n'
+        'divide_runs_total{adapter="real",outcome="succeeded"} 7.0\n'
+        'divide_runs_active{adapter="real"} 0.0\n'
+        'divide_run_duration_seconds_bucket{le="+Inf"} 12.0\n'
+        'divide_runs_total_unlabeled 5.0\n'
     )
     client = MagicMock()
     client.get.return_value.text = sample
     client.get.return_value.raise_for_status = lambda: None
-
     metrics = mod._fetch_metrics(client)
-    assert metrics == {
-        "divide_runs_total": 7.0,
-        "divide_runs_active": 0.0,
-        "divide_run_duration_seconds_bucket": 12.0,
-    }
+
+    # Labeled samples carry their labels.
+    assert mod._get_metric(metrics, "divide_runs_total",
+                           outcome="succeeded", adapter="real") == 7.0
+    assert mod._get_metric(metrics, "divide_runs_active",
+                           adapter="real") == 0.0
+    # Histogram bucket le=+Inf preserved.
+    assert mod._get_metric(metrics, "divide_run_duration_seconds_bucket",
+                           le="+Inf") == 12.0
+    # Unlabeled sample has empty label set.
+    assert mod._get_metric(metrics, "divide_runs_total_unlabeled") == 5.0
 
 
 def test_fetch_metrics_skips_unparseable_lines():
@@ -189,17 +247,80 @@ def test_fetch_metrics_skips_unparseable_lines():
     from unittest.mock import MagicMock
 
     sample = (
-        "divide_runs_total 1.0\n"
-        "divide_runs_active not_a_number\n"
-        "divide_runs_active 0.0\n"
+        'divide_runs_total 1.0\n'
+        'divide_runs_active not_a_number\n'
+        'divide_runs_active 0.0\n'
     )
     client = MagicMock()
     client.get.return_value.text = sample
     client.get.return_value.raise_for_status = lambda: None
 
     metrics = mod._fetch_metrics(client)
-    assert metrics["divide_runs_total"] == 1.0
-    assert metrics["divide_runs_active"] == 0.0
+    assert mod._get_metric(metrics, "divide_runs_total") == 1.0
+    assert mod._get_metric(metrics, "divide_runs_active") == 0.0
+
+
+# ---------- _get_metric / _sum_metric ----------
+
+
+def test_get_metric_finds_exact_label_combo():
+    mod = _load_module()
+    metrics = {
+        **_metric("divide_runs_total", 7.0, outcome="succeeded", adapter="real"),
+        **_metric("divide_runs_total", 0.0, outcome="failed", adapter="real"),
+    }
+    assert mod._get_metric(metrics, "divide_runs_total", outcome="succeeded") == 7.0
+    assert mod._get_metric(metrics, "divide_runs_total", outcome="failed") == 0.0
+
+
+def test_get_metric_treats_extra_labels_as_match():
+    """Asking for outcome='succeeded' should match the real counter
+    even though it also has adapter='real'."""
+    mod = _load_module()
+    metrics = {
+        **_metric("divide_runs_total", 7.0, outcome="succeeded", adapter="real"),
+    }
+    assert mod._get_metric(metrics, "divide_runs_total", outcome="succeeded") == 7.0
+
+
+def test_get_metric_returns_none_when_label_mismatch():
+    mod = _load_module()
+    metrics = {
+        **_metric("divide_runs_total", 7.0, outcome="succeeded", adapter="real"),
+    }
+    assert mod._get_metric(metrics, "divide_runs_total", outcome="cancelled") is None
+
+
+def test_sum_metric_aggregates_across_adapters():
+    mod = _load_module()
+    metrics = {
+        **_metric("divide_runs_total", 3.0, outcome="succeeded", adapter="real"),
+        **_metric("divide_runs_total", 2.0, outcome="succeeded", adapter="mock"),
+    }
+    assert mod._sum_metric(metrics, "divide_runs_total", outcome="succeeded") == 5.0
+
+
+# ---------- _parse_labels ----------
+
+
+def test_parse_labels_simple():
+    mod = _load_module()
+    lab = mod._parse_labels('adapter="real",outcome="succeeded"')
+    assert ("adapter", "real") in lab
+    assert ("outcome", "succeeded") in lab
+
+
+def test_parse_labels_handles_quoted_commas():
+    """If a label value contains a comma, the split must respect quotes."""
+    mod = _load_module()
+    lab = mod._parse_labels('msg="hello, world",k="v"')
+    assert ("msg", "hello, world") in lab
+    assert ("k", "v") in lab
+
+
+def test_parse_labels_handles_empty():
+    mod = _load_module()
+    assert mod._parse_labels("") == frozenset()
 
 
 # ---------- _fetch_run: list-shape tolerance ----------
