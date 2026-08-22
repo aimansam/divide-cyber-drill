@@ -97,9 +97,25 @@ upload-template: ## Upload + register a cloud-init VM template on PVE. Args: NAM
 	@test -n "$$ISO" || { echo "Set ISO=local:iso/<file>.iso (the Debian netinst ISO already on PVE is fine)"; exit 2; }
 	$(COMPOSE) exec api python /workdir/tools/upload_cloudinit_template.py --name "$$NAME" --iso "$$ISO"
 
+preflight: ## Verify all pre-conditions for `make live-drill` (PVE ACL, template, scenario, /metrics, Prometheus, Grafana).
+	@test -n "$$SCENARIO" || SCENARIO=first-live-drill; \
+	@test -n "$$TEMPLATE" || TEMPLATE=tpl-debian-cloudinit; \
+	$(PYTHON) tools/preflight.py --scenario "$$SCENARIO" --template "$$TEMPLATE"
+
 live-drill: ## Run a drill end-to-end against live PVE. Args: SCENARIO=first-live-drill TIMEOUT=300.
 	@test -n "$$SCENARIO" || SCENARIO=first-live-drill; \
 	$(COMPOSE) exec api python /workdir/tools/live_drill.py --scenario "$$SCENARIO" --timeout $${TIMEOUT:-300}
+
+watch-drill: ## Watch the next drill via Prometheus; exits when outcome moves. Args: OUTCOME=succeeded CANCEL_AFTER=...
+	@test -n "$$OUTCOME" || OUTCOME=succeeded; \
+	$(PYTHON) tools/watch_drill.py --outcome "$$OUTCOME" $${CANCEL_AFTER:+--cancel-after $$CANCEL_AFTER} --timeout $${TIMEOUT:-600}
+
+live-cancel: ## Start a drill, then cancel it after N seconds. Args: SCENARIO=first-live-drill CANCEL_AFTER=30.
+	@test -n "$$SCENARIO" || SCENARIO=first-live-drill; \
+	@echo "1) starting drill..."; \
+	$(COMPOSE) exec -T api python /workdir/tools/live_drill.py --scenario "$$SCENARIO" --timeout 5 --no-stop || true; \
+	@echo "2) watching + cancelling after $${CANCEL_AFTER:-30}s..."; \
+	$(PYTHON) tools/watch_drill.py --scenario "$$SCENARIO" --cancel-after $${CANCEL_AFTER:-30} --outcome cancelled --timeout $${TIMEOUT:-120}
 
 smoke-run: ## End-to-end smoke (in-memory DB + MockProxmoxAdapter).
 	PYTHONPATH=$(API_DIR) $(PYTHON) tools/run_smoke.py

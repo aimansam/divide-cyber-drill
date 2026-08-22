@@ -2,7 +2,7 @@
 
 ## Design & Architecture Plan
 
-> **Status:** Phase 0 — Foundations **DONE**. Stages 2, 2.5, 2.7, 3, 4, 5, 6, 7, 8, 9 **DONE**.
+> **Status:** Phase 0 — Foundations **DONE**. Stages 2, 2.5, 2.7, 3, 4, 5, 6, 7, 8, 9, 10 **DONE**.
 > PVE auth unblocked (PROXMOX_USER fix + PVE 9 GET /cluster/nextid).
 > First live drill is one `pveum acl` away.
 > **Target platform:** Proxmox VE (main host).
@@ -372,7 +372,15 @@ On drill completion, report-builder extracts IOCs (IPs, domains, URLs, hashes) f
 - 5 deploy-config tests (parse prometheus.yml, datasource provisioning, dashboard provider, dashboard JSON, compose service mentions).
 - Tests: 149 → 154 (+5). Live verified: Prometheus reports `divide-api` as `up`, Grafana loads the dashboard, datasource proxy returns query results.
 
-**Phase 1 — One-VM drill end-to-end** (after Stage 9)
+**Stage 10 — Phase 1 prep tooling** ✅
+- `tools/preflight.py` — 8-check pre-flight gate (API health, PROXMOX config, PVE nodes, template, scenario, /metrics, Prometheus scrape, Grafana dashboard). Returns exit 0 only if every check passes; on FAIL prints an actionable hint.
+- `tools/watch_drill.py` — Prometheus-driven watcher. Exits the moment `divide_runs_total{outcome=X}` increases. Has `--api-poll` fallback and `--cancel-after N` mode for exercising the cancel endpoint mid-flight.
+- Makefile targets: `preflight`, `watch-drill`, `live-cancel` (the runbook one-liner for the cancel exercise).
+- `docs/LIVE-DRILL-RUNBOOK.md` — 396-line operator doc: prerequisites, PVE ACL grant, env check, preflight, template upload (with the qemu-guest-agent gotcha), drill run, Grafana verification, cancel exercise, full troubleshooting matrix.
+- 9 new tests (5 preflight + 4 watch_drill). Tests: 154 → 163 (+9).
+- Live verified against current stack: preflight reports 7/8 (template is the one expected FAIL).
+
+**Phase 1 — One-VM drill end-to-end** (after Stage 10 — waiting on PVE ACL + template upload)
 - Single Ubuntu drill VM (vsftpd 2.3.4) — happy path with real PVE
 - Templates: `tpl-ubuntu-2204` + Kali template
 - Portal: list scenarios, start drill, see console, see artifact (PCAP), stop drill
