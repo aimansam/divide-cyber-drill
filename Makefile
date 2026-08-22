@@ -98,26 +98,26 @@ upload-template: ## Upload + register a cloud-init VM template on PVE. Args: NAM
 	$(COMPOSE) exec api python /workdir/tools/upload_cloudinit_template.py --name "$$NAME" --iso "$$ISO"
 
 preflight: ## Verify all pre-conditions for `make live-drill` (PVE ACL, template, scenario, /metrics, Prometheus, Grafana).
-	@test -n "$$SCENARIO" || SCENARIO=first-live-drill; \
-	@test -n "$$TEMPLATE" || TEMPLATE=tpl-debian-cloudinit; \
+	@SCENARIO=$${SCENARIO:-first-live-drill}; \
+	TEMPLATE=$${TEMPLATE:-tpl-debian-cloudinit}; \
 	$(PYTHON) tools/preflight.py --scenario "$$SCENARIO" --template "$$TEMPLATE"
 
 live-drill: ## Run a drill end-to-end against live PVE. Args: SCENARIO=first-live-drill TIMEOUT=300.
-	@test -n "$$SCENARIO" || SCENARIO=first-live-drill; \
+	@SCENARIO=$${SCENARIO:-first-live-drill}; \
 	$(COMPOSE) exec api python /workdir/tools/live_drill.py --scenario "$$SCENARIO" --timeout $${TIMEOUT:-300}
 
 verify-drill: ## Verify the most recent (or RUN_ID=N) drill against expected status. Args: RUN_ID= RUN_EXPECT=succeeded RUN_JSON=1.
 	$(PYTHON) tools/verify_drill.py --expect $${RUN_EXPECT:-succeeded} $${RUN_ID:+--run-id $$RUN_ID} $${RUN_JSON:+--json} $${RUN_NO_DESTROY:+--no-destroyed-check}
 
 watch-drill: ## Watch the next drill via Prometheus; exits when outcome moves. Args: OUTCOME=succeeded CANCEL_AFTER=...
-	@test -n "$$OUTCOME" || OUTCOME=succeeded; \
+	@OUTCOME=$${OUTCOME:-succeeded}; \
 	$(PYTHON) tools/watch_drill.py --outcome "$$OUTCOME" $${CANCEL_AFTER:+--cancel-after $$CANCEL_AFTER} --timeout $${TIMEOUT:-600}
 
 live-cancel: ## Start a drill, then cancel it after N seconds. Args: SCENARIO=first-live-drill CANCEL_AFTER=30.
-	@test -n "$$SCENARIO" || SCENARIO=first-live-drill; \
-	@echo "1) starting drill..."; \
+	@SCENARIO=$${SCENARIO:-first-live-drill}; \
+	echo "1) starting drill..."; \
 	$(COMPOSE) exec -T api python /workdir/tools/live_drill.py --scenario "$$SCENARIO" --timeout 5 --no-stop || true; \
-	@echo "2) watching + cancelling after $${CANCEL_AFTER:-30}s..."; \
+	echo "2) watching + cancelling after $${CANCEL_AFTER:-30}s..."; \
 	$(PYTHON) tools/watch_drill.py --scenario "$$SCENARIO" --cancel-after $${CANCEL_AFTER:-30} --outcome cancelled --timeout $${TIMEOUT:-120}
 
 smoke-run: ## End-to-end smoke (in-memory DB + MockProxmoxAdapter).
