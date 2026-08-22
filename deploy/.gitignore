@@ -1,0 +1,5 @@
+.env
+.env.local
+certs/*.pem
+certs/*.key
+letsencrypt/

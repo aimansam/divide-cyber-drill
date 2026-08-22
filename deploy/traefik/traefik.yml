@@ -1,0 +1,35 @@
+# Traefik static config — most options are CLI flags in docker-compose.yml.
+# This file exists so operators can add providers, middlewares, etc. without
+# editing the compose file.
+log:
+  level: INFO
+
+accessLog: {}
+
+api:
+  dashboard: true
+  insecure: false
+
+providers:
+  docker:
+    exposedByDefault: false
+    network: divide-net
+
+entryPoints:
+  web:
+    address: ":80"
+    http:
+      redirections:
+        entryPoint:
+          to: websecure
+          scheme: https
+  websecure:
+    address: ":443"
+
+certificatesResolvers:
+  le:
+    acme:
+      email: ${ACME_EMAIL:-admin@divide.local}
+      storage: /letsencrypt/acme.json
+      httpChallenge:
+        entryPoint: web

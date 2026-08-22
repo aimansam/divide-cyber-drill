@@ -1,0 +1,7 @@
+# Real scenarios land in Phase 1. Example layout:
+
+# phish-to-ransom/
+# ├── scenario.yaml        # declarative spec (topology, injects, success criteria)
+# ├── README.md            # instructor guide
+# ├── injects/             # timed events
+# └── flags/               # optional CTF-style flags

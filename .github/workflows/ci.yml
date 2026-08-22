@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      - name: Ruff lint
+        run: ruff check .
+      - name: Ruff format check
+        run: ruff format --check .
+      - name: MyPy
+        run: mypy services/api/app
+      - name: Pytest
+        run: pytest services/api/tests
+        env:
+          DIVIDE_DB_URL: sqlite+aiosqlite:///./test.sqlite
+          DIVIDE_REDIS_URL: redis://localhost:6379/0
+
+  diagrams:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install matplotlib
+        run: pip install matplotlib
+      - name: Regenerate architecture diagrams
+        run: python tools/gen_diagrams.py
+      - name: Verify diagrams committed
+        run: |
+          if [[ -n "$(git status --porcelain docs/images/)" ]]; then
+            echo "::error::Architecture diagrams are out of date. Run 'python tools/gen_diagrams.py' locally."
+            exit 1
+          fi

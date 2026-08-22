@@ -1,0 +1,29 @@
+#cloud-config
+# div:ide drill VM — base cloud-init template.
+# Per-drill values (drill_id, role, ssh pubkey) are interpolated by the orchestrator.
+
+hostname: drill-{{drill_id}}-{{role}}
+fqdn: {{role}}.{{drill_id}}.divide.local
+manage_etc_hosts: true
+
+users:
+  - name: trainee
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/bash
+    ssh_authorized_keys:
+      - {{ drill_ssh_pubkey }}
+
+package_update: true
+package_upgrade: false
+
+packages:
+  - qemu-guest-agent
+  - curl
+  - ca-certificates
+
+runcmd:
+  - systemctl enable --now qemu-guest-agent
+  - curl -fsS http://10.0.0.10/api/v1/drills/{{drill_id}}/bootstrap -o /tmp/bootstrap.sh
+  - [ -s /tmp/bootstrap.sh ] && bash /tmp/bootstrap.sh || echo "no bootstrap"
+
+final_message: "div:ide drill VM {{role}} for drill {{drill_id}} ready after $UPTIME seconds"
