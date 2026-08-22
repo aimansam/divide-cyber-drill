@@ -135,6 +135,19 @@ def pytest_collection_modifyitems(config, items):
 
 @pytest.fixture
 def client() -> TestClient:
+    # Reset cached DB engine + sessionmaker so each test sees the
+    # SQLite (or live PG) URL set by the db_setup fixture rather than
+    # whatever URL a previous test left cached. Without this,
+    # test_readyz_returns_503_when_db_unreachable poisons the engine
+    # for all subsequent tests.
+    from app.db import session as session_module
+    from app.services import db as db_module
+    from app.core.config import get_settings
+
+    get_settings.cache_clear()
+    db_module._engine = None
+    session_module._session_maker = None
+
     from app.main import app
 
     return TestClient(app)

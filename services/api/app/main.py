@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app import __version__
 from app.core.config import settings
 from app.core.logging import configure_logging
+from app.observability.middleware import PrometheusMiddleware
 from app.routers import drills, health, proxmox, scenarios
 from app.services.scenario_sync import sync_files
 
@@ -76,6 +77,10 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    # Metrics middleware installed LAST (outermost) so it sees the
+    # final status code after CORS and other middleware have run.
+    app.add_middleware(PrometheusMiddleware)
 
     app.include_router(health.router, prefix="", tags=["health"])
     app.include_router(scenarios.router, prefix="/api/v1/scenarios", tags=["scenarios"])

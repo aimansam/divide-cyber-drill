@@ -1,10 +1,11 @@
-"""Liveness and readiness endpoints."""
+"""Liveness, readiness, and metrics endpoints."""
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Response
 from pydantic import BaseModel
 
 from app import __version__
+from app.observability import render_latest
 
 router = APIRouter()
 
@@ -54,3 +55,19 @@ async def readyz() -> ReadinessResponse:
 
     status = "ok" if all(v == "ok" for v in checks.values()) else "degraded"
     return ReadinessResponse(status=status, checks=checks)
+
+
+@router.get(
+    "/metrics",
+    summary="Prometheus metrics",
+    response_class=Response,
+)
+async def metrics() -> Response:
+    """Prometheus exposition format. Scrape with /metrics every 15s.
+
+    No auth — the assumption is the API is reachable only via the
+    internal Docker network or behind Traefik with basic auth. If you
+    expose /metrics publicly, add an ACL on the route.
+    """
+    body, content_type = render_latest()
+    return Response(content=body, media_type=content_type)

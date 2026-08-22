@@ -16,8 +16,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import models as db_models
-from app.db.models import RunStatus
 from app.db.session import get_session
+from app.observability import record_cancel
 from app.runners.runner import Runner, RunnerError, RunRequest, build_runner
 
 router = APIRouter()
@@ -141,14 +141,19 @@ async def cancel_drill(
         # can react sensibly (re-fetch vs display toast).
         msg = str(exc)
         if "not found" in msg:
+            record_cancel(result="not_found")
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=msg,
             ) from exc
+        record_cancel(result="already_terminal")
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=msg,
         ) from exc
+    except Exception:  # noqa: BLE001
+        record_cancel(result="error")
+        raise
     return {
         "run_id": run.id,
         "status": run.status.value,

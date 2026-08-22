@@ -28,6 +28,7 @@ RUN pip install --upgrade pip hatchling && \
     "jsonschema>=4.18,<5" \
     "structlog>=24.4.0" \
     "tenacity>=9.0.0" \
+    "prometheus-client>=0.21.0" \
     "psycopg2-binary>=2.9.9"
 
 # --- runtime stage ---
@@ -47,7 +48,7 @@ COPY --from=builder /wheels /wheels
 RUN pip install --no-index --find-links=/wheels \
     fastapi uvicorn pydantic pydantic-settings \
     sqlalchemy asyncpg alembic redis httpx proxmoxer requests pyyaml \
-    jsonschema structlog tenacity psycopg2-binary \
+    jsonschema structlog tenacity prometheus-client psycopg2-binary \
     && rm -rf /wheels /root/.cache
 
 COPY services/api/app ./app

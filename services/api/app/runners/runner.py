@@ -30,7 +30,22 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import models
 from app.db.models import AssetStatus, AuditAction, RunStatus
+from app.observability import (
+    inc_run_started,
+    inc_run_terminal,
+    record_adapter_call,
+    record_cancel,
+)
 from app.runners.adapter import CloneSpec, ProxmoxAdapter
+
+
+def _adapter_label(adapter: ProxmoxAdapter) -> str:
+    """``real`` or ``mock`` — used as a Prometheus label so we can graph
+    live vs test traffic without distinguishing class names."""
+    cls = type(adapter).__name__
+    if cls == "RealProxmoxAdapter":
+        return "real"
+    return "mock"
 
 
 @dataclass(frozen=True)
@@ -122,6 +137,7 @@ class Runner:
         run.status = RunStatus.RUNNING
         run.started_at = datetime.now(timezone.utc)
         await session.flush()
+        inc_run_started(adapter=_adapter_label(self._adapter))
 
         # 3. Clone + start each asset. On error, mark run FAILED and tear
         #    down whatever was already created.
@@ -149,6 +165,7 @@ class Runner:
                 asset.status = AssetStatus.FAILED
                 asset.error = str(exc)
                 await self._best_effort_teardown(cloned_so_far)
+                inc_run_terminal(outcome="failed", adapter=_adapter_label(self._adapter))
                 await self._audit(
                     session,
                     action=AuditAction.RUN_FAILED,
@@ -164,6 +181,7 @@ class Runner:
         run.status = RunStatus.SUCCEEDED
         run.ended_at = datetime.now(timezone.utc)
         await session.flush()
+        inc_run_terminal(outcome="succeeded", adapter=_adapter_label(self._adapter))
         await self._audit(
             session,
             action=AuditAction.RUN_COMPLETED,
@@ -262,6 +280,7 @@ class Runner:
 
         run.status = RunStatus.SUCCEEDED
         run.ended_at = datetime.now(timezone.utc)
+        inc_run_terminal(outcome="succeeded", adapter=_adapter_label(self._adapter))
         await self._audit(
             session,
             action=AuditAction.RUN_CANCELLED,
@@ -324,6 +343,8 @@ class Runner:
         run.status = RunStatus.CANCELLED
         run.ended_at = datetime.now(timezone.utc)
         run.error = reason
+        inc_run_terminal(outcome="cancelled", adapter=_adapter_label(self._adapter))
+        record_cancel(result="ok")
         await self._audit(
             session,
             action=AuditAction.RUN_CANCELLED,

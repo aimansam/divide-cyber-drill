@@ -2,7 +2,7 @@
 
 ## Design & Architecture Plan
 
-> **Status:** Phase 0 — Foundations **DONE**. Stages 2, 2.5, 2.7, 3, 4, 5, 6, 7 **DONE**.
+> **Status:** Phase 0 — Foundations **DONE**. Stages 2, 2.5, 2.7, 3, 4, 5, 6, 7, 8 **DONE**.
 > PVE auth unblocked (PROXMOX_USER fix + PVE 9 GET /cluster/nextid).
 > First live drill is one `pveum acl` away.
 > **Target platform:** Proxmox VE (main host).
@@ -350,7 +350,17 @@ On drill completion, report-builder extracts IOCs (IPs, domains, URLs, hashes) f
 - 9 new tests (6 runner cancel paths + 3 router cancel paths).
 - Tests: 131 → 140 (+9). Live verified: `POST /drills/1/cancel` returns 409 for already-terminal runs, 404 for missing.
 
-**Phase 1 — One-VM drill end-to-end** (after Stage 7)
+**Stage 8 — Prometheus observability** ✅
+- `app/observability/__init__.py` — registry + named counters/gauges/histograms. Module-level `_zero_init()` pre-creates label combinations so `/metrics` is non-empty from first scrape (avoids Prometheus `rate()` returning NaN).
+- `app/observability/middleware.py` — `PrometheusMiddleware` records `divide_http_requests_total{method,route,status}` and `divide_http_request_latency_seconds{method,route}` on every request. Skips `/metrics` itself. Handles FastAPI's quirk where `@router.get("", ...)` yields `route.path == ""` (normalized to `/`).
+- `GET /metrics` endpoint returns Prometheus 0.0.4 exposition format (`text/plain; version=1.0.0`).
+- Hooked metrics into Runner: `inc_run_started` on every `start_run`; `inc_run_terminal` on `SUCCEEDED`/`FAILED`/`CANCELLED`; `record_cancel(result=ok|not_found|already_terminal|error)` in router.
+- Pre-existing test ordering flake fixed in `tests/conftest.py::client` fixture (resets `_engine`, `_session_maker`, and `get_settings.cache_clear()`).
+- `prometheus-client>=0.21.0` added to `pyproject.toml` and `Dockerfile`.
+- 9 new tests. Tests: 140 → 149.
+- Live verified: `GET /metrics` returns 12 metric families, cancel counters populate correctly.
+
+**Phase 1 — One-VM drill end-to-end** (after Stage 8)
 - Single Ubuntu drill VM (vsftpd 2.3.4) — happy path with real PVE
 - Templates: `tpl-ubuntu-2204` + Kali template
 - Portal: list scenarios, start drill, see console, see artifact (PCAP), stop drill
