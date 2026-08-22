@@ -331,3 +331,48 @@ def _sessionmaker():
     from app.db.session import get_sessionmaker
 
     return get_sessionmaker()
+
+
+def _default_adapter() -> ProxmoxAdapter:
+    """Pick the right adapter based on env.
+
+    - If `PROXMOX_HOST` + `PROXMOX_TOKEN_ID` + `PROXMOX_TOKEN_SECRET` are
+      all set, return a `RealProxmoxAdapter` against the live cluster.
+    - Otherwise return `MockProxmoxAdapter` so dev/test/CLI keep working
+      without a PVE token.
+
+    This is the single decision point that swaps mock <-> real; the rest of
+    the runner doesn't know which is in use.
+    """
+    from app.core.config import settings
+    from app.runners.mock_adapter import MockProxmoxAdapter
+    from app.runners.real_adapter import RealProxmoxAdapter
+
+    p = settings.proxmox
+    host = (p.host or "").strip()
+    token_id = (p.token_id or "").strip()
+    has_secret = p.token_secret is not None and bool(
+        p.token_secret.get_secret_value()
+    )
+    if host and token_id and has_secret:
+        try:
+            return RealProxmoxAdapter.from_settings(p)
+        except Exception:  # noqa: BLE001
+            # Bad config: fall back to mock so the API still boots, but log.
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "PROXMOX_* env present but invalid; using MockProxmoxAdapter",
+                exc_info=True,
+            )
+    return MockProxmoxAdapter()
+
+
+def build_runner() -> Runner:
+    """Build a `Runner` with the default adapter selection.
+
+    Convenience factory used by FastAPI dependency injection and the CLI
+    smoke tool. Pass `Runner(adapter=...)` explicitly in tests so the
+    mock stays in your control.
+    """
+    return Runner(adapter=_default_adapter())

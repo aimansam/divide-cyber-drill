@@ -141,6 +141,19 @@ curl -s http://localhost:8000/api/v1/proxmox/health
 # {"status":"ok","version":"8.x.y","release":"...","repoid":"...","host":"https://..."}
 ```
 
+### Runner adapter (Stage 5)
+
+The runner uses an internal `ProxmoxAdapter` interface with two implementations:
+
+- `MockProxmoxAdapter` — in-memory fake used by tests and when `PROXMOX_*` env
+  vars are missing. Default in dev / CI.
+- `RealProxmoxAdapter` — wraps `proxmoxer.ProxmoxAPI` to talk to your live
+  PVE (clone / start / stop / destroy). Selected automatically by
+  `build_runner()` once `PROXMOX_HOST` + `PROXMOX_TOKEN_ID` +
+  `PROXMOX_TOKEN_SECRET` are all set.
+
+No code change is needed to flip mock ↔ real — set the env vars and restart.
+
 ## Development
 
 ```bash

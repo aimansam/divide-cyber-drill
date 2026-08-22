@@ -118,3 +118,28 @@ When we add write endpoints (clone/start/stop/delete VMs):
 
 This way the token can write VMs but cannot manage storage pools, users, or
 cluster config.
+
+## 7. Runner adapter selection (Stage 5)
+
+`RealProxmoxAdapter` is shipped in `services/api/app/runners/real_adapter.py`
+and the runner factory (`build_runner()` in `services/api/app/runners/runner.py`)
+automatically picks it when all of the following are true:
+
+- `PROXMOX_HOST` is non-empty
+- `PROXMOX_TOKEN_ID` is non-empty
+- `PROXMOX_TOKEN_SECRET` is non-empty
+
+If any are missing, the factory returns `MockProxmoxAdapter` so dev / CI
+keep working without PVE creds.
+
+There is **no code change needed to flip mock → real**: once your token
+authenticates, restart the stack and the next `POST /api/v1/drills` will
+clone real VMs.
+
+If config looks set but the factory still returns the mock (and you see
+"PROXMOX_* env present but invalid" in logs), inspect the values:
+
+```bash
+docker compose -f deploy/docker-compose.yml --env-file deploy/.env run --rm api \
+    python -c "from app.core.config import settings; print(repr(settings.proxmox))"
+```
