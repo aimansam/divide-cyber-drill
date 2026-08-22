@@ -167,3 +167,46 @@ If config looks set but the factory still returns the mock (and you see
 docker compose -f deploy/docker-compose.yml --env-file deploy/.env run --rm api \
     python -c "from app.core.config import settings; print(repr(settings.proxmox))"
 ```
+
+## 8. Promote for write operations (Stage 6+)
+
+Read-only endpoints (Stage 2) work with `PVEAuditor`. Write operations
+(clone, start, stop, destroy) need a stronger role. Run on the PVE host:
+
+```bash
+# Add PVEVMAdmin for the divide user at the /v2/vm path.
+pveum acl modify /v2/vm --userid divide@pve@pam --role PVEVMAdmin
+
+# Or, for a broader token (also lets the control plane manage storage
+# pools + cluster config), grant PVEAdmin at /:
+pveum acl modify / --userid divide@pve@pam --role PVEAdmin
+```
+
+Verify:
+
+```bash
+pveum acl list /
+# Expect an entry: path=/v2/vm ugid=divide@pve@pam roleid=PVEVMAdmin
+```
+
+The `RealProxmoxAdapter` and `tools/upload_cloudinit_template.py` both
+surface `403 Permission check failed` errors with a copy-pasteable
+`pveum acl modify ...` hint when this is missing.
+
+Once the role is granted:
+
+```bash
+# 1. Bootstrap a cloud-init template (Debian netinst ISO already on PVE).
+make upload-template NAME=tpl-debian-cloudinit \
+    ISO=local:iso/debian-13.4.0-amd64-netinst.iso
+
+# 2. Start the smoke drill against it.
+make live-drill SCENARIO=first-live-drill TIMEOUT=300
+```
+
+Step 1 creates a VM (`vmid` allocated by PVE), attaches the ISO as
+`ide3`, adds a cloud-init drive as `ide2`, sets `template=1`. Boot it
+once via the PVE GUI to install Debian + `qemu-guest-agent`, then run
+the script again with `--convert-only <vmid>` to flip an already-existing
+VM to a template (or rebuild via `make upload-template` if it wasn't
+created with `--convert-only` from the start).

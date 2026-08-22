@@ -2,9 +2,9 @@
 
 ## Design & Architecture Plan
 
-> **Status:** Phase 0 — Foundations **DONE**. Stages 2, 2.5, 2.7, 3, 4, 5 **DONE**.
-> RealProxmoxAdapter is shipped (code) but unverified against live PVE pending
-> token fix.
+> **Status:** Phase 0 — Foundations **DONE**. Stages 2, 2.5, 2.7, 3, 4, 5, 6 **DONE**.
+> PVE auth unblocked (PROXMOX_USER fix + PVE 9 GET /cluster/nextid).
+> First live drill is one `pveum acl` away.
 > **Target platform:** Proxmox VE (main host).
 > **Control plane runtime:** Docker Compose on a dedicated VM/LXC.
 > **Repo root:** `/DATA/Storage/docker/divide-cyber-drill`
@@ -325,14 +325,24 @@ On drill completion, report-builder extracts IOCs (IPs, domains, URLs, hashes) f
 - Mapping: list_nodes / find_template / allocate_vmid / clone_vm / start_vm / stop_vm / destroy_vm / get_vm_state — all against the live PVE REST endpoints
 - `from_settings(cls, p)` classmethod pulls auth from `app.core.config.ProxmoxSettings`
 - `destroy_vm` is idempotent on 404 (PVE "no such VM" → swallowed so teardown can re-run safely)
-- Errors from proxmoxer wrapped as `ProxmoxAPIError`; timeouts surface as `ProxmoxAPIError` (never `asyncio.TimeoutError` to the runner)
+- Errors from proxmoxer wrapped as `ProxmoxAPIError`; timeouts surface as `ProxmoxAPIError` (never `asyncio.TimeoutError` to the runner); 403s get a clear PVEVMAdmin ACL hint
 - `app/runners/runner.py` `_default_adapter()` + `build_runner()` factory: env-gated real ↔ mock swap, no code change needed to flip
 - `app/runners/__init__.py` re-exports both adapters, factory, and dataclasses for ergonomic imports
 - Live-PG test infra: `pytest.mark.live_pg` marker + `DIVIDE_TEST_LIVE_PG` env var; `make test-live-pg` target; opt-in CI job (`live-pg-tests`) with Postgres service container
-- 33 real_adapter tests (mocked proxmoxer, no live PVE required) + 3 live_pg plumbing tests
-- Tests: 89 → 124 passing (+35). Default run still SQLite + mock; live mode is opt-in
+- 34 real_adapter tests (mocked proxmoxer, no live PVE required) + 3 live_pg plumbing tests
+- Tests: 89 → 125 passing (+36). Default run still SQLite + mock; live mode is opt-in
 
-**Phase 1 — One-VM drill end-to-end** (after Stage 5)
+**Stage 6 — First-live-drill bootstrap** ✅
+- `tools/upload_cloudinit_template.py` — connects to PVE via proxmoxer, creates a VM with scsi0 + cloudinit drive + install ISO, marks `template=1`. Idempotent on `--name` (existing template short-circuits with exit 0). `--convert-only VMID` flips an existing VM to a template.
+- `tools/live_drill.py` — POSTs `/api/v1/drills` for a named scenario, polls `/api/v1/drills` every 2s until terminal, prints final state. `--list-only` mode for inspection.
+- `examples/scenarios/first-live-drill.scenario.yaml` — single Debian cloud-init VM using template `tpl-debian-cloudinit`. Schema-valid, minimal. Designed to be the first end-to-end live drill.
+- `RealProxmoxAdapter._call` now augments 403 errors with an ACL hint ("token needs PVEVMAdmin on /v2/vm; see PROXMOX-SETUP.md §6").
+- Makefile targets: `make upload-template NAME=... ISO=...` and `make live-drill SCENARIO=... TIMEOUT=...`.
+- 6 new tests for live_drill JSON-shape tolerance + terminal-state detection.
+- Tests: 125 → 131 (+6).
+- **Status:** ready. Final gate is the user granting PVEVMAdmin on `/v2/vm` for `divide@pve@pam` from PVE, then running `make upload-template` + `make live-drill`.
+
+**Phase 1 — One-VM drill end-to-end** (after Stage 6)
 - Single Ubuntu drill VM (vsftpd 2.3.4) — happy path with real PVE
 - Templates: `tpl-ubuntu-2204` + Kali template
 - Portal: list scenarios, start drill, see console, see artifact (PCAP), stop drill
