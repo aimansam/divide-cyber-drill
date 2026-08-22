@@ -1,0 +1,32 @@
+# div:ide Prometheus scrape configuration.
+#
+# Scrapes the API's /metrics endpoint every 15s. Prometheus itself is
+# only exposed on localhost:9090 — same dev-friendly pattern as the
+# MinIO console on :9001.
+#
+# In production you'd add an Alertmanager + retention tuning. For now
+# 15d retention is more than enough for drill telemetry.
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    monitor: "divide-cyber-drill"
+
+scrape_configs:
+  - job_name: divide-api
+    metrics_path: /metrics
+    static_configs:
+      # The api service is on the divide-net bridge. Docker's embedded
+      # DNS resolves 'api' to its container IP. Don't use 'localhost'
+      # — Prometheus runs in its own container.
+      - targets:
+          - api:8000
+        labels:
+          service: divide-api
+          env: dev
+
+  - job_name: prometheus
+    static_configs:
+      - targets:
+          - localhost:9090

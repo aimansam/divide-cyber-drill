@@ -142,11 +142,77 @@ services:
       - traefik-letsencrypt:/letsencrypt
     networks: [divide-net]
 
+  # --- observability -----------------------------------------------------
+  #
+  # Prometheus scrapes the api's /metrics endpoint every 15s.
+  # Grafana reads from Prometheus and serves the starter dashboard
+  # defined in deploy/grafana/dashboards/.
+  #
+  # Both are exposed on localhost only (same dev pattern as the
+  # MinIO console on :9001). In production, hide them behind the
+  # divide-net bridge + put an authenticating reverse proxy in front.
+
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    container_name: divide-prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=15d"
+      - "--web.console.libraries=/usr/share/prometheus/console_libraries"
+      - "--web.console.templates=/usr/share/prometheus/consoles"
+      - "--web.enable-lifecycle"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    depends_on:
+      api:
+        condition: service_healthy
+    networks: [divide-net]
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9090/-/ready"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    container_name: divide-grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-divide}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+      GF_INSTALL_PLUGINS: ""
+      # Provisioning is mounted from the repo (read-only). Datasource +
+      # dashboard providers pick up new panels without a restart.
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    networks: [divide-net]
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
 volumes:
   postgres-data:
   redis-data:
   minio-data:
   traefik-letsencrypt:
+  prometheus-data:
+  grafana-data:
 
 networks:
   divide-net:

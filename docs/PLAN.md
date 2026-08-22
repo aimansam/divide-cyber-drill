@@ -2,7 +2,7 @@
 
 ## Design & Architecture Plan
 
-> **Status:** Phase 0 — Foundations **DONE**. Stages 2, 2.5, 2.7, 3, 4, 5, 6, 7, 8 **DONE**.
+> **Status:** Phase 0 — Foundations **DONE**. Stages 2, 2.5, 2.7, 3, 4, 5, 6, 7, 8, 9 **DONE**.
 > PVE auth unblocked (PROXMOX_USER fix + PVE 9 GET /cluster/nextid).
 > First live drill is one `pveum acl` away.
 > **Target platform:** Proxmox VE (main host).
@@ -360,7 +360,19 @@ On drill completion, report-builder extracts IOCs (IPs, domains, URLs, hashes) f
 - 9 new tests. Tests: 140 → 149.
 - Live verified: `GET /metrics` returns 12 metric families, cancel counters populate correctly.
 
-**Phase 1 — One-VM drill end-to-end** (after Stage 8)
+**Stage 9 — Prometheus + Grafana wiring** ✅
+- `prometheus` service added to `deploy/docker-compose.yml` (port 9090). Scrapes `api:8000/metrics` every 15s. 15-day retention.
+- `grafana` service added (port 3000). Default login `admin` / `divide`. Mounts provisioning + dashboards from the repo (read-only).
+- `deploy/prometheus/prometheus.yml` — single scrape job for the API.
+- `deploy/grafana/provisioning/datasources/prometheus.yml` — registers Prometheus as the default datasource.
+- `deploy/grafana/provisioning/dashboards/divide.yml` — auto-loads the starter dashboard from `/var/lib/grafana/dashboards`.
+- `deploy/grafana/dashboards/divide-drill-platform.json` — 6-panel starter dashboard: run rate by outcome, active runs, cancel requests donut, HTTP latency percentiles (p50/p95/p99), HTTP request rate by status, latency heatmap.
+- `docs/OBSERVABILITY.md` — full operator doc: metric reference, useful PromQL queries, how to add panels, production hardening notes.
+- `GRAFANA_ADMIN_USER` / `GRAFANA_ADMIN_PASSWORD` added to `.env.example`.
+- 5 deploy-config tests (parse prometheus.yml, datasource provisioning, dashboard provider, dashboard JSON, compose service mentions).
+- Tests: 149 → 154 (+5). Live verified: Prometheus reports `divide-api` as `up`, Grafana loads the dashboard, datasource proxy returns query results.
+
+**Phase 1 — One-VM drill end-to-end** (after Stage 9)
 - Single Ubuntu drill VM (vsftpd 2.3.4) — happy path with real PVE
 - Templates: `tpl-ubuntu-2204` + Kali template
 - Portal: list scenarios, start drill, see console, see artifact (PCAP), stop drill
