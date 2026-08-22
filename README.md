@@ -86,19 +86,34 @@ Once `make up` succeeds, open:
 
 ## Proxmox integration
 
-**Not yet wired up.** Phase 0 is intentionally Proxmox-free so the Docker stack can
-boot without any external dependencies. When you're ready to add Proxmox:
+**Read-only integration is live in Stage 2.** div:ide can query your Proxmox
+for version, nodes, storage pools, and templates — but cannot create, modify,
+or delete anything. Token role: `PVEAuditor`.
 
-1. Create a `divide@pve` user on your PVE (read-only first: `PVEAuditor` role).
-2. Generate a token for that user (PVE → Datacenter → Users → divide@pve → Tokens).
-3. Fill in `PROXMOX_HOST`, `PROXMOX_TOKEN_ID`, `PROXMOX_TOKEN_SECRET` in `deploy/.env`.
-4. Restart: `make restart`.
-5. Validate: `curl http://localhost:8000/api/v1/proxmox/health`.
-6. Smoke test from CLI: `make proxmox-ping` (or `PROXMOX_HOST=... PROXMOX_TOKEN_ID=... PROXMOX_TOKEN_SECRET=... make proxmox-ping`).
+Setup: see [`docs/PROXMOX-SETUP.md`](docs/PROXMOX-SETUP.md).
 
-The script will print the PVE version and list of nodes, and exit 0.
+### Endpoints
 
----
+| Method | Path                                       | Returns |
+|--------|--------------------------------------------|---------|
+| GET    | `/api/v1/proxmox/health`                   | PVE version + release + repoid |
+| GET    | `/api/v1/proxmox/nodes`                    | List of cluster nodes |
+| GET    | `/api/v1/proxmox/storage`                  | List of storage pools |
+| GET    | `/api/v1/proxmox/templates?node=<name>`    | List of VM templates (all nodes by default) |
+
+### Status codes
+
+- `200` — data returned
+- `502` — PVE reachable but call failed (auth error, network blip, parse error)
+- `503` — Proxmox not configured (env vars missing)
+
+### Quick test
+
+```bash
+make restart
+curl -s http://localhost:8000/api/v1/proxmox/health
+# {"status":"ok","version":"8.x.y","release":"...","repoid":"...","host":"https://..."}
+```
 
 ## Development
 
