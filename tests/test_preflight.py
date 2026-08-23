@@ -108,26 +108,50 @@ def _grafana_ok(r):
 # --- happy path ---------------------------------------------------------
 
 
+def _ok_acl(req):
+    """Permissions response: PVEVMAdmin on / with all drill privs (default)."""
+    return httpx.Response(
+        200,
+        json={
+            "items": {
+                "/": {
+                    "VM.Allocate": 1,
+                    "VM.Clone": 1,
+                    "VM.PowerMgmt": 1,
+                    "VM.Audit": 1,
+                    "VM.Snapshot": 1,
+                    "VM.Console": 1,
+                    "VM.Backup": 1,
+                    "VM.Config.Cloudinit": 1,
+                    "VM.Config.Network": 1,
+                    "VM.Config.CPU": 1,
+                    "VM.Config.Memory": 1,
+                    "VM.Config.Disk": 1,
+                    "VM.Config.Options": 1,
+                    "VM.Config.HWType": 1,
+                    "VM.Config.CDROM": 1,
+                    "VM.Migrate": 1,
+                    "VM.Replicate": 1,
+                    "VM.GuestAgent.Audit": 1,
+                    "VM.GuestAgent.FileRead": 1,
+                    "VM.GuestAgent.FileWrite": 1,
+                    "VM.GuestAgent.FileSystemMgmt": 1,
+                    "VM.GuestAgent.Unrestricted": 1,
+                    "VM.Snapshot.Rollback": 1,
+                },
+            },
+            "total_paths": 1,
+            "write_paths": ["/"],
+        },
+    )
+
+
 def test_all_checks_pass_when_everything_is_up(monkeypatch):
     handlers = {
         "http://localhost:8000/healthz": _ok_health,
         "http://localhost:8000/api/v1/proxmox/health": _prox_ok,
         "http://localhost:8000/api/v1/proxmox/nodes": _nodes,
-        "http://localhost:8000/api/v1/proxmox/acl": lambda r: httpx.Response(
-            200,
-            json={
-                "items": [
-                    {
-                        "path": "/",
-                        "ugid": "divide@pve@pam",
-                        "roleid": "PVEVMAdmin",
-                        "type": "user",
-                        "propagate": 1,
-                    }
-                ],
-                "total": 1,
-            },
-        ),
+        "http://localhost:8000/api/v1/proxmox/permissions": _ok_acl,
         "http://localhost:8000/api/v1/proxmox/templates": lambda r: httpx.Response(
             200, json={"items": [{"name": "tpl-debian-cloudinit", "vmid": 9000}]}
         ),
@@ -147,21 +171,7 @@ def test_template_missing_prints_actionable_hint(monkeypatch, capsys):
         "http://localhost:8000/healthz": _ok_health,
         "http://localhost:8000/api/v1/proxmox/health": _prox_ok,
         "http://localhost:8000/api/v1/proxmox/nodes": _nodes,
-        "http://localhost:8000/api/v1/proxmox/acl": lambda r: httpx.Response(
-            200,
-            json={
-                "items": [
-                    {
-                        "path": "/",
-                        "ugid": "divide@pve@pam",
-                        "roleid": "PVEVMAdmin",
-                        "type": "user",
-                        "propagate": 1,
-                    }
-                ],
-                "total": 1,
-            },
-        ),
+        "http://localhost:8000/api/v1/proxmox/permissions": _ok_acl,
         "http://localhost:8000/api/v1/proxmox/templates": lambda r: httpx.Response(
             200, json={"items": []}
         ),
@@ -269,21 +279,21 @@ def test_custom_scenario_and_template_args(monkeypatch):
 # --- ACL check ------------------------------------------------------------
 
 
-def _acl_handlers(acl_response=None, acl_status=200, **kwargs):
-    """Build a handlers dict for ACL-related tests.
+def _acl_handlers(perms_response=None, perms_status=200, **kwargs):
+    """Build a handlers dict for ACL/permissions-related tests.
 
-    acl_response is the body returned by /api/v1/proxmox/acl.
-    acl_status is the HTTP status.
+    perms_response is the body returned by /api/v1/proxmox/permissions.
+    perms_status is the HTTP status.
     Any extra kwargs are added as additional handlers.
     """
-    def acl(req):
-        return httpx.Response(acl_status, json=acl_response or {})
+    def perms(req):
+        return httpx.Response(perms_status, json=perms_response or {})
 
     base = {
         "http://localhost:8000/healthz": _ok_health,
         "http://localhost:8000/api/v1/proxmox/health": _prox_ok,
         "http://localhost:8000/api/v1/proxmox/nodes": _nodes,
-        "http://localhost:8000/api/v1/proxmox/acl": acl,
+        "http://localhost:8000/api/v1/proxmox/permissions": perms,
         "http://localhost:8000/api/v1/proxmox/templates": lambda r: httpx.Response(
             200, json={"items": [{"name": "tpl-debian-cloudinit", "vmid": 9000}]}
         ),
@@ -296,104 +306,127 @@ def _acl_handlers(acl_response=None, acl_status=200, **kwargs):
     return base
 
 
-def test_acl_direct_vm_grant_passes(monkeypatch):
-    """ACL with direct /v2/vm + PVEVMAdmin → PASS."""
-    handlers = _acl_handlers(
-        acl_response={
-            "items": [
-                {
-                    "path": "/v2/vm",
-                    "ugid": "divide@pve@pam",
-                    "roleid": "PVEVMAdmin",
-                    "type": "user",
-                    "propagate": 1,
-                }
-            ],
-            "total": 1,
-        }
-    )
-    assert _run_with_handlers(handlers, monkeypatch) == 0
-
-
 def test_acl_propagated_root_grant_passes(monkeypatch):
-    """PVEVMAdmin on / with propagate=1 → PASS (inherits /v2/vm)."""
-    handlers = _acl_handlers(
-        acl_response={
-            "items": [
-                {
-                    "path": "/",
-                    "ugid": "divide@pve@pam",
-                    "roleid": "PVEVMAdmin",
-                    "type": "user",
-                    "propagate": 1,
-                }
-            ],
-            "total": 1,
-        }
-    )
+    """PVEVMAdmin on / with all drill privs present → PASS.
+
+    This mirrors the real-world PVE setup: PVEVMAdmin role granted on
+    / with propagate=1, which lists every VM.* priv under / in
+    /access/permissions.
+    """
+    handlers = _acl_handlers(perms_response={
+        "items": {
+            "/": {
+                "VM.Allocate": 1,
+                "VM.Clone": 1,
+                "VM.PowerMgmt": 1,
+            },
+        },
+        "total_paths": 1,
+        "write_paths": ["/"],
+    })
     assert _run_with_handlers(handlers, monkeypatch) == 0
 
 
-def test_acl_pveadmin_root_passes(monkeypatch):
-    """PVEAdmin on / is a superset of PVEVMAdmin → PASS."""
-    handlers = _acl_handlers(
-        acl_response={
-            "items": [
-                {
-                    "path": "/",
-                    "ugid": "divide@pve@pam",
-                    "roleid": "PVEAdmin",
-                    "type": "user",
-                    "propagate": 1,
-                }
-            ],
-            "total": 1,
-        }
-    )
+def test_acl_legacy_vms_path_also_accepted(monkeypatch):
+    """PVE 8.x lists drill privs under /vms instead of / → still PASS.
+
+    Some PVE versions list privileges under the legacy /vms path
+    rather than /. Either path covering all DRILL_PRIVS passes.
+    """
+    handlers = _acl_handlers(perms_response={
+        "items": {
+            "/": {"VM.Audit": 1},  # only audit on /, not enough on its own
+            "/vms": {
+                "VM.Allocate": 1,
+                "VM.Clone": 1,
+                "VM.PowerMgmt": 1,
+            },
+        },
+        "total_paths": 2,
+        "write_paths": ["/vms"],
+    })
+    assert _run_with_handlers(handlers, monkeypatch) == 0
+
+
+def test_acl_v2vm_path_accepted(monkeypatch):
+    """PVE 9.x with /v2/vm → PASS.
+
+    Newer PVE versions use /v2/vm in /access/permissions.
+    """
+    handlers = _acl_handlers(perms_response={
+        "items": {
+            "/v2/vm": {
+                "VM.Allocate": 1,
+                "VM.Clone": 1,
+                "VM.PowerMgmt": 1,
+            },
+        },
+        "total_paths": 1,
+        "write_paths": ["/v2/vm"],
+    })
     assert _run_with_handlers(handlers, monkeypatch) == 0
 
 
 def test_acl_only_pveauditor_fails(monkeypatch, capsys):
-    """PVEAuditor on / is read-only → ACL check FAILs with hint."""
-    handlers = _acl_handlers(
-        acl_response={
-            "items": [
-                {
-                    "path": "/",
-                    "ugid": "divide@pve@pam",
-                    "roleid": "PVEAuditor",
-                    "type": "user",
-                    "propagate": 1,
-                }
-            ],
-            "total": 1,
-        }
-    )
+    """Only read privs (PVEAuditor equivalent) → FAIL with pveum hint."""
+    handlers = _acl_handlers(perms_response={
+        "items": {
+            "/": {
+                "VM.Audit": 1,
+                "VM.Console": 1,
+            },
+        },
+        "total_paths": 1,
+        "write_paths": [],  # no write paths = no VM.Allocate/Clone/PowerMgmt
+    })
     rc = _run_with_handlers(handlers, monkeypatch)
     out = capsys.readouterr().out
     assert rc == 1
     assert "ACL grants PVEVMAdmin" in out
     assert "pveum acl modify" in out
+    assert "PVEVMAdmin" in out  # hint should mention the right role
 
 
-def test_acl_empty_response_fails_with_cache_hint(monkeypatch, capsys):
-    """Empty ACL response (stale pveproxy cache) → FAIL with restart hint."""
-    handlers = _acl_handlers(acl_response={"items": [], "total": 0})
+def test_acl_empty_response_fails_with_pveum_hint(monkeypatch, capsys):
+    """Empty permissions response (no paths) → FAIL with pveum hint."""
+    handlers = _acl_handlers(perms_response={"items": {}, "total_paths": 0, "write_paths": []})
     rc = _run_with_handlers(handlers, monkeypatch)
     out = capsys.readouterr().out
     assert rc == 1
     assert "ACL grants PVEVMAdmin" in out
-    assert "pveproxy" in out
+    assert "no drill privileges" in out
+    assert "pveum acl modify" in out
 
 
 def test_acl_502_fails_with_pveum_hint(monkeypatch, capsys):
-    """If the ACL endpoint itself errors, check should still fail cleanly."""
-    def bad_acl(req):
+    """If the permissions endpoint errors, check should still fail cleanly."""
+    def bad_perms(req):
         return httpx.Response(502, text="upstream error")
 
     handlers = _acl_handlers()
-    handlers["http://localhost:8000/api/v1/proxmox/acl"] = bad_acl
+    handlers["http://localhost:8000/api/v1/proxmox/permissions"] = bad_perms
     rc = _run_with_handlers(handlers, monkeypatch)
     out = capsys.readouterr().out
     assert rc == 1
     assert "ACL grants PVEVMAdmin" in out
+    assert "502" in out
+
+
+def test_acl_partial_coverage_lists_missing(monkeypatch, capsys):
+    """Partial drill privs → FAIL with explicit list of missing privs."""
+    handlers = _acl_handlers(perms_response={
+        "items": {
+            "/": {
+                "VM.Allocate": 1,
+                "VM.Clone": 1,
+                # VM.PowerMgmt missing on purpose
+            },
+        },
+        "total_paths": 1,
+        "write_paths": ["/"],
+    })
+    rc = _run_with_handlers(handlers, monkeypatch)
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert "VM.PowerMgmt" in out  # the missing priv is named
+    assert "pveum acl modify" in out

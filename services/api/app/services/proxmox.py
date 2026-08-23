@@ -198,8 +198,40 @@ def list_acl() -> list[dict]:
 
     Each entry is a dict with keys: ``path``, ``ugid``, ``roleid``, ``type``,
     ``propagate``.
+
+    IMPORTANT: this endpoint requires the ``Access.Audit`` privilege, which
+    is NOT part of ``PVEVMAdmin``. A token scoped to PVEVMAdmin only will
+    get an empty list back from PVE (not an error -- PVE silently returns
+    ``[]`` for principals that lack Access.Audit). For permission-checking,
+    prefer ``list_permissions()`` which every authenticated user can read
+    for themselves.
     """
     return _call("acl", lambda: get_proxmox_client().access.acl.get())
+
+
+def list_permissions() -> dict[str, dict[str, int]]:
+    """List the privileges the current token inherits, grouped by path.
+
+    Calls ``GET /access/permissions``, which every authenticated principal
+    can call (no special privilege required). The result is a mapping of
+    ``{path: {privilege: 1}}`` -- e.g.::
+
+        {
+            "/": {"VM.Allocate": 1, "VM.Clone": 1, ...},
+            "/vms": {"VM.Allocate": 1, "VM.Clone": 1, ...},
+            "/access": {...},
+            ...
+        }
+
+    A path with propagate=1 in the underlying ACL appears under the root
+    path (``/``) here, with every privilege the role grants listed. Use
+    this instead of ``list_acl()`` when you want to verify *your token*
+    has the privileges you need without exposing the full cluster ACL.
+    """
+    return _call(
+        "permissions",
+        lambda: get_proxmox_client().access.permissions.get(),
+    )
 
 
 def _int_or_none(v: Any) -> int | None:

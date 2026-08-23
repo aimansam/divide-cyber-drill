@@ -223,27 +223,42 @@ def check_template_exists(client, name, report):
         )
 
 
-# --- Roles the runner can use to clone / start / stop / destroy VMs. ---
-# PVEVMAdmin is the minimum. PVEAdmin and PVEUserAdmin are supersets.
-WRITE_ROLES = frozenset({"PVEVMAdmin", "PVEAdmin", "PVEUserAdmin"})
+# --- Privileges the runner actually needs to exercise a drill. ---
+# We check for these directly via /access/permissions instead of inferring
+# them from roles -- the token may have a custom role we don't know about,
+# but if these specific privileges are present on / with propagate=1, the
+# drill can proceed.
+DRILL_PRIVS = frozenset({"VM.Allocate", "VM.Clone", "VM.PowerMgmt"})
 
 
 def check_acl_for_writes(
     client, report, user: str = "divide@pve@pam"
 ) -> None:
-    """Confirm `user` has a write-role on `/v2/vm` (or `/` with propagate=1).
+    """Confirm the current token has drill-write privileges on /v2/vm (or /).
 
-    Without this grant, every clone/start/stop/destroy will 403 with
-    "Permission check failed". Catching it here means we fail the
-    preflight cleanly instead of discovering it mid-drill.
+    Implementation note: the previous version of this check called
+    ``GET /access/acl`` to read the cluster-wide ACL table and looked for
+    a write-role grant for the divide user. That endpoint requires
+    ``Access.Audit``, which is **not** part of ``PVEVMAdmin`` -- so a
+    correctly-scoped token (PVEVMAdmin on / with propagate=1) got an
+    empty list back and the check failed even though every drill
+    operation would have succeeded.
 
-    Caches the ACL result so we don't hit the API twice (the runner
-    tests will too).
+    The fix: use ``GET /access/permissions`` instead. Every authenticated
+    principal can read their own privileges, regardless of role scope.
+    The response is ``{path: {privilege: 1}}``; we look for the union
+    of ``DRILL_PRIVS`` (``VM.Allocate`` + ``VM.Clone`` + ``VM.PowerMgmt``)
+    on ``/`` (which covers /v2/vm via propagate=1) or on the legacy
+    ``/vms`` path.
+
+    ``user`` is kept in the signature for diagnostic clarity (so the
+    report row still says *who* we checked), but the endpoint no longer
+    takes a user filter -- the privileges returned are always for the
+    current token's owner.
     """
     try:
         r = client.get(
-            "/api/v1/proxmox/acl",
-            params={"user": user},
+            "/api/v1/proxmox/permissions",
             timeout=10.0,
         )
         if r.status_code != 200:
@@ -257,7 +272,7 @@ def check_acl_for_writes(
             )
             return
         body = r.json()
-        items = body.get("items") or []
+        perms = body.get("items") or {}
     except Exception as exc:
         report.add(
             f"ACL grants PVEVMAdmin on /v2/vm to {user}",
@@ -266,66 +281,68 @@ def check_acl_for_writes(
         )
         return
 
-    if not items:
-        report.add(
-            f"ACL grants PVEVMAdmin on /v2/vm to {user}",
-            False,
-            f"no ACL entries for {user} (empty result — cache may be stale on PVE proxy)",
-            "On PVE host: pveum acl list (expect one entry for /v2/vm). "
-            "If pveum shows entries but API returns empty, restart pveproxy: "
-            "service pveproxy restart",
-        )
-        return
-
-    # Look for a direct /v2/vm grant, OR a / grant with propagate=1 and a
-    # write role.
-    direct_vm_grant = next(
-        (
-            a
-            for a in items
-            if a.get("path") == "/v2/vm" and a.get("roleid") in WRITE_ROLES
-        ),
-        None,
-    )
-    propagated_root_grant = next(
-        (
-            a
-            for a in items
-            if a.get("path") == "/"
-            and a.get("roleid") in WRITE_ROLES
-            and int(a.get("propagate", 0)) == 1
-        ),
-        None,
+    # Look for the three drill-required privileges on / (propagated)
+    # or on /vms (legacy spelling used by some PVE versions).
+    candidate_paths = ["/", "/v2/vm", "/vms"]
+    matched_privs: dict[str, list[str]] = {}
+    for path in candidate_paths:
+        path_privs = perms.get(path) or {}
+        have = sorted(p for p in DRILL_PRIVS if p in path_privs)
+        if have:
+            matched_privs[path] = have
+    # Success if at least one of the candidate paths covers every required
+    # priv (i.e. drill can run on this token).
+    all_covered = any(
+        set(privs) >= DRILL_PRIVS for privs in matched_privs.values()
     )
 
-    if direct_vm_grant:
+    if all_covered:
+        # Pick the most informative path to show -- prefer / (propagated)
+        # because that covers the most.
+        best_path = "/"
+        if best_path not in matched_privs:
+            best_path = next(iter(matched_privs))
         report.add(
             f"ACL grants PVEVMAdmin on /v2/vm to {user}",
             True,
-            f"path={direct_vm_grant['path']} role={direct_vm_grant['roleid']} "
-            f"propagate={direct_vm_grant.get('propagate', 0)}",
+            f"path={best_path} privs={','.join(sorted(DRILL_PRIVS))} "
+            f"(via /access/permissions)",
         )
         return
 
-    if propagated_root_grant:
-        report.add(
-            f"ACL grants PVEVMAdmin on /v2/vm to {user}",
-            True,
-            f"via propagate from {propagated_root_grant['path']!r} "
-            f"(role={propagated_root_grant['roleid']}, propagate=1)",
+    # No path covers all drill privs. Build a helpful report.
+    if not matched_privs:
+        summary = (
+            f"no drill privileges found for {user}. /access/permissions "
+            f"returned {len(perms)} path(s) but none of {sorted(DRILL_PRIVS)} "
+            f"appeared on /, /v2/vm, or /vms."
         )
-        return
+        fix = (
+            "On PVE host: pveum acl modify divide@pve@pam "
+            "--role PVEVMAdmin --path / --propagate=1 "
+            "(adds VM.Allocate + VM.Clone + VM.PowerMgmt across the cluster)."
+        )
+    else:
+        partial = ", ".join(
+            f"{p}: {','.join(prs)}"
+            for p, prs in sorted(matched_privs.items())
+        )
+        missing = sorted(DRILL_PRIVS - set().union(*matched_privs.values()))
+        summary = (
+            f"partial coverage for {user}: {partial}; missing {missing}. "
+            f"A role like PVEVMAdmin grants all three; a narrower role "
+            f"may grant one or two but not all."
+        )
+        fix = (
+            "On PVE host: pveum acl modify divide@pve@pam "
+            "--role PVEVMAdmin --path / --propagate=1"
+        )
 
-    # We have ACL entries but none grant write on /v2/vm.
-    summary = ", ".join(
-        f"{a.get('path')}/{a.get('roleid')}" for a in items[:5]
-    )
     report.add(
         f"ACL grants PVEVMAdmin on /v2/vm to {user}",
         False,
-        f"no write-role grant for {user}. Entries: [{summary}]",
-        "On PVE host: pveum acl modify /v2/vm --users divide@pve@pam "
-        "--roles PVEVMAdmin",
+        summary,
+        fix,
     )
 
 

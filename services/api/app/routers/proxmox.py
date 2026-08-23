@@ -21,6 +21,7 @@ from app.services.proxmox import (
     get_version,
     list_acl,
     list_nodes,
+    list_permissions,
     list_storage,
     list_templates,
 )
@@ -133,3 +134,45 @@ async def list_proxmox_acl(
     if user:
         items = [a for a in items if a.get("ugid") == user]
     return {"items": items, "total": len(items), "user_filter": user}
+
+
+@router.get(
+    "/permissions",
+    summary="List privileges the current Proxmox token inherits, by path",
+)
+async def get_proxmox_permissions() -> dict[str, Any]:
+    """Return the privileges the current token has, grouped by path.
+
+    Calls ``GET /access/permissions`` on PVE, which every authenticated
+    principal can read (no special privilege required). The response
+    shape is::
+
+        {
+            "items": {
+                "/":        {"VM.Allocate": 1, "VM.Clone": 1, ...},
+                "/vms":     {...},
+                "/access":  {...},
+                ...
+            },
+            "total_paths": N,
+            "write_paths": ["/", "/vms", ...]   # paths with at least one VM.* perm
+        }
+
+    Use this to verify a token has the privileges needed for a drill
+    (e.g. ``VM.Clone`` + ``VM.Allocate`` + ``VM.PowerMgmt`` on ``/``
+    with propagate=1) without exposing the cluster-wide ACL table.
+    """
+    if not _is_configured():
+        raise HTTPException(status_code=503, detail="Proxmox not configured")
+    try:
+        items = list_permissions()
+    except ProxmoxNotConfiguredError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    except ProxmoxAPIError as exc:
+        raise HTTPException(status_code=502, detail=f"Proxmox unreachable: {exc}") from exc
+    write_paths = sorted(
+        path
+        for path, privs in items.items()
+        if any(p.startswith("VM.") for p in privs)
+    )
+    return {"items": items, "total_paths": len(items), "write_paths": write_paths}
