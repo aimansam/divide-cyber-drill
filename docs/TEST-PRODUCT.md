@@ -4,19 +4,22 @@ A graded definition of "ready for someone to try it". Each level is a
 strict superset of the previous — you can't ship L2 without L1 green,
 and L3 without L2.
 
-> **Where we are today:** stack is healthy, 276 tests passing
-> (was 275, +1 regression test for the upload-qcow2 fix). `make preflight`
-> is 9/9 after the `/access/permissions` ACL fix **and** the
-> `tpl-debian-cloudinit` template was created (run #11 completed with
-> status `succeeded`).
+> **Where we are today:** stack is healthy, 276 tests passing.
+> `make preflight` is 9/9 after the `/access/permissions` ACL fix
+> **and** the `tpl-debian-cloudinit` template was created (run #11
+> completed with status `succeeded`).
 >
 > L1: **9 ✅ / 0 ❌ / 0 ⚠️** as of run #11. Items 1.3–1.9 all flipped
 > from blocked → done in one operator-side upload + one ACL grant.
 >
-> L2 has auth wired (`X-Divide-Token` HMAC tokens, `divide issue-token`
-> CLI, `started_by`/`actor` attribution), but **the rate limit, drill
-> timeout, telemetry-sink, after-action JSON work hasn't started yet**.
-> L2 requires ~3 h more before it's shippable.
+> L2: **12 ✅ / 6 ❌ / 0 ⚠️** as of L1 closure. Closed this session:
+> 2.1 (test UI), 2.3 / 2.4 / 2.5 (token middleware + CLI +
+> attribution), 2.13 / 2.14 (make verify + CI), 2.16 (setup wizard),
+> 2.17 / 2.18 (drill-detail endpoints). The six remaining items
+> (2.7 rate-limit, 2.8 drill timeout, 2.9 audit-token attribution,
+> 2.10 CORS, 2.11 MinIO telemetry, 2.12 after-action JSON) are queued
+> in the [Next plan](#next-plan-post-l1-ordered) below — total ~3.5 h,
+> no PVE required.
 >
 > **Setup wizard:** `/portal/` is live (commit `496efd1`). Operators can
 > stand up a fresh PVE-backed deployment from a browser — no SSH into
@@ -185,46 +188,103 @@ the SOC team sees the drill in Wazuh — without you being involved.
 
 ## Next plan (post-L1, ordered)
 
-> **L1 is closed** (run #11 succeeded, ledger 9/9 ✅). Items #1–#4 below
-> shipped during the L1-closure round. Only #5 remains, and it's now
-> optional — the wizard's `pveum` copy-paste block already walks an
-> operator through the one-time `PVEDatastoreAdmin` grant without
-> needing wizard automation.
+> **L1 is closed** (run #11 succeeded, ledger 9/9 ✅). Items #1–#4 from
+> the previous round shipped. #5 is now optional — the wizard's `pveum`
+> copy-paste block already walks operators through the one-time
+> `PVEDatastoreAdmin` grant.
+>
+> **L2 status:** 12/18 ✅ (closed: 2.1, 2.3, 2.4, 2.5, 2.13, 2.14, 2.16,
+> 2.17, 2.18). Six items remaining. The next plan below targets them in
+> priority order — total ~3.5 h, no PVE required for any of them. Once
+> they ship: L2 ledger 17/18 ✅ (2.15 flips automatically when L1 stays
+> green), tag `v0.2.0-l2`.
 
-| # | Item | Status | Notes |
-|---|---|---|---|
-| 1 | **Cancel-path smoke tests** | ✅ done (`tests/test_cancel_smoke.py`) | flipped L1 1.10, 1.11, 1.12 |
-| 2 | **`make verify` alias + CI wiring** | ✅ done (commit `be36033`) | flipped L2 2.13, 2.14 |
-| 3 | **`/portal/test/` smoke in CI** | ✅ done (`tests/test_portal_smoke.py`, 6 tests) | static-analysis regex on the HTML; no browser needed |
-| 4 | **Token middleware + `divide issue-token` CLI** | ✅ done (`app/core/auth.py`, `tools/issue_token.py`) | flipped L2 2.3, 2.4, 2.5 |
-| 5 | **SSH-key wizard step** (Bucket E) so wizard flips `PVEDatastoreAdmin` itself | ❌ **next** (~1 h, optional) | removes the last remaining human action in a fresh deploy; the wizard's copy-paste block is the current stand-in |
+| # | Item | Effort | Files | What it flips |
+|---|---|---|---|---|
+| 1 | **Audit `actor` from token subject** (`Runner._audit()` reads `req.started_by`; needs the same path on `cancel_run`, `stop_run`, and the asset events) | 30 min | `services/api/app/runners/runner.py`, `services/api/tests/test_runner.py` | L2 2.9 ✅ |
+| 2 | **CORS allowlist from `DIVIDE_DOMAIN`** | 20 min | `services/api/app/core/config.py`, `services/api/app/main.py`, `.env.example`, `services/api/tests/test_main.py` | L2 2.10 ✅ |
+| 3 | **Rate-limit `POST /api/v1/drills` (5 in-flight per token)** via Redis-backed token bucket (Redis is already a dep — no new infra) | 45 min | `services/api/app/routers/drills.py`, `services/api/app/services/rate_limit.py` (new), tests | L2 2.7 ✅ |
+| 4 | **Drill auto-timeout (30 min → auto-cancel)** as a watchdog task on `Runner.start_run` (calls `_audit(action=run.timeout)` + `cancel_run(reason="auto-timeout", actor="watchdog")`) | 45 min | `services/api/app/runners/runner.py`, tests | L2 2.8 ✅ |
+| 5 | **MinIO telemetry sink wire-up** (read `telemetry.sinks[]` from scenario, push audit events to `divide-artifacts` bucket on drill terminal) — only `minio` + `stdout` sinks for now; `wazuh`/`misp` are L3 | 1 h | `services/api/app/services/telemetry.py` (new), `services/api/app/runners/runner.py`, tests with `moto` mock | L2 2.11 ✅ |
+| 6 | **After-action JSON report at `GET /api/v1/drills/{id}/report`** (runs row + assets + audit log + scores; downloadable for offline analysis) | 45 min | `services/api/app/routers/drills.py`, `services/api/tests/test_drills.py` | L2 2.12 ✅ |
+| 7 | **Cloud-init user-data applied to `tpl-debian-cloudinit`** so cloned VMs get an SSH key + hostname out of the box. Currently the runner can clone+boot+stop but can't ssh-into-guest, blocking real drill content. | 1 h | `services/api/app/services/admin.py` (`_configure_vm` step), `services/api/tests/test_admin_service.py`, `tests/test_live_drill.py` | unblocks L3 3.8 (telemetry from inside the guest) |
+| 8 | **SSH-key wizard step (Bucket E)** — wizard flips `PVEDatastoreAdmin` itself via `asyncssh` when `DIVIDE_PVE_SSH_KEY` env is set | 1 h | `services/api/app/services/admin.py`, `services/portal/index.html`, tests with `asyncssh` mock | removes last SSH hop in fresh deploys |
+
+**Total: ~6 h.** After this: full L1 + L2 ✅, 0/13 L3 (L3 is
+separate scope; not in this round).
 
 ### Where the L2 work sits
 
-The remaining ~2.5 h to ship L2 is **not** in this table — it's in
-[§L2](#l2--trusted-colleague-lan-demo). Items 2.7 (rate-limit),
-2.8 (drill timeout), 2.11 (MinIO telemetry), 2.12 (after-action JSON)
-are queued next. Once those four ship: L2 ledger 15/18 ✅,
-tag `v0.2.0-l2`.
+The remaining six L2 items are pinned to specific table rows above
+(2.7 → #3, 2.8 → #4, 2.9 → #1, 2.10 → #2, 2.11 → #5, 2.12 → #6).
+Items 2.6 (Grafana auth) and 2.2 (Traefik route) are intentionally
+deferred — see "Why we are NOT doing these next" below.
+
+### Why this order
+
+1. **#1 first** because it's a 30-min, low-risk edit — the router
+   already passes `started_by`; `_audit()` just needs to thread it
+   to every call site. Closes 2.9 cleanly.
+2. **#2 second** because it's the only config-flag item and the only
+   blocker for "open the API from a non-localhost browser" beyond
+   Traefik work.
+3. **#3 third** because rate-limiting matters before we expose the
+   API to a second user. Uses Redis (already in the stack) — no new
+   infra.
+4. **#4 fourth** because the watchdog runs in the same process as
+   the runner, so its lifecycle is tied to start_run. Building it on
+   top of #1's audit-attribution work is cleaner.
+5. **#5 fifth** because telemetry needs the audit events 2.9 produces
+   (otherwise we'd hardcode "system" actors on every event).
+6. **#6 sixth** because the after-action report is the user-visible
+   payoff — once telemetry is landing in MinIO, the report endpoint
+   can pull both sources together.
+7. **#7 seventh** because it's the gate to L3 (real drill content
+   inside the cloned VM). It's also the natural pairing with #5: if
+   we're shipping SSH keys for telemetry, we might as well prove the
+   round trip.
+8. **#8 last** because it's the only item that touches PVE beyond
+   HTTP and the only one that needs the `DIVIDE_PVE_SSH_KEY` env var.
+   Worth doing once L2 is closed and we're ready to call the wizard
+   "fully autonomous".
 
 ### Why we are NOT doing these next
 
-- More PVE integration (multi-node, SDN zones, etc.) — that's L3
-  scope per Phase 2 of PLAN.md.
-- Real authn/authz (Keycloak/OIDC) — L3 (criteria 3.1–3.5).
-- Resilient queue workers — Phase 3+ (criteria 3.8–3.13).
-- PDF after-action reports — L2 item 2.12, rolled into the L2 block
-  above (slots naturally with the MinIO work).
+- **L2 2.2 (Traefik route)** — the compose stack includes Traefik
+  but the API isn't routed through it. Not blocking L2 closure
+  (curl works on `localhost:8000`), but worth wiring for the LAN
+  demo. ~30 min once Traefik labels are decided. Tracked
+  separately.
+- **L2 2.6 (Grafana basic-auth with anonymous viewer)** — current
+  state is admin-only (`admin` / `divide`). Anonymous view
+  requires a `grafana.ini` overlay (env vars alone can't enable
+  it). ~30 min. Cosmetic for L2; gating for L3.
+- **Multi-node PVE clusters** — Phase 2 / L3 scope (criterion 3.7).
+  ~weeks.
+- **Real authn/authz (Keycloak/OIDC)** — L3 (criteria 3.1–3.5).
+  Single-tenant mode + the current HMAC token is enough for the L2
+  use case (LAN demo, 2-5 trusted colleagues).
+- **Resilient queue workers** — Phase 3+ (criteria 3.8–3.13). The
+  current synchronous runner is fine for the drill volumes L2
+  anticipates (~tens of runs/day, not thousands).
+- **PDF after-action reports** — that's L3 criterion 3.6, not part
+  of the L2 set despite the JSON report at 2.12. Different code
+  path (HTML→PDF render, layout, fonts). Roll it into Phase 3.
+- **wazuh / misp sinks** — L3 (criterion 3.7). Schema already has
+  them; only `minio` + `stdout` ship at L2.
 
 ### Tracking these in the L1/L2 ledger
 
-- #1 → L1 1.10, 1.11, 1.12.
-- #2 → L2 2.13, 2.14.
-- #4 → L2 2.3, 2.4, 2.5 (2.9 partially — full audit attribution
-  needs the runner's `_audit()` hook updated to read the token subject).
-- #5 → not on the L1/L2 list as a single criterion, but enables
-  "1.2 succeeds via wizard" so the operator never has to SSH for
-  PVE perms again.
+- #1 → L2 2.9.
+- #2 → L2 2.10.
+- #3 → L2 2.7.
+- #4 → L2 2.8.
+- #5 → L2 2.11.
+- #6 → L2 2.12.
+- #7 → not on L1/L2, but unblocks L3 3.8 (guest telemetry).
+- #8 → removes the last remaining `pveum` SSH hop in a fresh deploy
+  (currently the wizard's copy-paste block handles it; this just
+  automates that step).
 
 When one ships, update the relevant row in §L1 / §L2 + add a row to
 the update log at the bottom of this file.
