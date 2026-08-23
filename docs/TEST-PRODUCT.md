@@ -4,8 +4,8 @@ A graded definition of "ready for someone to try it". Each level is a
 strict superset of the previous — you can't ship L2 without L1 green,
 and L3 without L2.
 
-> **Where we are today:** stack is healthy, 236 tests passing
-> (was 190, +26 this session). `make preflight` is now 8/9 after the
+> **Where we are today:** stack is healthy, 243 tests passing
+> (was 190, +29 this session). `make preflight` is now 8/9 after the
 > /access/permissions ACL fix (commit `ab0ab58`) — the only remaining
 > failure is the missing cloud-init template, which is PVE-side work.
 > L1: 4 ✅ / 8 ❌ / 3 ⚠️ (7 of the 8 ❌ cascade from a successful
@@ -14,6 +14,11 @@ and L3 without L2.
 > **Setup wizard:** `/portal/` is live (commit `496efd1`). Operators can
 > stand up a fresh PVE-backed deployment from a browser — no SSH into
 > PVE required except for one `pveum` grant. See `docs/SETUP-UI.md`.
+>
+> **Test UI:** `/portal/test/` is live (commit `cd0ccb5`). Browser tool
+> with 7 cards exposing every control-plane endpoint as a click button
+> (scenarios, drills, cancel, assets, audit, metrics, Proxmox). See
+> `docs/TEST-UI.md`.
 
 ---
 
@@ -42,7 +47,7 @@ shows the run, teardown works, audit log is populated.
 | 1.11 | `make live-cancel CANCEL_AFTER=10` exits with the run in `cancelled` state | tool output | ⚠️  code exists, never executed |
 | 1.12 | Drill can be cancelled by Prometheus watcher (the `watch_drill.py` path) | `make watch-drill OUTCOME=cancelled` | ⚠️  code exists, never executed |
 | 1.13 | Operator runbook exists and is accurate | `docs/LIVE-DRILL-RUNBOOK.md` | ✅ written |
-| 1.14 | All previously-shipped stages have passing tests | `make test` | ✅ 236 passing |
+| 1.14 | All previously-shipped stages have passing tests | `make test` | ✅ 243 passing |
 | 1.15 | `make lint` is clean | `make lint` | ✅ clean |
 
 ### L1 Time-to-ship estimate
@@ -190,6 +195,7 @@ levels.
 | 2026-08-23 | fix(verify-drill): label-aware metric parsing (commit `2e4abf7`). Tests 190 → 216 (+10). verify-drill now distinguishes `divide_runs_total{outcome=..., adapter="real"}` instead of collapsing labels — regression check is no longer blind to failed-drill increments. Doc-relative figures (this file) updated. |
 | 2026-08-23 | fix(preflight): use `/access/permissions` for ACL check (commit `ab0ab58`). PVE's `/access/acl` requires `Access.Audit` which is NOT part of `PVEVMAdmin` — correctly-scoped tokens were getting an empty list and the check failed. Switched to `/access/permissions` which every authenticated principal can read. preflight 7/9 → 8/9 (only the template remains). |
 | 2026-08-23 | feat(setup): web wizard at `/portal/` (commit `496efd1`). Operators can stand up a fresh PVE-backed deployment from a browser — no SSH into PVE required except for one `pveum` grant. 4 steps: probe perms → grant perms → upload cloud image → run first drill. Tests 216 → 236 (+20). |
+| 2026-08-23 | feat(ui): operator test UI at `/portal/test/` (commit `cd0ccb5`). 7 cards expose every control-plane endpoint as click buttons: scenarios, drills (start/refresh/cancel), assets, audit log, metrics, Proxmox state. Added `GET /api/v1/drills/{id}` and `GET /api/v1/drills/{id}/audit` read-only endpoints (the list endpoint only returned summary rows). Tests 236 → 243 (+7). |
 
 
 
