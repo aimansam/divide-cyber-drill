@@ -4,8 +4,8 @@ A graded definition of "ready for someone to try it". Each level is a
 strict superset of the previous — you can't ship L2 without L1 green,
 and L3 without L2.
 
-> **Where we are today:** stack is healthy, 250 tests passing
-> (was 190, +60 this session). `make preflight` is now 8/9 after the
+> **Where we are today:** stack is healthy, 256 tests passing
+> (was 190, +66 this session). `make preflight` is now 8/9 after the
 > /access/permissions ACL fix (commit `ab0ab58`) — the only remaining
 > failure is the missing cloud-init template, which is PVE-side work.
 > L1: 7 ✅ / 5 ❌ / 3 ⚠️ (4 of the 5 ❌ cascade from a successful
@@ -14,11 +14,9 @@ and L3 without L2.
 > without any PVE work.
 >
 > `make verify` is the new aggregate gate (lint + test + preflight +
-> smoke) — runs the same checks locally that CI runs in
-> `.github/workflows/ci.yml`. The orchestration of `tools/verify_drill.py`
-> is covered by `tests/test_verify_drill.py::test_main_returns_*` so
-> it gets exercised on every CI run without needing a live drill in the
-> DB.
+> smoke). `tests/test_portal_smoke.py` adds 6 static-analysis tests
+> that catch the failure mode "JS references an endpoint that doesn't
+> exist on the API" without needing a browser in CI.
 >
 > **Setup wizard:** `/portal/` is live (commit `496efd1`). Operators can
 > stand up a fresh PVE-backed deployment from a browser — no SSH into
@@ -56,7 +54,7 @@ shows the run, teardown works, audit log is populated.
 | 1.11 | `make live-cancel CANCEL_AFTER=10` exits with the run in `cancelled` state | tool output | ✅ covered by `tests/test_cancel_smoke.py::test_live_cancel_marks_run_cancelled_with_reason` |
 | 1.12 | Drill can be cancelled by Prometheus watcher (the `watch_drill.py` path) | `make watch-drill OUTCOME=cancelled` | ✅ covered by `tests/test_cancel_smoke.py::test_watch_drill_cancel_after_path_triggers_cancel_endpoint` + `tests/test_watch_drill.py::test_cancel_after_sends_cancel_request` |
 | 1.13 | Operator runbook exists and is accurate | `docs/LIVE-DRILL-RUNBOOK.md` | ✅ written |
-| 1.14 | All previously-shipped stages have passing tests | `make test` | ✅ 250 passing |
+| 1.14 | All previously-shipped stages have passing tests | `make test` | ✅ 256 passing |
 | 1.15 | `make lint` is clean | `make lint` | ✅ clean |
 
 ### L1 Time-to-ship estimate
@@ -194,7 +192,7 @@ Each is small enough to ship in one sitting.
 |---|---|---|---|---|---|
 | 1 | **Cancel-path smoke tests** for `live-cancel` + `watch-drill` via `MockProxmoxAdapter` | 30 min | `tests/test_cancel_smoke.py` (new) | No | L1 1.10, 1.11, 1.12 → ✅ |
 | 2 | **`make verify` alias** + CI wiring | 30 min | `Makefile`, `.github/workflows/ci.yml` | No | L2 2.13 ✅, 2.14 ✅ |
-| 3 | **`/portal/test/` Playwright smoke** (catches UI regressions in CI) | 30 min | `tests/test_portal_smoke.py` | No | regression guard |
+| 3 | **`/portal/test/` smoke in CI** (catches UI regressions; static analysis on the HTML+JS, no browser needed) | ✅ done ([`tests/test_portal_smoke.py`](../../tests/test_portal_smoke.py), 6 tests; covers both `/portal/` and `/portal/test/`). Why not Playwright: would add ~150 MB CI image and 30+ s per run for the failure mode (renamed endpoint → portal silent 404) which a 6-test regex static check catches in <100 ms with zero infra deps. If click-through tests become valuable later, add Playwright then. |
 | 4 | **Token middleware + `divide issue-token` CLI** | 1.5 h | `app/core/auth.py`, `tools/issue_token.py` | No | L2 2.3, 2.4, 2.5, 2.9 → ✅ |
 | 5 | **SSH-key wizard step** (Bucket E) so wizard flips `PVEStorageAdmin` itself | 1 h | `app/services/admin.py`, `portal/index.html` | **One SSH key setup** | full autonomy for fresh deploys |
 
