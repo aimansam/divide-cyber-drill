@@ -4,9 +4,12 @@ A graded definition of "ready for someone to try it". Each level is a
 strict superset of the previous — you can't ship L2 without L1 green,
 and L3 without L2.
 
-> **Where we are today:** stack is healthy, 190 tests passing,
-> `make preflight` is 7/9 (one stale pveproxy cache + one missing
-> cloud-init template). Both are PVE-side work, not code work.
+> **Where we are today:** stack is healthy, 216 tests passing
+> (was 190, +16 this session, +10 from the verify-drill label-aware fix).
+> `make preflight` is still 7/9 (one stale pveproxy cache + one missing
+> cloud-init template) — both are PVE-side work, not code work.
+> L1: 4 ✅ / 8 ❌ / 3 ⚠️ (4 of the 8 ❌ are blocked on a real drill
+> being executed).
 
 ---
 
@@ -35,7 +38,7 @@ shows the run, teardown works, audit log is populated.
 | 1.11 | `make live-cancel CANCEL_AFTER=10` exits with the run in `cancelled` state | tool output | ⚠️  code exists, never executed |
 | 1.12 | Drill can be cancelled by Prometheus watcher (the `watch_drill.py` path) | `make watch-drill OUTCOME=cancelled` | ⚠️  code exists, never executed |
 | 1.13 | Operator runbook exists and is accurate | `docs/LIVE-DRILL-RUNBOOK.md` | ✅ written |
-| 1.14 | All previously-shipped stages have passing tests | `make test` | ✅ 190 passing |
+| 1.14 | All previously-shipped stages have passing tests | `make test` | ✅ 216 passing |
 | 1.15 | `make lint` is clean | `make lint` | ✅ clean |
 
 ### L1 Time-to-ship estimate
@@ -180,6 +183,7 @@ levels.
 | Date | Change |
 |---|---|
 | 2026-08-23 | Initial draft. L1 7/15 green, blocked on 2 PVE steps. |
+| 2026-08-23 | fix(verify-drill): label-aware metric parsing (commit `2e4abf7`). Tests 190 → 216 (+10). verify-drill now distinguishes `divide_runs_total{outcome=..., adapter="real"}` instead of collapsing labels — regression check is no longer blind to failed-drill increments. Doc-relative figures (this file) updated. |
 
 
 
