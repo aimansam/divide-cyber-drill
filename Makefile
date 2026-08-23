@@ -65,6 +65,16 @@ smoke: ## Curl /healthz and /readyz on the local API.
 	@echo "== /api/v1/scenarios =="
 	@curl -fsS http://localhost:8000/api/v1/scenarios | $(PYTHON) -m json.tool
 
+verify: ## Aggregate gate: lint + test + preflight + smoke. Use before push / in CI.
+	@echo "=== make verify = 1/4 lint ==="
+	$(MAKE) lint
+	@echo "=== make verify = 2/4 test ==="
+	$(MAKE) test
+	@echo "=== make verify = 3/4 preflight (PVE health; non-fatal if PVE unreachable) ==="
+	-$(MAKE) preflight || { echo "preflight reported NOT READY (see output above) -- continuing"; }
+	@echo "=== make verify = 4/4 smoke ==="
+	$(MAKE) smoke
+
 proxmox-ping: ## Run the Proxmox smoke test (requires env vars).
 	cd $(API_DIR) && $(PYTHON) scripts/proxmox-smoke.py
 

@@ -10,6 +10,8 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 
+import httpx
+
 
 def _load_module():
     spec = importlib.util.spec_from_file_location(
@@ -375,3 +377,224 @@ def test_fetch_run_returns_none_when_id_absent():
     assert mod._fetch_run(client, 99) is None
 
 
+
+
+# ---------- orchestration (CI smoke) ----------
+
+
+def _patch_httpx_for_verify_drill(monkeypatch, mod, handlers):
+    """Install a MockTransport so verify_drill.main() hits fake endpoints.
+
+    Why patch mod.httpx.Client and not httpx.Client: the verify_drill
+    module does ``import httpx`` at top level, which binds httpx.Client
+    in its own namespace. Patching httpx.Client globally would only
+    affect other importers that look up the attribute lazily; the
+    module-level reference already points to the unpatched class.
+    """
+
+    def _route(request):
+        for prefix, handler in handlers.items():
+            if str(request.url).startswith(prefix):
+                return handler(request)
+        return httpx.Response(404, json={"detail": "no handler"})
+
+    transport = httpx.MockTransport(_route)
+    original_client = httpx.Client
+
+    def patched_client(*args, **kwargs):
+        kwargs["transport"] = transport
+        return original_client(*args, **kwargs)
+
+    # Patch both the global and the module-level reference -- belt
+    # and braces. The module-level patch matters because _client()
+    # binds httpx.Client(...).
+    monkeypatch.setattr(httpx, "Client", patched_client)
+    monkeypatch.setattr(mod.httpx, "Client", patched_client)
+    # Sanity check the patch took.
+    assert mod.httpx.Client is patched_client, (
+        "monkeypatch.setattr on mod.httpx.Client didn't stick -- "
+        "verify_drill.py likely uses a different reference. Inspect the "
+        "test file for newer fixes."
+    )
+
+
+def test_main_returns_zero_for_successful_run(monkeypatch):
+    """Full orchestration: main() drives the 4 checks against mocked HTTP
+    and returns 0 when the run is in the expected state.
+    """
+    import sys
+
+    import httpx
+
+    def drill_get(req):
+        # _fetch_run hits /api/v1/drills (list endpoint) regardless of
+        # whether --run-id was passed; the script filters the list by
+        # run_id. So we return a list containing the matching run.
+        url = str(req.url)
+        if url.endswith("/audit"):
+            return audit_get(req)
+        return httpx.Response(
+            200,
+            json={
+                "items": [
+                    {
+                        "run_id": 5,
+                        "scenario_id": 3,
+                        "status": "succeeded",
+                        "started_at": "2026-08-22T18:00:00+00:00",
+                        "ended_at": "2026-08-22T18:02:00+00:00",
+                        "duration_sec": 120,
+                        "score_blue": None,
+                        "score_red": None,
+                    },
+                ],
+                "total": 1,
+            },
+        )
+
+    def audit_get(req):
+        return httpx.Response(
+            200,
+            json={
+                "items": [
+                    {
+                        "id": 1,
+                        "at": "2026-08-22T18:00:00+00:00",
+                        "action": "run.started",
+                        "actor": "smoke",
+                        "scenario_id": 3,
+                        "asset_id": None,
+                        "details": {},
+                    },
+                    {
+                        "id": 2,
+                        "at": "2026-08-22T18:02:00+00:00",
+                        "action": "run.completed",
+                        "actor": "smoke",
+                        "scenario_id": 3,
+                        "asset_id": None,
+                        "details": {},
+                    },
+                ],
+                "total": 2,
+            },
+        )
+
+    def metrics_get(req):
+        # Synthetic Prometheus exposition matching what the live API
+        # would expose after a successful real-PVE run.
+        lines = [
+            "# HELP divide_runs_total Number of drill runs by terminal outcome.",
+            "# TYPE divide_runs_total counter",
+            'divide_runs_total{adapter="real",outcome="started"} 1.0',
+            'divide_runs_total{adapter="real",outcome="succeeded"} 1.0',
+            'divide_runs_total{adapter="real",outcome="failed"} 0.0',
+            "# HELP divide_runs_active Drill runs currently in a non-terminal state.",
+            "# TYPE divide_runs_active gauge",
+            'divide_runs_active{adapter="real"} 0.0',
+        ]
+        return httpx.Response(200, text="\n".join(lines) + "\n")
+
+    def healthz_get(req):
+        # main() probes /healthz as a startup smoke check; without
+        # this, even a perfectly-mocked run returns rc=2.
+        return httpx.Response(200, json={"status": "ok"})
+
+    handlers = {
+        "http://localhost:8000/healthz": healthz_get,
+        # /api/v1/drills and /api/v1/drills/5 must both map to drill_get:
+        # main() does an unfiltered /api/v1/drills list call first to find
+        # the latest run when --run-id isn't pinned, then _fetch_run does
+        # the same. With --run-id 5 the script should still hit /drills
+        # first. Match exact then prefix.
+        "http://localhost:8000/api/v1/drills/5/audit": audit_get,
+        "http://localhost:8000/api/v1/drills/5": drill_get,
+        "http://localhost:8000/api/v1/drills": drill_get,
+        "http://localhost:8000/metrics": metrics_get,
+    }
+    mod = _load_module()
+    _patch_httpx_for_verify_drill(monkeypatch, mod, handlers)
+
+    monkeypatch.setattr(
+        sys, "argv",
+        ["verify_drill.py", "--run-id", "5", "--expect", "succeeded",
+         "--json", "--no-destroyed-check"],
+    )
+    # Suppress only stdout; let stderr through so we can see the route
+    # traces.
+    import io
+    buf_out = io.StringIO()
+    monkeypatch.setattr(sys, "stdout", buf_out)
+    rc = mod.main()
+    assert rc == 0, (
+        f"main() returned {rc}; expected 0 for a happy-path run.\n"
+        f"Captured stdout:\n{buf_out.getvalue()[:1500]}"
+    )
+
+
+def test_main_returns_one_for_failed_run(monkeypatch):
+    """Failed run with RUN_EXPECT=failed exits 1 (the check fails)."""
+    import io
+    import sys
+
+    import httpx
+
+    def drill_get(req):
+        url = str(req.url)
+        if url.endswith("/audit"):
+            return audit_get(req)
+        return httpx.Response(
+            200,
+            json={
+                "items": [
+                    {
+                        "run_id": 6,
+                        "scenario_id": 3,
+                        "status": "failed",
+                        "started_at": "2026-08-22T18:00:00+00:00",
+                        "ended_at": "2026-08-22T18:00:30+00:00",
+                        "duration_sec": 30,
+                        "score_blue": None,
+                        "score_red": None,
+                    },
+                ],
+                "total": 1,
+            },
+        )
+
+    def audit_get(req):
+        return httpx.Response(200, json={"items": [], "total": 0})
+
+    def metrics_get(req):
+        return httpx.Response(
+            200,
+            text=(
+                'divide_runs_total{adapter="real",outcome="started"} 1.0\n'
+                'divide_runs_total{adapter="real",outcome="failed"} 1.0\n'
+                'divide_runs_active{adapter="real"} 0.0\n'
+            ),
+        )
+
+    def healthz_get(req):
+        return httpx.Response(200, json={"status": "ok"})
+
+    handlers = {
+        "http://localhost:8000/healthz": healthz_get,
+        "http://localhost:8000/api/v1/drills/6/audit": audit_get,
+        "http://localhost:8000/api/v1/drills/6": drill_get,
+        "http://localhost:8000/api/v1/drills": drill_get,
+        "http://localhost:8000/metrics": metrics_get,
+    }
+    mod = _load_module()
+    _patch_httpx_for_verify_drill(monkeypatch, mod, handlers)
+
+    mod = _load_module()
+    monkeypatch.setattr(
+        sys, "argv",
+        ["verify_drill.py", "--run-id", "6", "--expect", "succeeded",
+         "--no-destroyed-check"],
+    )
+    monkeypatch.setattr(sys, "stdout", io.StringIO())
+    monkeypatch.setattr(sys, "stderr", io.StringIO())
+    rc = mod.main()
+    assert rc == 1, f"main() returned {rc}; expected 1 for a run that didn't match --expect"

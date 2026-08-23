@@ -62,7 +62,7 @@ divide-cyber-drill/
 │   │   │   ├── routers/         # drills, scenarios, proxmox, admin (setup wizard), health
 │   │   │   ├── services/        # proxmox client, runner adapters, admin (template builder), scen_sync
 │   │   │   └── main.py          # mounts /portal and /portal/test/ via StaticFiles
-│   │   ├── tests/               # pytest (243 tests)
+│   │   ├── tests/               # pytest (250 tests)
 │   │   ├── scripts/             # proxmox-smoke.py
 │   │   └── Dockerfile
 │   └── portal/                  # static HTML+JS pages served by the API
@@ -133,7 +133,7 @@ The full runbook is at [`docs/LIVE-DRILL-RUNBOOK.md`](docs/LIVE-DRILL-RUNBOOK.md
 
 ### Current state
 
-- **248 tests passing**, **`make preflight` 8/9** (template missing).
+- **250 tests passing**, **`make preflight` 8/9** (template missing).
 - L1 ledger: **4 ✅ / 8 ❌ / 3 ⚠️**. See
   [`docs/TEST-PRODUCT.md`](docs/TEST-PRODUCT.md) for the per-criterion
   progress and the next-5-items plan.
