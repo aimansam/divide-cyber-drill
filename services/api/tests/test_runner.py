@@ -127,6 +127,45 @@ async def test_start_run_records_audit_log(session: AsyncSession) -> None:
 
 
 @pytest.mark.asyncio
+async def test_start_run_asset_spawned_audit_records_actor(session: AsyncSession) -> None:
+    """Regression for L2 2.9: every ASSET_SPAWNED audit row must carry the
+    token subject (i.e. Run.started_by) — not NULL. The router already
+    threads ``started_by`` through RunRequest -> Run.started_by; the
+    runner's _spawn_asset() used to omit the actor on its _audit call,
+    so all per-asset lifecycle events were unattributed.
+    """
+    s = _scenario_with("attributed", [_asset("red_attacker"), _asset("dc")])
+    session.add(s)
+    await session.commit()
+
+    adapter = MockProxmoxAdapter()
+    adapter.seed_template("tpl-x", 9000)
+    runner = Runner(adapter=adapter)
+
+    result = await runner.start_run(
+        RunRequest(scenario_id=s.id, started_by="alice"), session
+    )
+    assert result.status == RunStatus.SUCCEEDED
+
+    spawn_audits = (
+        await session.execute(
+            select(models.AuditLog).where(
+                models.AuditLog.run_id == result.run_id,
+                models.AuditLog.action == AuditAction.ASSET_SPAWNED,
+            )
+        )
+    ).scalars().all()
+    # Two assets -> two spawn events; both must be attributed.
+    assert len(spawn_audits) == 2
+    for entry in spawn_audits:
+        assert entry.actor == "alice", (
+            f"ASSET_SPAWNED audit row missing actor: {entry.actor!r}"
+        )
+        assert entry.asset_id is not None
+        assert entry.run_id == result.run_id
+
+
+@pytest.mark.asyncio
 async def test_mock_adapter_records_calls(session: AsyncSession) -> None:
     s = _scenario_with("calls", [_asset("red_attacker"), _asset("dc")])
     session.add(s)

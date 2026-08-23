@@ -12,14 +12,14 @@ and L3 without L2.
 > L1: **9 ✅ / 0 ❌ / 0 ⚠️** as of run #11. Items 1.3–1.9 all flipped
 > from blocked → done in one operator-side upload + one ACL grant.
 >
-> L2: **12 ✅ / 6 ❌ / 0 ⚠️** as of L1 closure. Closed this session:
+> L2: **13 ✅ / 5 ❌ / 0 ⚠️** as of L1 closure. Closed this session:
 > 2.1 (test UI), 2.3 / 2.4 / 2.5 (token middleware + CLI +
-> attribution), 2.13 / 2.14 (make verify + CI), 2.16 (setup wizard),
-> 2.17 / 2.18 (drill-detail endpoints). The six remaining items
-> (2.7 rate-limit, 2.8 drill timeout, 2.9 audit-token attribution,
-> 2.10 CORS, 2.11 MinIO telemetry, 2.12 after-action JSON) are queued
-> in the [Next plan](#next-plan-post-l1-ordered) below — total ~3.5 h,
-> no PVE required.
+> attribution), 2.9 (per-asset audit actor), 2.13 / 2.14 (make verify
+> + CI), 2.16 (setup wizard), 2.17 / 2.18 (drill-detail endpoints).
+> The five remaining items (2.7 rate-limit, 2.8 drill timeout, 2.10
+> CORS, 2.11 MinIO telemetry, 2.12 after-action JSON) are queued in
+> the [Next plan](#next-plan-post-l1-ordered) below — total ~3 h, no
+> PVE required.
 >
 > **Setup wizard:** `/portal/` is live (commit `496efd1`). Operators can
 > stand up a fresh PVE-backed deployment from a browser — no SSH into
@@ -103,7 +103,7 @@ contains the damage (rate limits, sane defaults, no shared secrets).
 | 2.6  | Grafana has basic-auth (anonymous viewer, admin via env-var creds) | ⚠️  admin only |
 | 2.7  | Rate limit on `POST /api/v1/drills` (max 5 in-flight per token) | ❌ no limit |
 | 2.8  | Drill that runs > 30 min auto-cancels (prevents forgotten VMs racking up CPU bills) | ❌ no timeout |
-| 2.9  | Audit log writes include the token subject (not just IP) | ⚠️  now requires handler-side work: router has the token, but the audit hook in `Runner._audit()` doesn't read it. Out of scope for the current item. |
+| 2.9  | Audit log writes include the token subject (not just IP) | ✅ done ([`services/api/app/runners/runner.py`](../../services/api/app/runners/runner.py) — `_spawn_asset()` now accepts and threads `actor=req.started_by` into the `ASSET_SPAWNED` audit row; `RUN_*` rows already carried it. All five audit call sites in the runner now attribute per-event. Commits: pending) |
 | 2.10 | CORS allowed origins constrained to `DIVIDE_DOMAIN` | ⚠️  no CORS configured |
 | 2.11 | Telemetry sinks wire-up: drill completion uploads audit log + asset metadata to MinIO `divide-artifacts` bucket | ❌ spec field is read, ignored |
 | 2.12 | After-action JSON report downloadable from `GET /api/v1/drills/{id}/report` | ❌ endpoint doesn't exist |
@@ -125,7 +125,7 @@ Big chunks:
 - 1 h — telemetry sinks (MinIO upload at run completion)
 - 30 min — `make verify` alias + wire into CI
 - 30 min — CORS + rate limit + other hardening
-- Already shipped (no work): 2.1 (test UI), 2.16 (wizard), 2.17, 2.18 (API endpoints)
+- Already shipped (no work): 2.1 (test UI), 2.16 (wizard), 2.17, 2.18 (API endpoints) + 2.3 / 2.4 / 2.5 (token middleware + CLI + attribution) + 2.9 (per-asset audit actor) + 2.13 / 2.14 (make verify + CI).
 
 ### L2 Done definition
 
@@ -321,6 +321,7 @@ levels.
 
 | Date | Change |
 |---|---|
+| 2026-08-24 | feat(audit): per-asset audit `actor` from token subject (L2 2.9 ✅). `Runner._spawn_asset()` now accepts and threads `actor=req.started_by` into the `ASSET_SPAWNED` audit row; the `RUN_*` rows already carried it. All five audit call sites in the runner now attribute per-event (start, failed, completed, cancel×2, asset-spawned). New regression test `test_start_run_asset_spawned_audit_records_actor` asserts both asset rows in a 2-asset scenario land with `actor == "alice"` — fails before the fix (`actor is None`), passes after. Tests 276 → 277 (+1). Closes the gap the token-middleware round (commit `90f7eaa`) couldn't fully bridge. **L2 ledger: 13 ✅ / 5 ❌ / 0 ⚠️**. |
 | 2026-08-23 | Initial draft. L1 7/15 green, blocked on 2 PVE steps. |
 | 2026-08-23 | fix(verify-drill): label-aware metric parsing (commit `2e4abf7`). Tests 190 → 216 (+10). verify-drill now distinguishes `divide_runs_total{outcome=..., adapter="real"}` instead of collapsing labels — regression check is no longer blind to failed-drill increments. Doc-relative figures (this file) updated. |
 | 2026-08-23 | fix(preflight): use `/access/permissions` for ACL check (commit `ab0ab58`). PVE's `/access/acl` requires `Access.Audit` which is NOT part of `PVEVMAdmin` — correctly-scoped tokens were getting an empty list and the check failed. Switched to `/access/permissions` which every authenticated principal can read. preflight 7/9 → 8/9 (only the template remains). |

@@ -156,6 +156,7 @@ class Runner:
                     asset=asset,
                     asset_spec=asset_spec,
                     node=node,
+                    actor=req.started_by,
                 )
                 cloned_so_far.append(asset)
             except Exception as exc:
@@ -364,6 +365,7 @@ class Runner:
         asset: models.Asset,
         asset_spec: dict,
         node: str,
+        actor: str | None = None,
     ) -> None:
         template_vmid = await self._adapter.find_template(asset.template)
         if template_vmid is None:
@@ -410,6 +412,7 @@ class Runner:
         await self._audit(
             session,
             action=AuditAction.ASSET_SPAWNED,
+            actor=actor,
             run_id=asset.run_id,
             asset_id=asset.id,
             details={"role": asset.role, "vmid": result.vmid, "ip": state.ip},
