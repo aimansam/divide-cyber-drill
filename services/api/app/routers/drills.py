@@ -16,6 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.core.auth import current_token
 from app.db import models as db_models
 from app.db.session import get_session
 from app.observability import record_cancel
@@ -40,6 +41,7 @@ def _get_runner() -> Runner:
 async def start_drill(
     body: dict,
     session: AsyncSession = Depends(get_session),
+    token=Depends(current_token),
 ) -> dict:
     scenario_id = body.get("scenario_id")
     if not isinstance(scenario_id, int):
@@ -47,6 +49,11 @@ async def start_drill(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="body must include integer `scenario_id`",
         )
+
+    # ``started_by`` attribution: prefer the token subject (proves
+    # which user ran the drill in audit logs); fall back to the
+    # body's ``started_by`` for legacy callers + smoke scripts.
+    started_by = token.sub if token else body.get("started_by")
 
     # Pre-check: scenario must exist and not be archived. The runner
     # would raise RunnerError too, but doing the check here lets us
@@ -70,7 +77,7 @@ async def start_drill(
     runner = _get_runner()
     try:
         result = await runner.start_run(
-            RunRequest(scenario_id=scenario_id, started_by=body.get("started_by")),
+            RunRequest(scenario_id=scenario_id, started_by=started_by),
             session,
         )
     except RunnerError as exc:
@@ -115,6 +122,7 @@ async def cancel_drill(
     run_id: int,
     body: dict | None = None,
     session: AsyncSession = Depends(get_session),
+    token=Depends(current_token),
 ) -> dict:
     """Abort a run mid-flight.
 
@@ -122,6 +130,7 @@ async def cancel_drill(
       * ``reason`` (str, default "user-requested") — recorded on the
         Run row + audit entry. Surfaces in the UI as the cancel cause.
       * ``actor`` (str, optional) — who cancelled (e.g. "trainee-7").
+        Defaults to the token subject if a token was supplied.
 
     Status codes:
       * 200 — run cancelled; assets best-effort torn down.
@@ -131,7 +140,7 @@ async def cancel_drill(
     """
     body = body or {}
     reason = body.get("reason") or "user-requested"
-    actor = body.get("actor")
+    actor = body.get("actor") or (token.sub if token else None)
     runner = _get_runner()
     try:
         run = await runner.cancel_run(

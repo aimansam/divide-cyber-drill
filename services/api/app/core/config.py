@@ -58,6 +58,13 @@ class Settings(BaseSettings):
     sync_on_startup: bool = True
     extra_scenarios_dirs: list[str] = Field(default_factory=list)
 
+    # HMAC secret for the X-Divide-Token auth. If unset, dev falls
+    # back to a derivation of PROXMOX_TOKEN_SECRET (with a warning);
+    # prod should always set this explicitly. The fallback is so a
+    # freshly cloned repo can run `divide issue-token` without an
+    # extra env var.
+    divide_token_secret: SecretStr | None = None
+
     # Setup wizard portal (vanilla HTML+JS). Mounted at /portal/ by main.py.
     # Defaults to the bundled copy; override for development to point at
     # the live source tree.

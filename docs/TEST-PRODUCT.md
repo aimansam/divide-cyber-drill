@@ -4,19 +4,17 @@ A graded definition of "ready for someone to try it". Each level is a
 strict superset of the previous — you can't ship L2 without L1 green,
 and L3 without L2.
 
-> **Where we are today:** stack is healthy, 256 tests passing
-> (was 190, +66 this session). `make preflight` is now 8/9 after the
+> **Where we are today:** stack is healthy, 275 tests passing
+> (was 190, +85 this session). `make preflight` is now 8/9 after the
 > /access/permissions ACL fix (commit `ab0ab58`) — the only remaining
 > failure is the missing cloud-init template, which is PVE-side work.
 > L1: 7 ✅ / 5 ❌ / 3 ⚠️ (4 of the 5 ❌ cascade from a successful
-> live-drill; 1.2 is the missing template). The cancel-path coverage
-> (`tests/test_cancel_smoke.py`) flipped L1 1.10, 1.11, 1.12 from ⚠️ to ✅
-> without any PVE work.
+> live-drill; 1.2 is the missing template).
 >
-> `make verify` is the new aggregate gate (lint + test + preflight +
-> smoke). `tests/test_portal_smoke.py` adds 6 static-analysis tests
-> that catch the failure mode "JS references an endpoint that doesn't
-> exist on the API" without needing a browser in CI.
+> L2 has auth wired (`X-Divide-Token` HMAC tokens, `divide issue-token`
+> CLI, `started_by`/`actor` attribution), but **the rate limit, drill
+> timeout, telemetry-sink, after-action JSON work hasn't started yet**.
+> L2 requires ~3 h more before it's shippable.
 >
 > **Setup wizard:** `/portal/` is live (commit `496efd1`). Operators can
 > stand up a fresh PVE-backed deployment from a browser — no SSH into
@@ -54,7 +52,7 @@ shows the run, teardown works, audit log is populated.
 | 1.11 | `make live-cancel CANCEL_AFTER=10` exits with the run in `cancelled` state | tool output | ✅ covered by `tests/test_cancel_smoke.py::test_live_cancel_marks_run_cancelled_with_reason` |
 | 1.12 | Drill can be cancelled by Prometheus watcher (the `watch_drill.py` path) | `make watch-drill OUTCOME=cancelled` | ✅ covered by `tests/test_cancel_smoke.py::test_watch_drill_cancel_after_path_triggers_cancel_endpoint` + `tests/test_watch_drill.py::test_cancel_after_sends_cancel_request` |
 | 1.13 | Operator runbook exists and is accurate | `docs/LIVE-DRILL-RUNBOOK.md` | ✅ written |
-| 1.14 | All previously-shipped stages have passing tests | `make test` | ✅ 256 passing |
+| 1.14 | All previously-shipped stages have passing tests | `make test` | ✅ 275 passing |
 | 1.15 | `make lint` is clean | `make lint` | ✅ clean |
 
 ### L1 Time-to-ship estimate
@@ -94,13 +92,13 @@ contains the damage (rate limits, sane defaults, no shared secrets).
 |---|---|---|
 | 2.1  | Operator browser tool at `/portal/test/` with one-click access to scenarios, drills, assets, audit, metrics, Proxmox | ✅ done ([`docs/TEST-UI.md`](TEST-UI.md), commit `cd0ccb5`) |
 | 2.2  | Portal can reach the API via the dev box hostname, not just localhost | ❌ needs Traefik route |
-| 2.3  | API has a token-based auth middleware (`X-Divide-Token` header) | ❌ wide-open |
-| 2.4  | Token issuance CLI: `divide issue-token --user alice --role trainee` | ❌ no auth subsystem |
-| 2.5  | `runs.started_by` populated from the token subject (proves attribution) | ⚠️  field exists, no auth |
+| 2.3  | API has a token-based auth middleware (`X-Divide-Token` header) | ✅ done ([`app/core/auth.py`](../../services/api/app/core/auth.py) — HMAC-SHA256 signed tokens, `current_token` + `require_token` Depends; routes on `/drills/{id}/cancel` already attribute `actor` from the token) |
+| 2.4  | Token issuance CLI: `divide issue-token --user alice --role trainee` | ✅ done ([`tools/issue_token.py`](../../tools/issue_token.py) — `--user`, `--role`, `--ttl` with `s/m/h/d` suffix support) |
+| 2.5  | `runs.started_by` populated from the token subject (proves attribution) | ✅ done (`POST /api/v1/drills` now prefers `token.sub` over the body's `started_by`) |
 | 2.6  | Grafana has basic-auth (anonymous viewer, admin via env-var creds) | ⚠️  admin only |
 | 2.7  | Rate limit on `POST /api/v1/drills` (max 5 in-flight per token) | ❌ no limit |
 | 2.8  | Drill that runs > 30 min auto-cancels (prevents forgotten VMs racking up CPU bills) | ❌ no timeout |
-| 2.9  | Audit log writes include the token subject (not just IP) | ⚠️  fields exist |
+| 2.9  | Audit log writes include the token subject (not just IP) | ⚠️  now requires handler-side work: router has the token, but the audit hook in `Runner._audit()` doesn't read it. Out of scope for the current item. |
 | 2.10 | CORS allowed origins constrained to `DIVIDE_DOMAIN` | ⚠️  no CORS configured |
 | 2.11 | Telemetry sinks wire-up: drill completion uploads audit log + asset metadata to MinIO `divide-artifacts` bucket | ❌ spec field is read, ignored |
 | 2.12 | After-action JSON report downloadable from `GET /api/v1/drills/{id}/report` | ❌ endpoint doesn't exist |
@@ -275,6 +273,8 @@ levels.
 | 2026-08-23 | feat(tests): cancel-path smoke coverage (`tests/test_cancel_smoke.py`, 5 tests). Proves `make live-cancel` happy path (Run→CANCELLED, reason recorded, audit entry written, `divide_cancel_requests_total{result="already_terminal"}` does **not** tick on success), 404 on unknown run, 409 on already-terminal, plus the `watch_drill --cancel-after` end-to-end path via mocked httpx. Flipped L1 1.10 / 1.11 / 1.12 from ⚠️ to ✅ **without any PVE work**. Tests 243 → 248 (+5). |
 | 2026-08-23 | feat(verify): `make verify` aggregate gate + CI coverage of `tools/verify_drill.py`. The `verify` Makefile target chains `lint && test && preflight && smoke` (preflight is `-`-prefixed so a PVE-unreachable dev box still passes — useful for laptops). `tests/test_verify_drill.py` got two new tests (`test_main_returns_zero_for_successful_run`, `test_main_returns_one_for_failed_run`) that drive the full `verify_drill.main()` CLI with mocked httpx, proving the orchestrator works end-to-end without a live drill in the DB. Flipped L2 2.13 / 2.14 to ✅. Tests 248 → 250 (+2). |
 
+| 2026-08-23 | feat(tests): portal static-analysis smoke (`tests/test_portal_smoke.py`, 6 tests). Asserts every API path fragment the wizard + test UI JS references exists in the FastAPI OpenAPI schema. Catches "JS calls a path that doesn't exist on the API" without a browser. Why not Playwright: would add ~150 MB CI image for the same failure-mode coverage. Tests 250 → 256 (+6). |
+| 2026-08-23 | feat(auth): token middleware + CLI (`app/core/auth.py`, `tools/issue_token.py`, 19 tests). HMAC-SHA256 signed compact tokens carried in `X-Divide-Token`. `current_token` returns `TokenData | None` (None = anonymous); `require_token` 401s anonymous. CLI parses `--ttl` with `s/m/h/d` suffix + bare seconds. Secret resolution: explicit `DIVIDE_TOKEN_SECRET` > derived from `PROXMOX_TOKEN_SECRET` (dev) > per-process random fallback (with warning). Token subject is now recorded in `runs.started_by` and `runs.cancel.actor`. Flipped L2 2.3 / 2.4 / 2.5 → ✅. (2.9 — audit attribution from the token — needs the runner's `_audit()` hook updated; out of scope for this item.) Tests 256 → 275 (+19). |
 
 
 
