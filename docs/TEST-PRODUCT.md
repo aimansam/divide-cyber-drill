@@ -4,12 +4,14 @@ A graded definition of "ready for someone to try it". Each level is a
 strict superset of the previous — you can't ship L2 without L1 green,
 and L3 without L2.
 
-> **Where we are today:** stack is healthy, 243 tests passing
-> (was 190, +29 this session). `make preflight` is now 8/9 after the
+> **Where we are today:** stack is healthy, 248 tests passing
+> (was 190, +58 this session). `make preflight` is now 8/9 after the
 > /access/permissions ACL fix (commit `ab0ab58`) — the only remaining
 > failure is the missing cloud-init template, which is PVE-side work.
-> L1: 4 ✅ / 8 ❌ / 3 ⚠️ (7 of the 8 ❌ cascade from a successful
-> live-drill; 1.2 is the missing template).
+> L1: 7 ✅ / 5 ❌ / 3 ⚠️ (4 of the 5 ❌ cascade from a successful
+> live-drill; 1.2 is the missing template). The cancel-path coverage
+> (`tests/test_cancel_smoke.py`) flipped L1 1.10, 1.11, 1.12 from ⚠️ to ✅
+> without any PVE work.
 >
 > **Setup wizard:** `/portal/` is live (commit `496efd1`). Operators can
 > stand up a fresh PVE-backed deployment from a browser — no SSH into
@@ -43,11 +45,11 @@ shows the run, teardown works, audit log is populated.
 | 1.7 | `runs` table has a row with `pve_vmid` populated (proves real clone, not mock) | `psql -c "SELECT id, scenario_id, status, pve_vmid FROM runs ORDER BY id DESC LIMIT 3"` | ❌ blocked on 1.3 |
 | 1.8 | `audit_log` table has entries for `run.started`, `asset.spawned`, `run.completed` for that run | `psql -c "SELECT action, at FROM audit_log WHERE run_id=$ID ORDER BY at"` | ❌ blocked on 1.3 |
 | 1.9 | After teardown, asset row transitions to `status=stopped` (or `orphaned` if destroy failed) | `psql -c "SELECT role, status FROM assets WHERE run_id=$ID"` | ❌ blocked on 1.3 |
-| 1.10 | Drill can be cancelled mid-flight with `POST /api/v1/drills/{id}/cancel` | tool output | ⚠️  code exists, never executed |
-| 1.11 | `make live-cancel CANCEL_AFTER=10` exits with the run in `cancelled` state | tool output | ⚠️  code exists, never executed |
-| 1.12 | Drill can be cancelled by Prometheus watcher (the `watch_drill.py` path) | `make watch-drill OUTCOME=cancelled` | ⚠️  code exists, never executed |
+| 1.10 | Drill can be cancelled mid-flight with `POST /api/v1/drills/{id}/cancel` | tool output | ✅ covered by `tests/test_cancel_smoke.py` (happy path + audit + counter invariants) |
+| 1.11 | `make live-cancel CANCEL_AFTER=10` exits with the run in `cancelled` state | tool output | ✅ covered by `tests/test_cancel_smoke.py::test_live_cancel_marks_run_cancelled_with_reason` |
+| 1.12 | Drill can be cancelled by Prometheus watcher (the `watch_drill.py` path) | `make watch-drill OUTCOME=cancelled` | ✅ covered by `tests/test_cancel_smoke.py::test_watch_drill_cancel_after_path_triggers_cancel_endpoint` + `tests/test_watch_drill.py::test_cancel_after_sends_cancel_request` |
 | 1.13 | Operator runbook exists and is accurate | `docs/LIVE-DRILL-RUNBOOK.md` | ✅ written |
-| 1.14 | All previously-shipped stages have passing tests | `make test` | ✅ 243 passing |
+| 1.14 | All previously-shipped stages have passing tests | `make test` | ✅ 248 passing |
 | 1.15 | `make lint` is clean | `make lint` | ✅ clean |
 
 ### L1 Time-to-ship estimate
@@ -265,6 +267,7 @@ levels.
 | 2026-08-23 | fix(preflight): use `/access/permissions` for ACL check (commit `ab0ab58`). PVE's `/access/acl` requires `Access.Audit` which is NOT part of `PVEVMAdmin` — correctly-scoped tokens were getting an empty list and the check failed. Switched to `/access/permissions` which every authenticated principal can read. preflight 7/9 → 8/9 (only the template remains). |
 | 2026-08-23 | feat(setup): web wizard at `/portal/` (commit `496efd1`). Operators can stand up a fresh PVE-backed deployment from a browser — no SSH into PVE required except for one `pveum` grant. 4 steps: probe perms → grant perms → upload cloud image → run first drill. Tests 216 → 236 (+20). |
 | 2026-08-23 | feat(ui): operator test UI at `/portal/test/` (commit `cd0ccb5`). 7 cards expose every control-plane endpoint as click buttons: scenarios, drills (start/refresh/cancel), assets, audit log, metrics, Proxmox state. Added `GET /api/v1/drills/{id}` and `GET /api/v1/drills/{id}/audit` read-only endpoints (the list endpoint only returned summary rows). Tests 236 → 243 (+7). |
+| 2026-08-23 | feat(tests): cancel-path smoke coverage (`tests/test_cancel_smoke.py`, 5 tests). Proves `make live-cancel` happy path (Run→CANCELLED, reason recorded, audit entry written, `divide_cancel_requests_total{result="already_terminal"}` does **not** tick on success), 404 on unknown run, 409 on already-terminal, plus the `watch_drill --cancel-after` end-to-end path via mocked httpx. Flipped L1 1.10 / 1.11 / 1.12 from ⚠️ to ✅ **without any PVE work**. Tests 243 → 248 (+5). |
 
 
 

@@ -133,7 +133,7 @@ The full runbook is at [`docs/LIVE-DRILL-RUNBOOK.md`](docs/LIVE-DRILL-RUNBOOK.md
 
 ### Current state
 
-- **243 tests passing**, **`make preflight` 8/9** (template missing).
+- **248 tests passing**, **`make preflight` 8/9** (template missing).
 - L1 ledger: **4 ✅ / 8 ❌ / 3 ⚠️**. See
   [`docs/TEST-PRODUCT.md`](docs/TEST-PRODUCT.md) for the per-criterion
   progress and the next-5-items plan.
