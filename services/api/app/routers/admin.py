@@ -54,6 +54,12 @@ class CreateTemplateRequest(BaseModel):
     cores: int = 2
     memory_mb: int = 2048
     disk_gb: int = 20
+    # Optional bridge for net0. If unset, ``net0`` is omitted from the
+    # VM config -- this lets the operator wire the network after creation
+    # (or use the template with the runner's own bridge discovery). On
+    # PVE hosts with SDN-managed bridges the default ``vmbr0`` requires
+    # ``SDN.Use`` which drill tokens don't have.
+    bridge: str | None = None
     job_id: str | None = None
 
 
@@ -172,6 +178,7 @@ async def create_template(body: CreateTemplateRequest, background_tasks: Backgro
         cores=body.cores,
         memory_mb=body.memory_mb,
         disk_gb=body.disk_gb,
+        bridge=body.bridge,
         job_id=body.job_id,
     )
     return {

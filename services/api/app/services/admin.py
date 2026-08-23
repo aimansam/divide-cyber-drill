@@ -16,9 +16,11 @@ Why a separate module:
   * Keeps proxmoxer / httpx / redis coupling out of the router layer.
 
 This module does NOT add new privileges to the API token. The operator
-must grant ``PVEStorageAdmin`` (or equivalent) on ``/storage`` to the
-divide token before these endpoints will succeed; ``probe_pve()`` is the
-canonical way to detect that gap.
+must grant ``PVEDatastoreAdmin`` (a built-in PVE role that covers
+``Datastore.Allocate``, ``Datastore.AllocateSpace``, and
+``Datastore.Audit``) on ``/storage`` to the divide token before these
+endpoints will succeed; ``probe_pve()`` is the canonical way to detect
+that gap.
 """
 from __future__ import annotations
 
@@ -288,46 +290,61 @@ async def upload_qcow2(
     port = int(os.environ.get("PROXMOX_PORT", "8006"))
     verify = (os.environ.get("PROXMOX_VERIFY_SSL", "true").lower() == "true")
     scheme = "https" if verify or port == 8006 else "http"
-    url = f"{scheme}://{host}:{port}/api2/json/nodes/{node}/storage/{storage}/upload"
+    # `content=import` is required so PVE accepts .qcow2 files via the
+    # upload endpoint -- the storage's allowed content types include
+    # 'import' for raw qemu-img targets. Without this query param PVE
+    # returns 400 'wrong file extension'.
+    url = (
+        f"{scheme}://{host}:{port}/api2/json/nodes/{node}/storage"
+        f"/{storage}/upload?content=import"
+    )
 
     headers = {
         "Authorization": f"PVEAPIToken={user}!{token_name}={token_secret}",
     }
 
     async def _run() -> UploadProgress:
-        def _file_iter() -> Iterable[bytes]:
-            with open(local_path, "rb") as fh:
-                while True:
-                    chunk = fh.read(chunk_size)
-                    if not chunk:
-                        break
-                    progress.bytes_sent += len(chunk)
-                    if progress_callback:
-                        progress_callback(progress.bytes_sent, total)
-                    yield chunk
-
+        # Open the file and pass the raw handle to httpx. httpx needs a
+        # file-like object exposing `.read(n)` -- a bare generator breaks
+        # because httpx calls `.read()` on it. We deliberately do NOT wrap
+        # the handle here: httpx's `peek_filelike_length` needs to be able
+        # to discover the file's length (via `fileno()` -> `fstat`) so that
+        # the request uses `Content-Length` instead of chunked encoding.
+        # Some PVE endpoints (including /upload) mis-handle chunked bodies
+        # and drop the connection mid-stream, which surfaces as a generic
+        # `httpcore.ReadError` from httpx.
+        fh = open(local_path, "rb")
         try:
-            async with httpx.AsyncClient(timeout=httpx.Timeout(600.0, connect=10.0), verify=verify) as client:
-                files = {"content": (filename, _file_iter(), "application/octet-stream")}
-                data = {"filename": filename}
-                r = await client.post(url, headers=headers, files=files, data=data)
-                if r.status_code >= 400:
-                    raise ProxmoxAPIError(
-                        f"PVE upload failed: HTTP {r.status_code}: {r.text[:300]}"
-                    )
-                body = r.json()
-                volid = None
-                try:
-                    volid = (body.get("data") or "").strip() or None
-                except Exception:  # noqa: BLE001
+            try:
+                async with httpx.AsyncClient(timeout=httpx.Timeout(600.0, connect=10.0), verify=verify) as client:
+                    # PVE expects the file under the field name 'filename',
+                    # not 'content'. The 'content' parameter is the storage
+                    # content-type filter (we pass it via the URL query
+                    # string above). An extra form field with the same name
+                    # would shadow the query param.
+                    files = {"filename": (filename, fh, "application/octet-stream")}
+                    r = await client.post(url, headers=headers, files=files)
+                    if r.status_code >= 400:
+                        raise ProxmoxAPIError(
+                            f"PVE upload failed: HTTP {r.status_code}: {r.text[:300]}"
+                        )
+                    body = r.json()
                     volid = None
-                progress.status = "success"
-                progress.result_volid = volid or f"{storage}:import/{filename}"
+                    try:
+                        volid = (body.get("data") or "").strip() or None
+                    except Exception:  # noqa: BLE001
+                        volid = None
+                    progress.status = "success"
+                    progress.result_volid = volid or f"{storage}:import/{filename}"
+                    progress.finished_at = time.time()
+                    # best-effort progress update on success
+                    progress.bytes_sent = progress.total_bytes
+            except Exception as exc:  # noqa: BLE001
+                progress.status = "error"
+                progress.error = f"{exc.__class__.__name__}: {exc}"
                 progress.finished_at = time.time()
-        except Exception as exc:  # noqa: BLE001
-            progress.status = "error"
-            progress.error = f"{exc.__class__.__name__}: {exc}"
-            progress.finished_at = time.time()
+        finally:
+            fh.close()
         await _set_progress(progress)
         return progress
 
@@ -392,6 +409,7 @@ async def create_template_from_qcow2(
     cores: int = 2,
     memory_mb: int = 2048,
     disk_gb: int = 20,
+    bridge: str | None = None,
     job_id: str | None = None,
 ) -> TemplateProgress:
     """Create a PVE template VM from an uploaded cloud image.
@@ -434,7 +452,7 @@ async def create_template_from_qcow2(
         progress.step = "creating VM"
         await _set_template_progress(progress)
         await asyncio.to_thread(
-            _create_qemu_vm, vmid, node, disk_storage, disk_gb, cores, memory_mb
+            _create_qemu_vm, vmid, node, disk_storage, disk_gb, cores, memory_mb, bridge
         )
 
         progress.step = "importing disk"
@@ -466,7 +484,8 @@ async def create_template_from_qcow2(
 
 
 def _create_qemu_vm(
-    vmid: int, node: str, _disk_storage: str, _disk_gb: int, cores: int, memory_mb: int
+    vmid: int, node: str, _disk_storage: str, _disk_gb: int, cores: int, memory_mb: int,
+    bridge: str | None = None,
 ) -> None:
     """POST /nodes/{n}/qemu with the skeleton (no disk yet).
 
@@ -476,7 +495,7 @@ def _create_qemu_vm(
     can't find it.
     """
     client = get_proxmox_client()
-    client.nodes(node).qemu.post(
+    kwargs: dict[str, Any] = dict(
         vmid=vmid,
         # Cloud-init drive (mandatory for the runner's ipconfig0 path).
         ide2="local:cloudinit",
@@ -488,20 +507,28 @@ def _create_qemu_vm(
         agent=1,
         # Modern SCSI controller; harmless default but greppable.
         scsihw="virtio-scsi-single",
-        # Net0: virtio on the default bridge. Operator can rewire later.
-        net0="virtio,bridge=vmbr0",
     )
+    if bridge:
+        # Net0: virtio on the named bridge. On SDN-managed PVE the default
+        # ``vmbr0`` requires ``SDN.Use`` which drill tokens don't have, so
+        # only attach a NIC if the caller picked a bridge explicitly.
+        kwargs["net0"] = f"virtio,bridge={bridge}"
+    client.nodes(node).qemu.post(**kwargs)
 
 
 def _import_disk(vmid: int, node: str, source_volid: str, target_storage: str) -> None:
-    """Import the uploaded qcow2 from {storage}:import/<file> into {target_storage}."""
+    """Import the uploaded qcow2 from {storage}:import/<file> into {target_storage}.
+
+    In PVE 7/8 this was ``POST /qemu/{vmid}/importdisk``. PVE 9 removed
+    that endpoint (``Method not implemented``) and the documented path is
+    now ``POST /qemu/{vmid}/config`` with the special
+    ``scsi0={target}:0,import-from={source_volid}`` syntax -- PVE
+    internally runs ``qemu-img convert`` and attaches the disk. We use
+    that here.
+    """
     client = get_proxmox_client()
-    storage_part = source_volid.split(":", 1)[0]
-    filename = source_volid.split("/", 1)[-1]
-    client.nodes(node).qemu(vmid).importdisk.post(
-        import_path=f"{storage_part}:import/{filename}",
-        storage=target_storage,
-        format="qcow2",
+    client.nodes(node).qemu(vmid).config.post(
+        scsi0=f"{target_storage}:0,import-from={source_volid}",
     )
 
 

@@ -451,7 +451,7 @@ L1 closes when the operator runs through §1–§8 above and tags
 | 2 | **`make verify` alias** (`lint && test && preflight && smoke`) | 30 min | No | L2 2.13 |
 | 3 | **Wire `make verify-drill` into CI** | 15 min | No | L2 2.14 |
 | 4 | **Token middleware + `divide issue-token` CLI** | 1.5 h | No | L2 2.3, 2.4, 2.5, 2.9 |
-| 5 | **SSH-key wizard step** (Bucket E) so the wizard flips `PVEStorageAdmin` itself | 1 h | One SSH key setup | Full autonomy for fresh deploys |
+| 5 | **SSH-key wizard step** (Bucket E) so the wizard flips `PVEDatastoreAdmin` itself | 1 h | One SSH key setup | Full autonomy for fresh deploys |
 
 After these, **L2 is buildable** (Token middleware is the longest
 item). L3 is a separate project — see [docs/TEST-PRODUCT.md](TEST-PRODUCT.md)

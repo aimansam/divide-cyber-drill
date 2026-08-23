@@ -62,7 +62,7 @@ divide-cyber-drill/
 │   │   │   ├── routers/         # drills, scenarios, proxmox, admin (setup wizard), health
 │   │   │   ├── services/        # proxmox client, runner adapters, admin (template builder), scen_sync
 │   │   │   └── main.py          # mounts /portal and /portal/test/ via StaticFiles
-│   │   ├── tests/               # pytest (275 tests)
+│   │   ├── tests/               # pytest (276 tests)
 │   │   ├── scripts/             # proxmox-smoke.py
 │   │   └── Dockerfile
 │   └── portal/                  # static HTML+JS pages served by the API
@@ -133,10 +133,10 @@ The full runbook is at [`docs/LIVE-DRILL-RUNBOOK.md`](docs/LIVE-DRILL-RUNBOOK.md
 
 ### Current state
 
-- **275 tests passing**, **`make preflight` 8/9** (template missing).
-- L1 ledger: **4 ✅ / 8 ❌ / 3 ⚠️**. See
-  [`docs/TEST-PRODUCT.md`](docs/TEST-PRODUCT.md) for the per-criterion
-  progress and the next-5-items plan.
+- **276 tests passing**, **`make preflight` 9/9**, **L1 ledger: 9 ✅ / 0 ❌ / 0 ⚠️** as of run #11.
+- L1 ledger: **9 ✅ / 0 ❌ / 0 ⚠️**. Run #11 (`first-live-drill`) ended
+  `succeeded`. See [`docs/TEST-PRODUCT.md`](docs/TEST-PRODUCT.md) for the
+  per-criterion progress and the next-5-items plan.
 - Phase 0 → L1 complete in code; L1 closures require one live
   drill, which is documented in the runbook above.
 

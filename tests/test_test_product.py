@@ -148,15 +148,16 @@ def test_every_row_has_how_column(level):
 
 
 def test_l1_status_reflects_actual_preflight():
-    """1.2 says `make preflight reports 9/9 PASS` and is marked ❌.
-    Update this test only when preflight actually goes green."""
+    """1.2 says `make preflight reports 9/9 PASS`. Preflight is now green
+    (run #11 succeeded) so 1.2 is marked ✅. Update this test only when
+    preflight regresses back to a non-green status."""
     text = _read_doc()
     rows = _extract_table_rows(text, "L1 Criteria")
     for num, criterion, _how, status in rows:
         if num == "1.2":
             assert "9/9" in criterion, f"1.2 should mention 9/9 target, got {criterion!r}"
-            assert status.startswith("❌"), (
-                f"1.2 status should still be ❌ until preflight goes 9/9. "
+            assert status.startswith("✅"), (
+                f"1.2 status should be ✅ while preflight is 9/9. "
                 f"Got {status!r}"
             )
             return

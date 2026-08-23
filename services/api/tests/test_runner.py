@@ -142,9 +142,12 @@ async def test_mock_adapter_records_calls(session: AsyncSession) -> None:
     assert len(adapter.cloned) == 2
     assert len(adapter.started) == 2
     assert all(spec.name.startswith("divide-") for spec in adapter.cloned)
-    # Asset names embed role; check both roles show up.
+    # Asset names embed role; check both roles show up. Note that the
+    # runner sanitizes underscores from the role before passing it to
+    # PVE (PVE 9 rejects DNS-invalid names on the clone endpoint), so
+    # 'red_attacker' becomes 'redattacker'.
     names = sorted(spec.name.rsplit("-", 1)[-1] for spec in adapter.cloned)
-    assert names == ["dc", "red_attacker"]
+    assert names == ["dc", "redattacker"]
 
 
 # --- stop path --------------------------------------------------------------

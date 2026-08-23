@@ -36,7 +36,7 @@ The token is the one created during `docs/PROXMOX-SETUP.md §5`
 (`divide@pve@pam!drill-token`). It needs:
 
 - **For running drills** (always required): `PVEVMAdmin` on `/` with `propagate=1`
-- **For the wizard to create templates** (added during step 2): `PVEStorageAdmin`
+- **For the wizard to create templates** (added during step 2): `PVEDatastoreAdmin` (built-in PVE role covering `Datastore.Allocate`, `Datastore.AllocateSpace`, `Datastore.Audit`)
   on `/storage` with `propagate=1`
 
 If you'd rather not give the token storage privileges, use the **manual
@@ -67,13 +67,16 @@ step is one human action:
 
 ```bash
 ssh root@192.168.0.10
-pveum acl modify divide@pve@pam --role PVEStorageAdmin --path /storage --propagate=1
+pveum acl modify /storage --users divide@pve@pam --roles PVEDatastoreAdmin --propagate=1
 exit
 ```
 
+Note: PVE 9 expects `--roles` (plural). `--role` (singular) is the PVE 7 form
+and PVE 9 rejects it.
+
 After running it, click **"I've run it — re-probe"** to refresh.
 
-If you can't or won't grant `PVEStorageAdmin`, use **Option B** in step 3
+If you can't or won't grant `PVEDatastoreAdmin`, use **Option B** in step 3
 (manual install). The wizard never forces this grant.
 
 ### Step 3 — Drill template

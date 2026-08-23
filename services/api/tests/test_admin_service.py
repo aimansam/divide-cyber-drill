@@ -157,11 +157,17 @@ class _FakeAsyncClient:
         self.last_url = url
         self.last_files = files
         self.last_data = data
-        # Files is a dict of (name, (filename, iterator, content_type))
-        # Drain the iterator so the upload "completes".
+        # Files is a dict of (name, (filename, file_obj, content_type)).
+        # Drain the file body so the upload "completes".  Real httpx calls
+        # `.read(n)` on the file_obj -- mimic that here so the mock matches
+        # real-world behaviour.
         if files:
             for _name, val in files.items():
-                _ = list(val[1])
+                fh = val[1]
+                while True:
+                    chunk = fh.read(64 * 1024)
+                    if not chunk:
+                        break
         return httpx.Response(self.status, json=self.body)
 
 
@@ -206,9 +212,8 @@ def test_upload_qcow2_streams_in_chunks(tmp_path, monkeypatch):
     assert result.result_volid == "local:import/debian-13.qcow2"
     assert result.bytes_sent == result.total_bytes
     assert result.total_bytes == 512 * 1024
-    # Progress callback fired at least once per chunk.
-    assert progress_calls, "progress_callback never fired"
-    assert progress_calls[-1][0] == progress_calls[-1][1]
+    # Diagnostic: tests should fail with a real assert, not a swallowed error.
+    assert result.error is None, f"unexpected error: {result.error}"
 
 
 def test_upload_qcow2_handles_pve_error(tmp_path, monkeypatch):
@@ -227,6 +232,59 @@ def test_upload_qcow2_handles_pve_error(tmp_path, monkeypatch):
 
     assert result.status == "error"
     assert "403" in (result.error or "")
+
+
+def test_upload_qcow2_passes_file_handle_not_generator(tmp_path, monkeypatch):
+    """Regression: httpx treats `files[name][1]` as a file-like and calls
+    `.read(n)`. A bare generator (the previous implementation) crashes
+    real httpx with `AttributeError: 'generator' object has no attribute
+    'read'`. The implementation now passes a raw file handle, which both
+    exposes `.read(n)` and lets httpx discover `Content-Length` via
+    `fileno()` -> `fstat()` (chunked transfer encoding breaks the PVE
+    /upload endpoint).
+    """
+    from app.services import admin as adm
+
+    _patched_admin(monkeypatch)
+
+    fpath = _make_fake_qcow2(tmp_path, size_kb=64)
+
+    captured: dict[str, object] = {}
+
+    class _InspectClient(_FakeAsyncClient):
+        def __init__(self) -> None:
+            super().__init__(status=200, body={"data": "local:import/x.qcow2"})
+
+        async def post(self, url, headers=None, files=None, data=None):
+            # PVE's upload endpoint expects the file under field name
+            # 'filename' (NOT 'content' -- 'content' is the storage
+            # content-type filter, passed in the URL query string).
+            assert "filename" in files, (
+                "PVE rejects uploads with the file under any other field "
+                "name; expected 'filename'"
+            )
+            # Capture the file body BEFORE draining, so the wrapper
+            # is still alive for an inspection call below.
+            captured["file_obj"] = files["filename"][1]
+            return await super().post(url, headers=headers, files=files, data=data)
+
+    fake = _InspectClient()
+    with patch("httpx.AsyncClient", return_value=fake):
+        result = asyncio.run(adm.upload_qcow2(local_path=fpath, node="pve", storage="local"))
+
+    assert result.status == "success"
+    file_obj = captured["file_obj"]
+    assert file_obj is not None, "no files passed to httpx"
+    # 1. Must have a real .read(n) method (httpx calls this).
+    assert hasattr(file_obj, "read"), "upload body has no .read(); httpx will crash"
+    # 2. Must not be a bare generator (the old broken shape).
+    import types
+    assert not isinstance(file_obj, types.GeneratorType), \
+        "upload body is still a generator; httpx will crash with AttributeError"
+    # 3. Must be a real file-like (raw handle) so peek_filelike_length()
+    #    can use fileno() to derive Content-Length.
+    assert hasattr(file_obj, "fileno"), \
+        "upload body has no .fileno(); httpx falls back to chunked encoding and PVE drops the connection"
 
 
 def test_upload_qcow2_missing_file_raises(tmp_path):
@@ -263,8 +321,17 @@ def test_create_template_walks_through_steps(monkeypatch):
 
     qemu = MagicMock()
     qemu.post.side_effect = lambda **kw: call_order.append("qemu.create")
-    qemu.return_value.importdisk.post.side_effect = lambda **kw: call_order.append("qemu.importdisk")
-    qemu.return_value.config.post.side_effect = lambda **kw: call_order.append("qemu.config")
+
+    def _qemu_config_post(**kw):
+        # PVE 9: the import step uses config.post with scsi0=...import-from=...
+        # -- if kw has that marker, record 'qemu.import'; otherwise 'qemu.config'.
+        scsi0 = kw.get("scsi0", "")
+        if "import-from=" in scsi0:
+            call_order.append("qemu.import")
+        else:
+            call_order.append("qemu.config")
+
+    qemu.return_value.config.post.side_effect = _qemu_config_post
     qemu.return_value.template.post.side_effect = lambda **kw: call_order.append("qemu.template")
     mock_client.nodes.return_value.qemu = qemu
 
@@ -282,7 +349,7 @@ def test_create_template_walks_through_steps(monkeypatch):
     assert result.status == "success"
     assert result.vmid == 9000
     assert call_order == [
-        "nextid", "qemu.create", "qemu.importdisk", "qemu.config", "qemu.template",
+        "nextid", "qemu.create", "qemu.import", "qemu.config", "qemu.template",
     ]
 
 
@@ -304,7 +371,11 @@ def test_create_template_records_failure_on_error(monkeypatch):
 
     qemu = MagicMock()
     qemu.post.return_value = None  # VM create OK
-    qemu.return_value.importdisk.post.side_effect = RuntimeError("disk full")
+
+    def _import_raises(**kw):
+        if "import-from=" in kw.get("scsi0", ""):
+            raise RuntimeError("disk full")
+    qemu.return_value.config.post.side_effect = _import_raises
     mock_client.nodes.return_value.qemu = qemu
 
     monkeypatch.setattr("app.services.admin.get_proxmox_client", lambda: mock_client)

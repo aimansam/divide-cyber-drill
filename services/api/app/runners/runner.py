@@ -374,11 +374,17 @@ class Runner:
 
         new_vmid = await self._adapter.allocate_vmid()
         resources = asset_spec.get("resources") or {}
+        # PVE 9 enforces strict DNS-1123 names on the clone VMID; underscores
+        # in the role (e.g. ``drill_vm``) violate that. We strip them from
+        # both role and a sanitized copy for the VM name only; the asset's
+        # ``role`` field on the DB row stays untouched.
+        role = asset.role
+        sanitized_role = role.replace("_", "")
         clone = CloneSpec(
             source_vmid=template_vmid,
             new_vmid=new_vmid,
             node=node,
-            name=f"divide-{asset.run_id}-{asset.role}",
+            name=f"divide-{asset.run_id}-{sanitized_role}",
             cores=resources.get("cores"),
             sockets=resources.get("sockets"),
             ram_mb=resources.get("ram_mb"),

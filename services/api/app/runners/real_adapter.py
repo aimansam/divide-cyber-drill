@@ -200,27 +200,49 @@ class RealProxmoxAdapter(ProxmoxAdapter):
         if not node:
             raise ProxmoxAPIError("clone_vm requires a target node")
 
-        params: dict[str, Any] = {"name": spec.name}
+        # PVE 9 split clone + post-clone config:
+        #   * ``clone.post`` only accepts clone-time params (name, newid).
+        #   * Per-resource overrides (cores, sockets, memory) go via
+        #     ``config.post`` on the new VMID.
+        #   * Disk resize goes via ``PUT /qemu/{vmid}/resize`` with
+        #     ``disk=scsi0&size=+XG`` -- ``config.post`` rejects ``disk``
+        #     on PVE 9 with ``property is not defined in schema``.
+        clone_params: dict[str, Any] = {"name": spec.name}
         if spec.new_vmid is not None:
-            params["newid"] = spec.new_vmid
-        if spec.cores is not None:
-            params["cores"] = spec.cores
-        if spec.sockets is not None:
-            params["sockets"] = spec.sockets
-        if spec.ram_mb is not None:
-            params["memory"] = spec.ram_mb
-        if spec.disk_gb is not None:
-            # PVE resize shorthand: scsi0=N resizes the first scsi disk.
-            params["disk"] = f"scsi0={spec.disk_gb}G"
+            clone_params["newid"] = spec.new_vmid
 
         def _do() -> None:
-            self._get_client().nodes(node).qemu(spec.source_vmid).clone.post(**params)
+            self._get_client().nodes(node).qemu(spec.source_vmid).clone.post(**clone_params)
 
         await self._call(_do)
         # If we passed newid, we know it; otherwise allocate via nextid.
         new_vmid = (
             int(spec.new_vmid) if spec.new_vmid is not None else await self.allocate_vmid()
         )
+
+        config_overrides: dict[str, Any] = {}
+        if spec.cores is not None:
+            config_overrides["cores"] = spec.cores
+        if spec.sockets is not None:
+            config_overrides["sockets"] = spec.sockets
+        if spec.ram_mb is not None:
+            config_overrides["memory"] = spec.ram_mb
+
+        if config_overrides:
+            def _config() -> None:
+                self._get_client().nodes(node).qemu(new_vmid).config.post(**config_overrides)
+
+            await self._call(_config)
+
+        if spec.disk_gb is not None:
+            def _resize() -> None:
+                self._get_client().nodes(node).qemu(new_vmid).resize.put(
+                    disk="scsi0",
+                    size=f"+{spec.disk_gb}G",
+                )
+
+            await self._call(_resize)
+
         return ClonedVM(vmid=new_vmid, node=node, name=spec.name)
 
     async def start_vm(self, vmid: int, node: str) -> None:

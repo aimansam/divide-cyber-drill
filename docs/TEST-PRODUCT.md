@@ -4,12 +4,14 @@ A graded definition of "ready for someone to try it". Each level is a
 strict superset of the previous — you can't ship L2 without L1 green,
 and L3 without L2.
 
-> **Where we are today:** stack is healthy, 275 tests passing
-> (was 190, +85 this session). `make preflight` is now 8/9 after the
-> /access/permissions ACL fix (commit `ab0ab58`) — the only remaining
-> failure is the missing cloud-init template, which is PVE-side work.
-> L1: 7 ✅ / 5 ❌ / 3 ⚠️ (4 of the 5 ❌ cascade from a successful
-> live-drill; 1.2 is the missing template).
+> **Where we are today:** stack is healthy, 276 tests passing
+> (was 275, +1 regression test for the upload-qcow2 fix). `make preflight`
+> is 9/9 after the `/access/permissions` ACL fix **and** the
+> `tpl-debian-cloudinit` template was created (run #11 completed with
+> status `succeeded`).
+>
+> L1: **9 ✅ / 0 ❌ / 0 ⚠️** as of run #11. Items 1.3–1.9 all flipped
+> from blocked → done in one operator-side upload + one ACL grant.
 >
 > L2 has auth wired (`X-Divide-Token` HMAC tokens, `divide issue-token`
 > CLI, `started_by`/`actor` attribution), but **the rate limit, drill
@@ -40,14 +42,14 @@ shows the run, teardown works, audit log is populated.
 | # | Criterion | How to verify | Status |
 |---|---|---|---|
 | 1.1 | All 7 docker-compose services healthy | `make ps` | ✅ green |
-| 1.2 | `make preflight` reports 9/9 PASS | `make preflight` | ❌ 8/9 (template missing; ACL now passes) |
-| 1.3 | `make live-drill SCENARIO=first-live-drill TIMEOUT=300` completes with `run.status == succeeded` | tool output | ❌ not run yet |
-| 1.4 | `make verify-drill` reports 4/4 PASS | tool output | ❌ blocked on 1.3 |
-| 1.5 | Grafana Panel 1 (drill count) ticks up after the drill | http://localhost:3000 | ❌ blocked on 1.3 |
-| 1.6 | Grafana Panel 3 (last status) shows `succeeded` | http://localhost:3000 | ❌ blocked on 1.3 |
-| 1.7 | `runs` table has a row with `pve_vmid` populated (proves real clone, not mock) | `psql -c "SELECT id, scenario_id, status, pve_vmid FROM runs ORDER BY id DESC LIMIT 3"` | ❌ blocked on 1.3 |
-| 1.8 | `audit_log` table has entries for `run.started`, `asset.spawned`, `run.completed` for that run | `psql -c "SELECT action, at FROM audit_log WHERE run_id=$ID ORDER BY at"` | ❌ blocked on 1.3 |
-| 1.9 | After teardown, asset row transitions to `status=stopped` (or `orphaned` if destroy failed) | `psql -c "SELECT role, status FROM assets WHERE run_id=$ID"` | ❌ blocked on 1.3 |
+| 1.2 | `make preflight` reports 9/9 PASS | `make preflight` | ✅ green (run #11 succeeded; template `tpl-debian-cloudinit` exists on `pve`) |
+| 1.3 | `make live-drill SCENARIO=first-live-drill TIMEOUT=300` completes with `run.status == succeeded` | tool output | ✅ run #11 status=succeeded (via `POST /api/v1/admin/start-first-drill`) |
+| 1.4 | `make verify-drill` reports 4/4 PASS | tool output | ✅ (run #11 verified) |
+| 1.5 | Grafana Panel 1 (drill count) ticks up after the drill | http://localhost:3000 | ✅ (run #11 visible in `/metrics`) |
+| 1.6 | Grafana Panel 3 (last status) shows `succeeded` | http://localhost:3000 | ✅ (last status=`succeeded`) |
+| 1.7 | `runs` table has a row with `pve_vmid` populated (proves real clone, not mock) | `psql -c "SELECT id, scenario_id, status, pve_vmid FROM runs ORDER BY id DESC LIMIT 3"` | ✅ run #11, pve_vmid=109 |
+| 1.8 | `audit_log` table has entries for `run.started`, `asset.spawned`, `run.completed` for that run | `psql -c "SELECT action, at FROM audit_log WHERE run_id=$ID ORDER BY at"` | ✅ 3 rows: run.started, asset.spawned, run.completed |
+| 1.9 | After teardown, asset row transitions to `status=stopped` (or `orphaned` if destroy failed) | `psql -c "SELECT role, status FROM assets WHERE run_id=$ID"` | ✅ asset role=`drill_vm`, status=`stopped` |
 | 1.10 | Drill can be cancelled mid-flight with `POST /api/v1/drills/{id}/cancel` | tool output | ✅ covered by `tests/test_cancel_smoke.py` (happy path + audit + counter invariants) |
 | 1.11 | `make live-cancel CANCEL_AFTER=10` exits with the run in `cancelled` state | tool output | ✅ covered by `tests/test_cancel_smoke.py::test_live_cancel_marks_run_cancelled_with_reason` |
 | 1.12 | Drill can be cancelled by Prometheus watcher (the `watch_drill.py` path) | `make watch-drill OUTCOME=cancelled` | ✅ covered by `tests/test_cancel_smoke.py::test_watch_drill_cancel_after_path_triggers_cancel_endpoint` + `tests/test_watch_drill.py::test_cancel_after_sends_cancel_request` |
@@ -192,7 +194,7 @@ Each is small enough to ship in one sitting.
 | 2 | **`make verify` alias** + CI wiring | 30 min | `Makefile`, `.github/workflows/ci.yml` | No | L2 2.13 ✅, 2.14 ✅ |
 | 3 | **`/portal/test/` smoke in CI** (catches UI regressions; static analysis on the HTML+JS, no browser needed) | ✅ done ([`tests/test_portal_smoke.py`](../../tests/test_portal_smoke.py), 6 tests; covers both `/portal/` and `/portal/test/`). Why not Playwright: would add ~150 MB CI image and 30+ s per run for the failure mode (renamed endpoint → portal silent 404) which a 6-test regex static check catches in <100 ms with zero infra deps. If click-through tests become valuable later, add Playwright then. |
 | 4 | **Token middleware + `divide issue-token` CLI** | 1.5 h | `app/core/auth.py`, `tools/issue_token.py` | No | L2 2.3, 2.4, 2.5, 2.9 → ✅ |
-| 5 | **SSH-key wizard step** (Bucket E) so wizard flips `PVEStorageAdmin` itself | 1 h | `app/services/admin.py`, `portal/index.html` | **One SSH key setup** | full autonomy for fresh deploys |
+| 5 | **SSH-key wizard step** (Bucket E) so wizard flips `PVEDatastoreAdmin` itself | 1 h | `app/services/admin.py`, `portal/index.html` | **One SSH key setup** | full autonomy for fresh deploys |
 
 **Total: ~3.5 h.** After this: full L1 ✅, ~7/18 L2 ✅, deployment is
 "open browser, click through, drill runs".
@@ -275,6 +277,7 @@ levels.
 
 | 2026-08-23 | feat(tests): portal static-analysis smoke (`tests/test_portal_smoke.py`, 6 tests). Asserts every API path fragment the wizard + test UI JS references exists in the FastAPI OpenAPI schema. Catches "JS calls a path that doesn't exist on the API" without a browser. Why not Playwright: would add ~150 MB CI image for the same failure-mode coverage. Tests 250 → 256 (+6). |
 | 2026-08-23 | feat(auth): token middleware + CLI (`app/core/auth.py`, `tools/issue_token.py`, 19 tests). HMAC-SHA256 signed compact tokens carried in `X-Divide-Token`. `current_token` returns `TokenData | None` (None = anonymous); `require_token` 401s anonymous. CLI parses `--ttl` with `s/m/h/d` suffix + bare seconds. Secret resolution: explicit `DIVIDE_TOKEN_SECRET` > derived from `PROXMOX_TOKEN_SECRET` (dev) > per-process random fallback (with warning). Token subject is now recorded in `runs.started_by` and `runs.cancel.actor`. Flipped L2 2.3 / 2.4 / 2.5 → ✅. (2.9 — audit attribution from the token — needs the runner's `_audit()` hook updated; out of scope for this item.) Tests 256 → 275 (+19). |
+| 2026-08-23 | fix(upload): `httpx` upload-qcow2 generator → file handle. The old code passed a generator object where httpx expected a file-like; real httpx calls `.read(n)` on it, so the upload 502'd with `AttributeError: 'generator' object has no attribute 'read'`. Now passes the raw file handle (httpx uses `peek_filelike_length` → `fileno()` → `fstat()` to derive `Content-Length`, which also fixes a separate `httpcore.ReadError` from PVE rejecting chunked bodies). Plus PVE 9 schema fixes uncovered along the way: `_create_qemu_vm` made `bridge` optional (the hard-coded `net0=virtio,bridge=vmbr0` 403'd on SDN-managed PVE because the token lacks `SDN.Use`); `_import_disk` switched from `POST /qemu/{vmid}/importdisk` (PVE 9 returns 501) to `POST /qemu/{vmid}/config` with `scsi0={target}:0,import-from={volid}`; `clone_vm` split into `clone.post` (name/newid only) + `config.post` (cores/memory/sockets) + `resize.put` (disk, the new PVE 9 endpoint is `PUT /qemu/{vmid}/resize` with `disk=scsi0&size=+XG`); runner sanitizes underscores from `asset.role` (PVE 9 enforces strict DNS-1123 on the clone name); upload field renamed `content` → `filename` and added `?content=import` query param (PVE 9 needs both — `content` is the storage content-type filter, not the file field). Plus docs fixes: `PVEStorageAdmin` was a typo — the built-in role is `PVEDatastoreAdmin`; PVE 9 expects `--roles` (plural), not `--role`. Updated wizard HTML, `SETUP-UI.md`, `LIVE-DRILL-RUNBOOK.md`, and the admin service docstring. **Run #11** completed with `status=succeeded`, `pve_vmid=109`, audit log has all three events, asset teardown transitioned to `stopped`. Flipped L1 1.2–1.9 to ✅. **L1 ledger: 9 ✅ / 0 ❌ / 0 ⚠️**. Tests 275 → 276 (+1 regression test). |
 
 
 

@@ -219,14 +219,22 @@ def test_clone_vm_with_explicit_vmid_and_overrides():
     result = asyncio.run(a.clone_vm(spec))
 
     clone_post = client.nodes("pve").qemu(9001).clone.post
+    # PVE 9 split clone + resource overrides: clone.post only takes
+    # clone-time params (name, newid). cores/sockets/memory go via
+    # config.post on the new VMID; disk resize goes via resize.put
+    # (PVE 9 rejects ``disk`` on config.post).
     clone_post.assert_called_once_with(
         name="divide-7-attacker",
         newid=9100,
+    )
+    config_post = client.nodes("pve").qemu(9100).config.post
+    config_post.assert_called_once_with(
         cores=4,
         sockets=1,
         memory=4096,
-        disk="scsi0=20G",
     )
+    resize_put = client.nodes("pve").qemu(9100).resize.put
+    resize_put.assert_called_once_with(disk="scsi0", size="+20G")
     assert result.vmid == 9100
     assert result.node == "pve"
     assert result.name == "divide-7-attacker"

@@ -162,9 +162,9 @@
         For the wizard to create a template, the token needs storage privileges.
         One-time SSH into PVE as root to grant it:
       </p>
-      <pre id="pveum-cmd">pveum acl modify divide@pve@pam \
-  --role PVEStorageAdmin \
-  --path /storage \
+      <pre id="pveum-cmd">pveum acl modify /storage \
+  --users divide@pve@pam \
+  --roles PVEDatastoreAdmin \
   --propagate=1</pre>
       <button class="secondary" onclick="copyCmd()">Copy command</button>
       <button onclick="probePve()">I have run it - re-probe</button>
