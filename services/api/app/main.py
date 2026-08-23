@@ -7,12 +7,13 @@ from pathlib import Path
 import structlog
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from app import __version__
 from app.core.config import settings
 from app.core.logging import configure_logging
 from app.observability.middleware import PrometheusMiddleware
-from app.routers import drills, health, proxmox, scenarios
+from app.routers import admin, drills, health, proxmox, scenarios
 from app.services.scenario_sync import sync_files
 
 log = structlog.get_logger()
@@ -86,6 +87,20 @@ def create_app() -> FastAPI:
     app.include_router(scenarios.router, prefix="/api/v1/scenarios", tags=["scenarios"])
     app.include_router(drills.router, prefix="/api/v1/drills", tags=["drills"])
     app.include_router(proxmox.router, prefix="/api/v1/proxmox", tags=["proxmox"])
+    app.include_router(admin.router, prefix="/api/v1/admin", tags=["admin"])
+
+    # Mount the setup wizard portal at /portal/. If the directory doesn't
+    # exist (e.g. a slim image without the portal), skip silently so the
+    # API still starts.
+    portal_path = Path(settings.portal_dir)
+    if portal_path.is_dir():
+        app.mount("/portal", StaticFiles(directory=str(portal_path), html=True), name="portal")
+    else:
+        log.warning(
+            "divide_api.portal_skipped",
+            portal_dir=str(portal_path),
+            reason="directory does not exist; admin endpoints still work via API",
+        )
 
     return app
 

@@ -26,6 +26,7 @@ RUN pip install --upgrade pip hatchling && \
     "requests>=2.32.3" \
     "pyyaml>=6.0.2" \
     "jsonschema>=4.18,<5" \
+    "python-multipart>=0.0.12" \
     "structlog>=24.4.0" \
     "tenacity>=9.0.0" \
     "prometheus-client>=0.21.0" \
@@ -48,7 +49,7 @@ COPY --from=builder /wheels /wheels
 RUN pip install --no-index --find-links=/wheels \
     fastapi uvicorn pydantic pydantic-settings \
     sqlalchemy asyncpg alembic redis httpx proxmoxer requests pyyaml \
-    jsonschema structlog tenacity prometheus-client psycopg2-binary \
+    jsonschema python-multipart structlog tenacity prometheus-client psycopg2-binary \
     && rm -rf /wheels /root/.cache
 
 COPY services/api/app ./app
@@ -58,6 +59,8 @@ COPY services/api/alembic.ini ./alembic.ini
 # JSON Schema is shared with the host. We bundle a copy at /app/schemas so
 # the schema-sync service works inside the container without a host mount.
 COPY schemas ./schemas
+# Setup wizard portal (vanilla HTML + JS). Mounted at /portal/ by main.py.
+COPY services/portal ./portal
 USER divide
 
 EXPOSE 8000

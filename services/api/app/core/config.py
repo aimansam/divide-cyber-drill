@@ -58,6 +58,11 @@ class Settings(BaseSettings):
     sync_on_startup: bool = True
     extra_scenarios_dirs: list[str] = Field(default_factory=list)
 
+    # Setup wizard portal (vanilla HTML+JS). Mounted at /portal/ by main.py.
+    # Defaults to the bundled copy; override for development to point at
+    # the live source tree.
+    portal_dir: str = "/app/portal"
+
 
 @lru_cache
 def get_settings() -> Settings:

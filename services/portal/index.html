@@ -1,0 +1,509 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>div:ide — setup</title>
+<style>
+  :root {
+    --bg: #0e1117;
+    --panel: #161b22;
+    --border: #30363d;
+    --text: #c9d1d9;
+    --muted: #8b949e;
+    --green: #3fb950;
+    --red: #f85149;
+    --yellow: #d29922;
+    --blue: #58a6ff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    margin: 0;
+    padding: 24px;
+    line-height: 1.5;
+  }
+  .container { max-width: 880px; margin: 0 auto; }
+  h1 { font-size: 1.6em; margin: 0 0 8px; color: var(--blue); }
+  h2 { font-size: 1.15em; margin: 24px 0 8px; color: var(--text); border-bottom: 1px solid var(--border); padding-bottom: 4px; }
+  p.lede { color: var(--muted); margin-top: 0; }
+  .step {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+  .step-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+  }
+  .step-num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px; height: 26px;
+    border-radius: 50%;
+    background: var(--border);
+    color: var(--text);
+    font-weight: bold;
+    font-size: 0.9em;
+  }
+  .step.done .step-num { background: var(--green); color: var(--bg); }
+  .step.active .step-num { background: var(--blue); color: var(--bg); }
+  .step.error .step-num { background: var(--red); color: var(--bg); }
+  .step-status { color: var(--muted); font-size: 0.9em; }
+  .step-body { display: none; padding-top: 12px; border-top: 1px solid var(--border); }
+  .step.active .step-body { display: block; }
+  label { display: block; margin: 8px 0 2px; color: var(--muted); font-size: 0.9em; }
+  input[type="text"], input[type="number"], input[type="password"], select {
+    width: 100%;
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 8px 10px;
+    font-family: inherit;
+    font-size: 1em;
+  }
+  button {
+    background: var(--blue);
+    color: var(--bg);
+    border: 0;
+    border-radius: 4px;
+    padding: 8px 14px;
+    font-weight: 600;
+    cursor: pointer;
+    margin: 8px 4px 0 0;
+  }
+  button.secondary { background: var(--border); color: var(--text); }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  button:hover:not(:disabled) { filter: brightness(1.1); }
+  .row { display: flex; gap: 12px; }
+  .row > * { flex: 1; }
+  .pill {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 0.85em;
+    margin: 2px;
+    background: var(--border);
+  }
+  .pill.ok { background: var(--green); color: var(--bg); }
+  .pill.bad { background: var(--red); color: var(--bg); }
+  .pill.optional { background: var(--yellow); color: var(--bg); }
+  pre {
+    background: #000;
+    padding: 10px;
+    border-radius: 4px;
+    overflow-x: auto;
+    font-size: 0.85em;
+    border: 1px solid var(--border);
+  }
+  .progress {
+    height: 14px;
+    background: var(--border);
+    border-radius: 7px;
+    overflow: hidden;
+    margin: 8px 0;
+  }
+  .progress-bar {
+    height: 100%;
+    background: var(--blue);
+    transition: width 0.2s ease;
+  }
+  .check-list { list-style: none; padding: 0; margin: 8px 0; }
+  .check-list li { padding: 4px 0; }
+  .check-list li.ok::before { content: "OK "; color: var(--green); font-weight: bold; }
+  .check-list li.bad::before { content: "X  "; color: var(--red); font-weight: bold; }
+  .muted { color: var(--muted); font-size: 0.9em; }
+  code { background: var(--bg); padding: 2px 6px; border-radius: 3px; font-size: 0.9em; }
+  #global-msg { margin-top: 16px; padding: 12px; border-radius: 6px; display: none; }
+  #global-msg.ok { background: rgba(63, 185, 80, 0.15); border: 1px solid var(--green); }
+  #global-msg.bad { background: rgba(248, 81, 73, 0.15); border: 1px solid var(--red); }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>div:ide - PVE setup wizard</h1>
+  <p class="lede">
+    Stand up a Proxmox-backed div:ide deployment without SSH-ing into Proxmox to drive the installer.
+    Each step verifies the previous one before you can move on.
+  </p>
+
+  <div class="step" id="step-1">
+    <div class="step-head">
+      <span class="step-num">1</span>
+      <strong>Proxmox connection</strong>
+      <span class="step-status" id="step-1-status">pending</span>
+    </div>
+    <div class="step-body">
+      <p class="muted">
+        The API token (set in .env) connects to PVE. The probe below shows exactly
+        what privileges it has and what's missing.
+      </p>
+      <button class="secondary" onclick="probePve()">Re-probe PVE</button>
+      <div id="probe-result"></div>
+    </div>
+  </div>
+
+  <div class="step" id="step-2">
+    <div class="step-head">
+      <span class="step-num">2</span>
+      <strong>Token permissions</strong>
+      <span class="step-status" id="step-2-status">pending</span>
+    </div>
+    <div class="step-body">
+      <p class="muted">
+        For the wizard to create a template, the token needs storage privileges.
+        One-time SSH into PVE as root to grant it:
+      </p>
+      <pre id="pveum-cmd">pveum acl modify divide@pve@pam \
+  --role PVEStorageAdmin \
+  --path /storage \
+  --propagate=1</pre>
+      <button class="secondary" onclick="copyCmd()">Copy command</button>
+      <button onclick="probePve()">I have run it - re-probe</button>
+    </div>
+  </div>
+
+  <div class="step" id="step-3">
+    <div class="step-head">
+      <span class="step-num">3</span>
+      <strong>Drill template</strong>
+      <span class="step-status" id="step-3-status">pending</span>
+    </div>
+    <div class="step-body">
+      <p class="muted">
+        Choose how to create tpl-debian-cloudinit on PVE. Upload cloud image is the
+        recommended path (fully automated). Use existing ISO + manual install is the fallback.
+      </p>
+      <h3 style="margin-top:0">Option A - Upload cloud image (recommended)</h3>
+      <div class="row">
+        <div>
+          <label>Node</label>
+          <input id="upload-node" type="text" value="pve" placeholder="pve">
+        </div>
+        <div>
+          <label>Storage</label>
+          <input id="upload-storage" type="text" value="local" placeholder="local">
+        </div>
+      </div>
+      <label>Cloud image (.qcow2)</label>
+      <input id="qcow2-file" type="file" accept=".qcow2">
+      <button onclick="uploadQcow2()">Upload &amp; import</button>
+      <div id="upload-result"></div>
+      <h3>Option B - Manual install via existing ISO</h3>
+      <p class="muted">
+        1. Open PVE GUI - create VM with your existing ISO.<br>
+        2. Install Debian, install qemu-guest-agent, shut down.<br>
+        3. Enter the new VMID + node here to mark it as a template:
+      </p>
+      <div class="row">
+        <div>
+          <label>New VMID</label>
+          <input id="manual-vmid" type="number" placeholder="9000">
+        </div>
+        <div>
+          <label>Node</label>
+          <input id="manual-node" type="text" value="pve" placeholder="pve">
+        </div>
+      </div>
+      <button class="secondary" onclick="setManualTemplate()">Mark as template</button>
+    </div>
+  </div>
+
+  <div class="step" id="step-4">
+    <div class="step-head">
+      <span class="step-num">4</span>
+      <strong>Run the first drill</strong>
+      <span class="step-status" id="step-4-status">pending</span>
+    </div>
+    <div class="step-body">
+      <p class="muted">
+        With the template in place, kick off the L1 demo drill.
+        It clones the template, boots it, runs the drill, and tears it down.
+      </p>
+      <div class="row">
+        <div>
+          <label>Timeout (seconds)</label>
+          <input id="drill-timeout" type="number" value="300" min="60" max="1800">
+        </div>
+        <div>
+          <label>Template status</label>
+          <div id="template-status-display" class="muted">not checked</div>
+        </div>
+      </div>
+      <button onclick="checkTemplate()">Check template</button>
+      <button onclick="startFirstDrill()">Start first-live-drill</button>
+      <div id="drill-result"></div>
+    </div>
+  </div>
+
+  <div id="global-msg"></div>
+</div>
+
+<script>
+const API = "/api/v1/admin";
+
+function setStepState(num, state, label) {
+  const el = document.getElementById("step-" + num);
+  el.classList.remove("active", "done", "error");
+  if (state === "active") el.classList.add("active");
+  else if (state === "done") el.classList.add("done");
+  else if (state === "error") el.classList.add("error");
+  if (label !== undefined) document.getElementById("step-" + num + "-status").textContent = label;
+}
+
+function activateStep(num) {
+  for (let i = 1; i <= 4; i++) {
+    if (i < num) setStepState(i, "done", "ok");
+    else if (i === num) setStepState(i, "active");
+    else setStepState(i, "", "pending");
+  }
+}
+
+function showMsg(text, kind) {
+  const el = document.getElementById("global-msg");
+  el.textContent = text;
+  el.className = kind || "";
+  el.style.display = text ? "block" : "none";
+}
+
+async function probePve() {
+  showMsg("Probing PVE...", "");
+  try {
+    const r = await fetch(API + "/probe");
+    const data = await r.json();
+    renderProbe(data);
+  } catch (e) {
+    showMsg("Probe failed: " + e, "bad");
+  }
+}
+
+function renderProbe(d) {
+  const html = [];
+  html.push("<p><strong>Connection:</strong> " + (d.reachable ? "ok " : "unreachable ") + (d.version || "") + "</p>");
+  html.push("<p><strong>Token user:</strong> <code>" + d.pve_user + "</code></p>");
+  html.push("<h3>Drill privileges</h3><ul class='check-list'>");
+  ["VM.Allocate", "VM.Clone", "VM.PowerMgmt"].forEach(p => {
+    const ok = d.drill_privs_present.includes(p);
+    html.push("<li class='" + (ok ? "ok" : "bad") + "'>" + p + "</li>");
+  });
+  html.push("</ul>");
+  html.push("<h3>Setup privileges (needed to create templates)</h3><ul class='check-list'>");
+  ["Datastore.AllocateSpace", "Datastore.Allocate", "Datastore.Audit"].forEach(p => {
+    const ok = d.setup_privs_present.includes(p);
+    html.push("<li class='" + (ok ? "ok" : "bad") + "'>" + p + "</li>");
+  });
+  html.push("</ul>");
+  if (d.storage && d.storage.length) {
+    html.push("<h3>Storage pools</h3><ul>");
+    for (const s of d.storage) {
+      const free = s.avail_bytes ? (s.avail_bytes / 1024**3).toFixed(1) : "?";
+      html.push("<li><code>" + s.storage + "</code> content: " + (s.content || "?") + " free: " + free + " GB</li>");
+    }
+    html.push("</ul>");
+  }
+  if (d.nodes && d.nodes.length) {
+    html.push("<p><strong>Nodes:</strong> " + d.nodes.join(", ") + "</p>");
+  }
+  if (d.error) {
+    html.push("<pre style='color: var(--red)'>" + d.error + "</pre>");
+  }
+  document.getElementById("probe-result").innerHTML = html.join("");
+
+  if (d.reachable && d.has_drill_privs && d.has_setup_privs) {
+    setStepState(1, "done", "ok");
+    setStepState(2, "done", "ok");
+    activateStep(3);
+    showMsg("PVE " + d.version + " reachable with full privileges.", "ok");
+  } else if (d.reachable && d.has_drill_privs) {
+    setStepState(1, "done", "ok");
+    setStepState(2, "active", "needs storage perms");
+    showMsg("Drill perms OK; storage perms missing - run the pveum command in step 2.", "");
+  } else {
+    setStepState(1, "error", "needs attention");
+    showMsg("PVE unreachable or perms incomplete.", "bad");
+  }
+}
+
+function copyCmd() {
+  const cmd = document.getElementById("pveum-cmd").textContent.replace(/\\\n/g, " ").trim();
+  navigator.clipboard.writeText(cmd).then(() => {
+    showMsg("Command copied. Paste it into a root SSH session on PVE.", "ok");
+  });
+}
+
+function uploadQcow2() {
+  const fileInput = document.getElementById("qcow2-file");
+  const f = fileInput.files[0];
+  if (!f) { showMsg("Pick a .qcow2 file first.", "bad"); return; }
+  const node = document.getElementById("upload-node").value.trim();
+  const storage = document.getElementById("upload-storage").value.trim();
+  if (!node || !storage) { showMsg("node and storage are required", "bad"); return; }
+  showMsg("Uploading " + f.name + " (" + (f.size/1024/1024).toFixed(0) + " MB)...", "");
+  document.getElementById("upload-result").innerHTML =
+    "<div class='progress'><div id='upbar' class='progress-bar' style='width:0%'></div></div>" +
+    "<div id='uptext' class='muted'>preparing...</div>";
+
+  const fd = new FormData();
+  fd.append("file", f);
+  fd.append("node", node);
+  fd.append("storage", storage);
+  fd.append("filename", f.name);
+
+  const xhr = new XMLHttpRequest();
+  xhr.open("POST", API + "/upload-qcow2");
+  xhr.upload.onprogress = (ev) => {
+    if (ev.lengthComputable) {
+      const pct = (ev.loaded / ev.total * 100).toFixed(1);
+      document.getElementById("upbar").style.width = pct + "%";
+      document.getElementById("uptext").textContent =
+        pct + "% (" + (ev.loaded/1024/1024).toFixed(1) + " / " + (ev.total/1024/1024).toFixed(1) + " MB)";
+    }
+  };
+  xhr.onload = () => {
+    let data;
+    try { data = JSON.parse(xhr.responseText); }
+    catch (e) { data = {detail: xhr.responseText.slice(0, 500)}; }
+    if (xhr.status >= 400) {
+      document.getElementById("upload-result").innerHTML =
+        "<pre style='color:var(--red)'>" + (data.detail || JSON.stringify(data)) + "</pre>";
+      showMsg("Upload failed.", "bad");
+    } else {
+      document.getElementById("uptext").textContent = "uploaded to " + data.result_volid;
+      document.getElementById("upload-result").insertAdjacentHTML("beforeend",
+        renderTemplateForm(data.result_volid, node));
+      showMsg("Upload complete. Now create the template.", "ok");
+    }
+  };
+  xhr.onerror = () => {
+    document.getElementById("upload-result").innerHTML = "<pre style='color:var(--red)'>network error</pre>";
+  };
+  xhr.send(fd);
+}
+
+function renderTemplateForm(volid, node) {
+  return "<h3>Turn " + volid.split('/').pop() + " into a template</h3>" +
+    "<div class='row'><div><label>Template name</label>" +
+    "<input id='tpl-name' type='text' value='tpl-debian-cloudinit'></div>" +
+    "<div><label>Disk storage</label>" +
+    "<input id='tpl-disk-storage' type='text' value='local-lvm'></div></div>" +
+    "<div class='row'><div><label>Cores</label>" +
+    "<input id='tpl-cores' type='number' value='2'></div>" +
+    "<div><label>RAM (MB)</label>" +
+    "<input id='tpl-mem' type='number' value='2048'></div>" +
+    "<div><label>Disk (GB)</label>" +
+    "<input id='tpl-disk' type='number' value='20'></div></div>" +
+    "<button onclick='createTemplate(\"" + volid + "\",\"" + node + "\")'>Create template</button>" +
+    "<div id='tpl-progress'></div>";
+}
+
+async function createTemplate(volid, node) {
+  const name = document.getElementById("tpl-name").value.trim();
+  const disk_storage = document.getElementById("tpl-disk-storage").value.trim();
+  const cores = parseInt(document.getElementById("tpl-cores").value);
+  const memory_mb = parseInt(document.getElementById("tpl-mem").value);
+  const disk_gb = parseInt(document.getElementById("tpl-disk").value);
+
+  const r = await fetch(API + "/create-template", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({template_name: name, source_volid: volid, node, disk_storage, cores, memory_mb, disk_gb}),
+  });
+  const data = await r.json();
+  if (!data.job_id) {
+    document.getElementById("tpl-progress").innerHTML =
+      "<pre style='color:var(--red)'>" + JSON.stringify(data, null, 2) + "</pre>";
+    return;
+  }
+  showMsg("Template creation queued (job " + data.job_id + ").", "");
+  pollTemplateProgress(data.job_id);
+}
+
+async function pollTemplateProgress(jobId) {
+  const el = document.getElementById("tpl-progress");
+  while (true) {
+    const r = await fetch(API + "/progress/template/" + jobId);
+    if (!r.ok) break;
+    const data = await r.json();
+    el.innerHTML = "<p class='muted'>status: <strong>" + data.status + "</strong> step: " + data.step +
+      (data.vmid ? " VMID: " + data.vmid : "") +
+      (data.error ? " error: " + data.error : "") + "</p>";
+    if (data.status === "success") {
+      showMsg("Template created as VMID " + data.vmid + ".", "ok");
+      setStepState(3, "done", "vmid " + data.vmid);
+      activateStep(4);
+      checkTemplate();
+      break;
+    } else if (data.status === "error") {
+      showMsg("Template creation failed: " + data.error, "bad");
+      break;
+    }
+    await new Promise(res => setTimeout(res, 1000));
+  }
+}
+
+async function setManualTemplate() {
+  const vmid = parseInt(document.getElementById("manual-vmid").value);
+  const node = document.getElementById("manual-node").value.trim();
+  if (!vmid || !node) { showMsg("VMID and node are required", "bad"); return; }
+  const r = await fetch(API + "/set-template/" + vmid, {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({node}),
+  });
+  const data = await r.json();
+  if (r.ok) {
+    showMsg("VM " + vmid + " marked as template.", "ok");
+    setStepState(3, "done", "vmid " + vmid);
+    activateStep(4);
+    checkTemplate();
+  } else {
+    showMsg("Failed: " + data.detail, "bad");
+  }
+}
+
+async function checkTemplate() {
+  const r = await fetch(API + "/drill-template-status");
+  const data = await r.json();
+  const el = document.getElementById("template-status-display");
+  if (data.ready) {
+    el.innerHTML = "<span class='pill ok'>READY</span> <span class='muted'>vmid=" + data.vmid + "</span>";
+    activateStep(4);
+  } else {
+    el.innerHTML = "<span class='pill bad'>NOT READY</span><br><span class='muted'>" + (data.error || "see step 3") + "</span>";
+  }
+}
+
+async function startFirstDrill() {
+  const timeout_s = parseInt(document.getElementById("drill-timeout").value);
+  const r = await fetch(API + "/start-first-drill", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({timeout_s}),
+  });
+  const data = await r.json();
+  const el = document.getElementById("drill-result");
+  if (r.ok) {
+    el.innerHTML = "<pre>" + JSON.stringify(data, null, 2) + "</pre>";
+    setStepState(4, "done", "drill started");
+    showMsg("Drill started - run id " + (data.id || "?") + ".", "ok");
+  } else {
+    el.innerHTML = "<pre style='color:var(--red)'>" + JSON.stringify(data, null, 2) + "</pre>";
+    showMsg("Drill failed to start.", "bad");
+  }
+}
+
+window.addEventListener("load", () => {
+  activateStep(1);
+  probePve();
+});
+</script>
+</body>
+</html>
