@@ -79,16 +79,23 @@ def test_doc_has_l1_criteria_with_15_rows():
     )
 
 
-def test_doc_has_l2_criteria_with_15_rows():
+def test_doc_has_l2_criteria_with_at_least_15_rows():
+    """L2 grew from 15 → 18 when the wizard + test UI + audit endpoint shipped.
+
+    The test enforces a lower bound (not ==) so:
+      * Rows don't get silently deleted (alert if count drops below 15).
+      * Adding new criteria doesn't break the structural suite.
+      * The L3 table is checked for parity (it grew too).
+    """
     text = _read_doc()
     rows = _extract_table_rows(text, "New criteria beyond L1")
-    assert len(rows) == 15
+    assert len(rows) >= 15, f"L2 has {len(rows)} rows, expected ≥ 15"
 
 
-def test_doc_has_l3_criteria_with_15_rows():
+def test_doc_has_l3_criteria_with_at_least_15_rows():
     text = _read_doc()
     rows = _extract_table_rows(text, "New criteria beyond L2")
-    assert len(rows) == 15
+    assert len(rows) >= 15, f"L3 has {len(rows)} rows, expected ≥ 15"
 
 
 # ---------- row shape ----------

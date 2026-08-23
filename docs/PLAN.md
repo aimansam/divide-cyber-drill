@@ -492,3 +492,36 @@ errors (token rejection on PVE side). The `feat/proxmox-readonly` branch is
 ---
 
 *End of plan. When you're ready, the next gate is Proxmox integration (see §11).*
+
+---
+
+## 14. Where this doc stops being current (read [docs/TEST-PRODUCT.md](TEST-PRODUCT.md) for now)
+
+This file predates L1 work and many of its "current state" snippets
+are stale. For the live ledger of what's done / what's next, see:
+
+- **[docs/TEST-PRODUCT.md](TEST-PRODUCT.md)** — the L1/L2/L3 graded
+  checklist, the live `preflight` count, the test count, the per-
+  criterion progress. This file is the canonical answer to "where are
+  we right now?".
+- **[docs/TEST-UI.md](TEST-UI.md)** — the operator browser tool at
+  `/portal/test/` (7 cards, exposes every control-plane endpoint).
+- **[docs/SETUP-UI.md](SETUP-UI.md)** — the 4-step setup wizard at
+  `/portal/` (no SSH into PVE required, except for one `pveum` grant).
+- **[docs/LIVE-DRILL-RUNBOOK.md](LIVE-DRILL-RUNBOOK.md)** — step-by-step
+  instructions for the PVE-side work; check the runbook for the
+  canonical step ordering.
+
+The rest of this section calls out specific places where PLAN.md's
+text is misleading so future readers don't trust stale snippets:
+
+- §5 "Phase 1" was deferred multiple times — it's done; see commits
+  `ab0ab58` (preflight fix), `496efd1` (wizard), `cd0ccb5` (test UI).
+- §13 "What we've built" lists up to Stage 4 — the codebase is now
+  at Stage 12 (per [docs/TEST-PRODUCT.md](TEST-PRODUCT.md)). Use
+  TEST-PRODUCT.md's update log for the authoritative timeline.
+- §13 "Live Proxmox integration" says the read-only endpoints return
+  502. They return 200 now (token works since the
+  `/access/permissions` fix in commit `ab0ab58`).
+- "Tests: 56 passed" is from the §13 snapshot — current count is
+  243, see `make test`.

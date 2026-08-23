@@ -1,7 +1,9 @@
 # div:ide cyber drill
 
-> **Status:** Phase 0 — Foundations. Control-plane skeleton only.
-> See [`docs/PLAN.md`](docs/PLAN.md) for the full design and roadmap.
+> **Status:** Phase 0 ✅ + Phase 1 ✅ (code-complete; one live drill away from L1 done).
+> See [`docs/TEST-PRODUCT.md`](docs/TEST-PRODUCT.md) for the L1/L2/L3 ship criteria + next plan.
+> Two browser tools ship in the API container: setup wizard at `/portal/`
+> and operator test tool at `/portal/test/`.
 
 **div:ide** is a Proxmox-backed cyber drill platform for blue teams, red teams, and
 training cohorts. It spins up isolated, reproducible attack/defense scenarios as VMs,
@@ -40,13 +42,15 @@ Full spec (every field, every enum): [`docs/SCENARIO-SPEC.md`](docs/SCENARIO-SPE
 ```
 divide-cyber-drill/
 ├── docs/
-│   ├── PLAN.md                  # full design + architecture
+│   ├── PLAN.md                  # full design + architecture (now §14 says "read TEST-PRODUCT for current state")
 │   ├── LIVE-DRILL-RUNBOOK.md    # operator runbook for the first live drill
 │   ├── PROXMOX-SETUP.md         # PVE host setup (ACLs, tokens, ISO)
 │   ├── OBSERVABILITY.md         # Prometheus + Grafana wiring
 │   ├── SCENARIO-SPEC.md         # full scenario YAML spec
 │   ├── SCENARIO-SYNC.md         # YAML → DB catalog sync
-│   ├── TEST-PRODUCT.md          # L1/L2/L3 ship criteria + ETAs
+│   ├── TEST-PRODUCT.md          # **canonical**: L1/L2/L3 ship criteria + ETAs + next plan
+│   ├── SETUP-UI.md              # docs for the browser-based setup wizard at /portal/
+│   ├── TEST-UI.md               # docs for the operator test tool at /portal/test/
 │   └── images/                  # 6 architecture diagrams (auto-generated)
 ├── deploy/
 │   ├── docker-compose.yml       # control-plane stack
@@ -55,15 +59,28 @@ divide-cyber-drill/
 ├── services/
 │   ├── api/                     # FastAPI app
 │   │   ├── app/                 # code
-│   │   ├── tests/               # pytest
+│   │   │   ├── routers/         # drills, scenarios, proxmox, admin (setup wizard), health
+│   │   │   ├── services/        # proxmox client, runner adapters, admin (template builder), scen_sync
+│   │   │   └── main.py          # mounts /portal and /portal/test/ via StaticFiles
+│   │   ├── tests/               # pytest (243 tests)
 │   │   ├── scripts/             # proxmox-smoke.py
 │   │   └── Dockerfile
-│   └── ...                      # orchestrator/portal/guacamole land in later phases
-├── tools/
-│   └── gen_diagrams.py          # regenerates docs/images/*.png
+│   └── portal/                  # static HTML+JS pages served by the API
+│       ├── index.html           # → /portal/  (setup wizard, 4 steps)
+│       └── test/index.html      # → /portal/test/  (operator test tool, 7 cards)
+├── tools/                       # CLI entry points used by Makefile targets
+│   ├── gen_diagrams.py          # regenerates docs/images/*.png
+│   ├── preflight.py             # `make preflight` — 9 PVE/stack health checks
+│   ├── upload_cloudinit_template.py  # `make upload-template` — create tpl-debian-cloudinit
+│   ├── live_drill.py            # `make live-drill` — POST /api/v1/drills + poll
+│   ├── verify_drill.py          # `make verify-drill` — assertions on run outcome (4 checks)
+│   ├── watch_drill.py           # `make watch-drill` — Prometheus-driven outcome watcher
+│   ├── sync_scenarios.py        # `make sync-scenarios` — YAML → DB
+│   └── validate_scenario.py     # `tools/validate_scenario.py` — JSON-Schema check
 ├── scripts/
 │   ├── dev-shell.sh             # `make shell`-style helper
 │   └── lint-all.sh              # `make lint`-style helper
+├── tests/                       # top-level pytest (preflight, scenarios, smoke, etc.)
 ├── Makefile
 ├── pyproject.toml               # ruff + mypy config
 └── .pre-commit-config.yaml
@@ -71,7 +88,7 @@ divide-cyber-drill/
 
 ---
 
-## Quickstart (Phase 0)
+## Quickstart (Phase 0 → L1)
 
 Requirements: Docker 24+, Docker Compose v2, Python 3.12 (only for lint/test).
 
@@ -80,13 +97,48 @@ git clone <this-repo> divide-cyber-drill
 cd divide-cyber-drill
 
 cp deploy/.env.example deploy/.env
-# edit deploy/.env — at minimum change POSTGRES_PASSWORD and MINIO_ROOT_PASSWORD
+# edit deploy/.env — at minimum change POSTGRES_PASSWORD and MINIO_ROOT_PASSWORD,
+# and fill in PROXMOX_HOST/PROXMOX_USER/PROXMOX_TOKEN_ID/PROXMOX_TOKEN_SECRET
+# from your PVE token (see docs/PROXMOX-SETUP.md §5).
 
 make build          # build the API container
 make up             # start the stack (waits for /healthz)
+make preflight      # confirm 9/9 PVE + stack health checks pass (expect 8/9 until template is uploaded)
 make smoke          # curl the health, ready, and stub endpoints
 make logs           # tail logs
 ```
+
+### Two browser tools ship with the API
+
+After `make up`, browse to:
+
+| URL | Purpose | Doc |
+|---|---|---|
+| `http://localhost:8000/portal/`       | Setup wizard — stand up a fresh PVE-backed deployment without SSH-ing into Proxmox | [`docs/SETUP-UI.md`](docs/SETUP-UI.md) |
+| `http://localhost:8000/portal/test/`  | Operator test tool — every control-plane endpoint as a click button | [`docs/TEST-UI.md`](docs/TEST-UI.md) |
+
+Both are served by the API container via FastAPI `StaticFiles`. No
+new containers, no new build step — just open the URL.
+
+### Running a live drill (L1)
+
+Once preflight is 9/9:
+
+```bash
+make live-drill SCENARIO=first-live-drill TIMEOUT=300   # run the drill
+make verify-drill                                          # 4/4 checks pass on success
+```
+
+The full runbook is at [`docs/LIVE-DRILL-RUNBOOK.md`](docs/LIVE-DRILL-RUNBOOK.md).
+
+### Current state
+
+- **243 tests passing**, **`make preflight` 8/9** (template missing).
+- L1 ledger: **4 ✅ / 8 ❌ / 3 ⚠️**. See
+  [`docs/TEST-PRODUCT.md`](docs/TEST-PRODUCT.md) for the per-criterion
+  progress and the next-5-items plan.
+- Phase 0 → L1 complete in code; L1 closures require one live
+  drill, which is documented in the runbook above.
 
 Once `make up` succeeds, open:
 
@@ -181,15 +233,28 @@ CI runs on every PR — see `.github/workflows/ci.yml`.
 
 ## Roadmap
 
-| Phase | What | When |
-|------:|------|------|
-| 0     | **You are here.** Control-plane skeleton + Proxmox client (unused) | now |
-| 1     | One-VM drill end-to-end (vsftpd scenario, tpl-ubuntu-2204)        | ~2 wk |
-| 2     | Multi-VM drills in isolated VxLAN zones                            | ~3 wk |
-| 3     | Wazuh correlation + MISP publishing + PDF after-action reports    | ~2 wk |
-| 4     | RBAC via Keycloak + scheduled drills + scenarios marketplace       | ~2 wk |
+| Phase | What | Status |
+|------:|------|:------:|
+| 0     | Control-plane skeleton + Proxmox client wrapper                       | ✅ done |
+| 1     | One-VM drill end-to-end (vsftpd → first-live-drill scenario)          | ✅ code ✅ — needs one live drill run to flip all L1 ✅ |
+| 2     | Multi-VM drills in isolated VxLAN zones                              | ❌ not started |
+| 3     | Wazuh correlation + MISP publishing + PDF after-action reports      | ❌ not started |
+| 4     | RBAC via Keycloak + scheduled drills + scenarios marketplace         | ❌ not started |
 
-Full plan: [`docs/PLAN.md`](docs/PLAN.md).
+**Where we actually are**: between Phase 0 and Phase 2. The L1
+acceptance bar from [`docs/TEST-PRODUCT.md`](docs/TEST-PRODUCT.md) is
+met in code — all 243 tests pass, `make preflight` reports 8/9, and
+the wizard at `/portal/` covers the only remaining PVE-side action
+(template upload). One real drill + a `git tag v0.1.0-phase1` and L1
+is closed.
+
+**Next move** (≈3.5 h, no PVE required): see
+[`docs/TEST-PRODUCT.md` §Next plan](docs/TEST-PRODUCT.md#next-plan-post-l1-ordered)
+— cancel-path smoke tests, `make verify` + CI, portal smoke, token
+middleware, SSH-key wizard step.
+
+Full design: [`docs/PLAN.md`](docs/PLAN.md). Canonical status ledger:
+[`docs/TEST-PRODUCT.md`](docs/TEST-PRODUCT.md).
 
 ---
 

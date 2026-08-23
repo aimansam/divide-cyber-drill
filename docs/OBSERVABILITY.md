@@ -29,6 +29,16 @@ The API exposes Prometheus 0.0.4 exposition format on `GET /metrics`.
 | `divide_http_request_latency_seconds` | `method`, `route` | HTTP handler latency |
 | `divide_cancel_requests_total` | `result` | `/drills/{id}/cancel` outcomes |
 
+**Labels are preserved end-to-end** — Prometheus, Grafana, and the
+`make verify-drill` tool all use the `outcome` and `adapter` labels
+distinctly. Don't ever collapse `divide_runs_total` to a single number:
+a `succeeded` and a `failed` increment look identical without labels,
+but the regression check (`make verify-drill`) needs to distinguish
+them. Earlier in this project, `_fetch_metrics` in `verify_drill.py`
+stripped labels — that bug shipped as commit `a600f3c6` and was fixed
+in commit `2e4abf7`. The `tests/test_verify_drill.py` suite has a
+`_fetch_metrics_preserves_labels` test that catches any regression.
+
 Cardinality is bounded:
 - `route` is the templated FastAPI path (`/{run_id}/cancel`), not the literal URL.
 - `outcome` / `result` / `status` use closed enums.

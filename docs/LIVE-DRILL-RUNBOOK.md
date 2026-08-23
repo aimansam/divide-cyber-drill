@@ -74,6 +74,24 @@ If you don't see that line, the grant didn't take. Re-run the command.
 - If the user doesn't exist: `pveum user add divide@pve@pam --comment "div:ide runner"`
 - If the role doesn't exist: `pveum role list | grep PVEVMAdmin` — it should be there by default in PVE 8+.
 
+### 1.5. Verify the ACL via PVE's per-principal permissions API
+
+This is the **one** verification that actually matters. The ACL table
+(`pveum acl list`) requires `Access.Audit` which the divide token
+deliberately doesn't have — so `pveum` on the dev box will see what the
+operator user sees, not what the divide token sees.
+
+Run this from the dev box (uses the divide token):
+
+```bash
+curl -sk -H "Authorization: PVEAPIToken=$(grep ^PROXMOX_TOKEN_ID deploy/.env | cut -d= -f2)=$(grep ^PROXMOX_TOKEN_SECRET deploy/.env | cut -d= -f2)" \
+  https://$(grep ^PROXMOX_HOST deploy/.env | cut -d= -f2 | sed 's|https://||')/api2/json/access/permissions
+```
+
+Expected: a JSON object with a `/` key containing at least
+`VM.Allocate`, `VM.Clone`, and `VM.PowerMgmt` (or any subset on
+`/vms`, `/v2/vm`, etc.). `preflight` runs this same check.
+
 ---
 
 ## 2. Verify env on dev box
@@ -106,7 +124,8 @@ the convention for proxmoxer's token auth.
 make preflight
 ```
 
-**Expected: 8/8 checks PASS.**
+**Expected: 9/9 checks PASS** (1/2 healthz + Proxmox config + nodes
++ ACL + Template + scenario + metrics + Prometheus + Grafana = 9).
 
 ```
 ======================================================================
@@ -115,19 +134,26 @@ PRE-FLIGHT REPORT
   [PASS] /healthz responds 200                              env=dev, version=0.1.0
   [PASS] PROXMOX_* configured (RealProxmoxAdapter)          version=9.1.7, ok=?
   [PASS] PVE nodes reachable                                1 node(s): pve
+  [PASS] ACL grants PVEVMAdmin on /v2/vm to divide@pve@pam  path=/ privs=VM.Allocate,VM.Clone,VM.PowerMgmt (via /access/permissions)
   [PASS] Template 'tpl-debian-cloudinit' exists on PVE      vmid=9000
   [PASS] Scenario 'first-live-drill' in DB                  id=3
   [PASS] /metrics live on API                               12 divide_* metric families, ...
   [PASS] Prometheus scraping divide-api                     http://api:8000/metrics -> up
   [PASS] Grafana dashboard 'divide-drill-platform' loaded   title='div:ide — Drill Platform', panels=6
 ----------------------------------------------------------------------
-  8/8 checks passed
+  9/9 checks passed
   READY for live drill. Run: make live-drill
 ======================================================================
 ```
 
+If the ACL check fails with "no drill privileges found", see §1.5
+below — the fix is on the PVE host, not in the runbook.
+
+If the template check fails, the wizard at `/portal/` (§4b) or the
+manual path (§4c–4e) below are both fine — pick whichever you prefer.
+
 Each FAIL line tells you exactly what to fix. Run `make preflight` again
-after any change until 8/8.
+after any change until 9/9.
 
 ---
 
@@ -410,3 +436,67 @@ The runner's `_best_effort_teardown` already destroys the clone on
 | `docs/OBSERVABILITY.md` | Metric reference + Grafana dashboard authoring |
 | `deploy/prometheus/prometheus.yml` | Scrape config |
 | `deploy/grafana/dashboards/divide-drill-platform.json` | The 6-panel dashboard |
+
+---
+
+## 9. What's next (post-L1)
+
+L1 closes when the operator runs through §1–§8 above and tags
+`v0.1.0-phase1` on master. After that, the five next moves
+(from `docs/TEST-PRODUCT.md` §"Next plan"):
+
+| # | Item | Effort | PVE needed? | What it unblocks |
+|---|---|---|---|---|
+| 1 | **Cancel-path smoke tests** for `live-cancel` + `watch-drill` via MockProxmoxAdapter | 30 min | No | L1 1.10, 1.11, 1.12 → ✅ |
+| 2 | **`make verify` alias** (`lint && test && preflight && smoke`) | 30 min | No | L2 2.13 |
+| 3 | **Wire `make verify-drill` into CI** | 15 min | No | L2 2.14 |
+| 4 | **Token middleware + `divide issue-token` CLI** | 1.5 h | No | L2 2.3, 2.4, 2.5, 2.9 |
+| 5 | **SSH-key wizard step** (Bucket E) so the wizard flips `PVEStorageAdmin` itself | 1 h | One SSH key setup | Full autonomy for fresh deploys |
+
+After these, **L2 is buildable** (Token middleware is the longest
+item). L3 is a separate project — see [docs/TEST-PRODUCT.md](TEST-PRODUCT.md)
+§L3 for the scope.
+
+### Why these five (not others)
+
+These are the items that:
+
+- Close remaining L1 criteria without any PVE work (1, 2, 3) — flip
+  5 ❌ → ✅ in 1.5 h.
+- Unblock the L2 work in this order (4 → 5 → then everything else).
+- Don't depend on each other — could be done one per session.
+
+What we're **not** doing next:
+
+- More Phase 2 work (multi-VM, SDN zones) — that's L3.
+- Real auth — that's L2.
+- Resilient queue workers — that's Phase 3+.
+
+### Tooling that already exists for the next steps
+
+| Need | Tool |
+|---|---|
+| Cancel-path coverage | `MockProxmoxAdapter` + `tests/test_runner.py` already cover 70% |
+| CI wiring | `.github/workflows/ci.yml` has the slots; just need to add `make verify-drill` |
+| Token middleware | `app/core/` is the right home; `app.core.config.settings.proxmox.token_secret` is the model |
+| SSH-key for wizard | `docs/SETUP-UI.md` §"When to use the runbook instead" lists what changes |
+
+### What *does* still need PVE work after L1
+
+1. **Updating templates** (new `tpl-kali`, `tpl-win2022`): even with
+   the wizard, each new template still needs a base OS image and
+   PVE-side network setup.
+2. **Real multi-node**: today `tpl-debian-cloudinit` lives on one node.
+   Multi-node drills need it replicated.
+3. **SDN zones per drill**: Phase 2 work; no PVE token setup tricks
+   will get around this.
+
+### Tracking these
+
+L1 ledger lives in [docs/TEST-PRODUCT.md](TEST-PRODUCT.md) §L1 Criteria.
+Every time one flips ✅ the doc's update log gets a row.
+
+L2 ledger lives in the same doc §L2; the items in the table above are
+2.3, 2.4, 2.5, 2.9, 2.13, 2.14.
+
+L3 is in the same doc §L3 — out of scope for the next move.

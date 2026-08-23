@@ -85,7 +85,7 @@ contains the damage (rate limits, sane defaults, no shared secrets).
 
 | # | Criterion | Status |
 |---|---|---|
-| 2.1  | A minimal HTML page (`portals/minimal/`) lists scenarios + lets you start/stop a drill with one click | ❌ no portal yet |
+| 2.1  | Operator browser tool at `/portal/test/` with one-click access to scenarios, drills, assets, audit, metrics, Proxmox | ✅ done ([`docs/TEST-UI.md`](TEST-UI.md), commit `cd0ccb5`) |
 | 2.2  | Portal can reach the API via the dev box hostname, not just localhost | ❌ needs Traefik route |
 | 2.3  | API has a token-based auth middleware (`X-Divide-Token` header) | ❌ wide-open |
 | 2.4  | Token issuance CLI: `divide issue-token --user alice --role trainee` | ❌ no auth subsystem |
@@ -100,22 +100,26 @@ contains the damage (rate limits, sane defaults, no shared secrets).
 | 2.13 | Pre-flight gate in `make verify` (alias for `lint && test && preflight && smoke`) | ❌ not built |
 | 2.14 | `make verify-drill` runs as a CI job on every PR | ❌ only in local `make` |
 | 2.15 | L1 criteria all still green | ❌ blocked on L1 |
+| 2.16 | Setup wizard at `/portal/` for fresh PVE-backed deployment (browser-driven; no SSH into PVE except one `pveum` grant) | ✅ done ([`docs/SETUP-UI.md`](SETUP-UI.md), commit `496efd1`) |
+| 2.17 | `GET /api/v1/drills/{id}` returns a single run + its assets (no need to query the DB directly) | ✅ done (commit `cd0ccb5`) |
+| 2.18 | `GET /api/v1/drills/{id}/audit` returns the append-only audit log for one drill (no need to query the DB directly) | ✅ done (commit `cd0ccb5`) |
 
 ### L2 Time-to-ship estimate
 
-**~3-5 hours of coding + 1 hour of testing.**
+**~3-4 hours of coding + 30 min of testing.** 3 of 18 criteria are
+already done (test UI, wizard, two missing API endpoints).
 
 Big chunks:
 - 1 h — token middleware + issuance CLI
-- 1 h — minimal HTML portal (no framework, vanilla JS + fetch)
-- 30 min — drill timeout (prometheus gauge + simple background task)
+- 1 h — drill timeout (prometheus gauge + simple background task)
 - 1 h — telemetry sinks (MinIO upload at run completion)
 - 30 min — `make verify` alias + wire into CI
 - 30 min — CORS + rate limit + other hardening
+- Already shipped (no work): 2.1 (test UI), 2.16 (wizard), 2.17, 2.18 (API endpoints)
 
 ### L2 Done definition
 
-All 15 L1 criteria green + all 15 L2 criteria green. A non-PVE
+All 15 L1 criteria green + all 18 L2 criteria green. A non-PVE
 operator can complete a drill from the portal, see Grafana light up,
 download an after-action JSON. Master tagged `v0.2.0-l2`.
 
@@ -169,6 +173,71 @@ you work on it daily, longer if you're splitting attention.
 
 A stranger can sign up via SSO, run a drill, get a PDF report, and
 the SOC team sees the drill in Wazuh — without you being involved.
+
+---
+
+## Next plan (post-L1, ordered)
+
+Five work items that close most of the remaining L1/L2 without PVE.
+Each is small enough to ship in one sitting.
+
+| # | Item | Effort | Files | PVE needed? | What it flips |
+|---|---|---|---|---|---|
+| 1 | **Cancel-path smoke tests** for `live-cancel` + `watch-drill` via `MockProxmoxAdapter` | 30 min | `tests/test_cancel_smoke.py` (new) | No | L1 1.10, 1.11, 1.12 → ✅ |
+| 2 | **`make verify` alias** + CI wiring | 30 min | `Makefile`, `.github/workflows/ci.yml` | No | L2 2.13 ✅, 2.14 ✅ |
+| 3 | **`/portal/test/` Playwright smoke** (catches UI regressions in CI) | 30 min | `tests/test_portal_smoke.py` | No | regression guard |
+| 4 | **Token middleware + `divide issue-token` CLI** | 1.5 h | `app/core/auth.py`, `tools/issue_token.py` | No | L2 2.3, 2.4, 2.5, 2.9 → ✅ |
+| 5 | **SSH-key wizard step** (Bucket E) so wizard flips `PVEStorageAdmin` itself | 1 h | `app/services/admin.py`, `portal/index.html` | **One SSH key setup** | full autonomy for fresh deploys |
+
+**Total: ~3.5 h.** After this: full L1 ✅, ~7/18 L2 ✅, deployment is
+"open browser, click through, drill runs".
+
+### Why this order
+
+1. **#1 first** because it flips three L1 criteria without any PVE
+   work. Cheapest L1 closure.
+2. **#2 second** because `make verify` makes every later change safer
+   to ship (catches regressions locally + in CI).
+3. **#3 third** because the test UI is already the primary tool
+   you'll use to debug the next round of changes.
+4. **#4 fourth** because token middleware unblocks L2 properly
+   (currently `/api/v1/admin/*` and `/portal/*` are wide open).
+5. **#5 last** because it's the only item needing a one-time PVE
+   host SSH key — do it once L1 + L2-essentials are done.
+
+### Why we are NOT doing these next
+
+- More PVE integration (multi-node, SDN zones, etc.) — that's L3
+  scope per Phase 2 of PLAN.md.
+- Real authn/authz (Keycloak/OIDC) — L3 (criteria 3.1–3.5).
+- Resilient queue workers — Phase 3+ (criteria 3.8–3.13).
+- PDF after-action reports — that's a single L2 item (2.12), slot it
+  in with the MinIO work (#5 above).
+
+### Tracking these in the L1/L2 ledger
+
+Each item above maps to existing criteria:
+
+- #1 → L1 1.10 (cancel endpoint), 1.11 (live-cancel CLI), 1.12 (watcher).
+- #2 → L2 2.13 (make verify), 2.14 (CI).
+- #4 → L2 2.3, 2.4, 2.5, 2.9.
+- #5 → not on the L1/L2 list as a single criterion, but enables
+  "1.2 succeeds via wizard" so the operator never has to SSH for
+  PVE perms again.
+
+When one ships, update the relevant row in §L1 / §L2 + add a row to
+the update log at the bottom of this file.
+
+### What still needs PVE work after the above 5
+
+1. **Updating the template** (kernel upgrade, new package, etc.) —
+   re-runs the upload-template flow; the wizard covers it.
+2. **Adding a new template** (`tpl-kali`, `tpl-win2022`) — the
+   wizard's step 3 is generalised enough to handle this once we add
+   a `kind: vm` selector for non-cloud-init flows.
+3. **Multi-node PVE clusters** — wizard per node, or template
+   replication per node.
+4. **SDN zones per drill** — Phase 2 scope, ~weeks.
 
 ---
 
