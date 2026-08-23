@@ -217,3 +217,42 @@ def test_readme_lists_test_product_in_docs():
     assert "TEST-PRODUCT.md" in readme, "README.md should list TEST-PRODUCT.md in docs/"
 
 
+def test_user_requirements_doc_exists_and_links():
+    """USER-REQUIREMENTS.md is the persona-side companion to
+    TEST-PRODUCT.md. Catches silent rename/move of the doc.
+    """
+    doc = REPO / "docs" / "USER-REQUIREMENTS.md"
+    assert doc.exists(), "docs/USER-REQUIREMENTS.md must exist"
+
+    text = doc.read_text(encoding="utf-8")
+    # Must name the five human personas + the watchdog.
+    for persona in [
+        "Platform Admin",
+        "Drill Lead",
+        "Red Team",
+        "Blue Team",
+        "Observer",
+        "Watchdog",
+    ]:
+        assert persona in text, f"USER-REQUIREMENTS.md should mention '{persona}'"
+
+    # Must reference the parent doc it complements.
+    assert "TEST-PRODUCT.md" in text
+    assert "PLAN.md" in text
+
+    # Must include the permission matrix table header (so future
+    # edits don't silently drop it).
+    assert "Per-role permission matrix" in text
+
+    # Cross-link from TEST-PRODUCT.md must point at this doc.
+    tp = (REPO / "docs" / "TEST-PRODUCT.md").read_text(encoding="utf-8")
+    assert "USER-REQUIREMENTS.md" in tp, (
+        "TEST-PRODUCT.md should link to USER-REQUIREMENTS.md in its "
+        "'How to read this' footer"
+    )
+
+    # README must list the new doc in the docs/ tree.
+    readme = (REPO / "README.md").read_text(encoding="utf-8")
+    assert "USER-REQUIREMENTS.md" in readme
+
+

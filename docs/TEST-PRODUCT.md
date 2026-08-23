@@ -315,6 +315,10 @@ lists, ask yourself if it's worth doing now. There's a strong
 "don't build what isn't asked for" rule in the gaps between these
 levels.
 
+For the persona-side view of L2 (who is the user, what can they
+do today, what's missing), see
+[`docs/USER-REQUIREMENTS.md`](USER-REQUIREMENTS.md).
+
 ---
 
 ## Update log

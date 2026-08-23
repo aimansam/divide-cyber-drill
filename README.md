@@ -49,6 +49,7 @@ divide-cyber-drill/
 │   ├── SCENARIO-SPEC.md         # full scenario YAML spec
 │   ├── SCENARIO-SYNC.md         # YAML → DB catalog sync
 │   ├── TEST-PRODUCT.md          # **canonical**: L1/L2/L3 ship criteria + ETAs + next plan
+│   ├── USER-REQUIREMENTS.md     # persona view: who needs what, what's wired, what's missing
 │   ├── SETUP-UI.md              # docs for the browser-based setup wizard at /portal/
 │   ├── TEST-UI.md               # docs for the operator test tool at /portal/test/
 │   └── images/                  # 6 architecture diagrams (auto-generated)
