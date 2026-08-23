@@ -54,7 +54,7 @@ shows the run, teardown works, audit log is populated.
 | 1.11 | `make live-cancel CANCEL_AFTER=10` exits with the run in `cancelled` state | tool output | ✅ covered by `tests/test_cancel_smoke.py::test_live_cancel_marks_run_cancelled_with_reason` |
 | 1.12 | Drill can be cancelled by Prometheus watcher (the `watch_drill.py` path) | `make watch-drill OUTCOME=cancelled` | ✅ covered by `tests/test_cancel_smoke.py::test_watch_drill_cancel_after_path_triggers_cancel_endpoint` + `tests/test_watch_drill.py::test_cancel_after_sends_cancel_request` |
 | 1.13 | Operator runbook exists and is accurate | `docs/LIVE-DRILL-RUNBOOK.md` | ✅ written |
-| 1.14 | All previously-shipped stages have passing tests | `make test` | ✅ 275 passing |
+| 1.14 | All previously-shipped stages have passing tests | `make test` | ✅ 276 passing |
 | 1.15 | `make lint` is clean | `make lint` | ✅ clean |
 
 ### L1 Time-to-ship estimate
@@ -185,32 +185,27 @@ the SOC team sees the drill in Wazuh — without you being involved.
 
 ## Next plan (post-L1, ordered)
 
-Five work items that close most of the remaining L1/L2 without PVE.
-Each is small enough to ship in one sitting.
+> **L1 is closed** (run #11 succeeded, ledger 9/9 ✅). Items #1–#4 below
+> shipped during the L1-closure round. Only #5 remains, and it's now
+> optional — the wizard's `pveum` copy-paste block already walks an
+> operator through the one-time `PVEDatastoreAdmin` grant without
+> needing wizard automation.
 
-| # | Item | Effort | Files | PVE needed? | What it flips |
-|---|---|---|---|---|---|
-| 1 | **Cancel-path smoke tests** for `live-cancel` + `watch-drill` via `MockProxmoxAdapter` | 30 min | `tests/test_cancel_smoke.py` (new) | No | L1 1.10, 1.11, 1.12 → ✅ |
-| 2 | **`make verify` alias** + CI wiring | 30 min | `Makefile`, `.github/workflows/ci.yml` | No | L2 2.13 ✅, 2.14 ✅ |
-| 3 | **`/portal/test/` smoke in CI** (catches UI regressions; static analysis on the HTML+JS, no browser needed) | ✅ done ([`tests/test_portal_smoke.py`](../../tests/test_portal_smoke.py), 6 tests; covers both `/portal/` and `/portal/test/`). Why not Playwright: would add ~150 MB CI image and 30+ s per run for the failure mode (renamed endpoint → portal silent 404) which a 6-test regex static check catches in <100 ms with zero infra deps. If click-through tests become valuable later, add Playwright then. |
-| 4 | **Token middleware + `divide issue-token` CLI** | 1.5 h | `app/core/auth.py`, `tools/issue_token.py` | No | L2 2.3, 2.4, 2.5, 2.9 → ✅ |
-| 5 | **SSH-key wizard step** (Bucket E) so wizard flips `PVEDatastoreAdmin` itself | 1 h | `app/services/admin.py`, `portal/index.html` | **One SSH key setup** | full autonomy for fresh deploys |
+| # | Item | Status | Notes |
+|---|---|---|---|
+| 1 | **Cancel-path smoke tests** | ✅ done (`tests/test_cancel_smoke.py`) | flipped L1 1.10, 1.11, 1.12 |
+| 2 | **`make verify` alias + CI wiring** | ✅ done (commit `be36033`) | flipped L2 2.13, 2.14 |
+| 3 | **`/portal/test/` smoke in CI** | ✅ done (`tests/test_portal_smoke.py`, 6 tests) | static-analysis regex on the HTML; no browser needed |
+| 4 | **Token middleware + `divide issue-token` CLI** | ✅ done (`app/core/auth.py`, `tools/issue_token.py`) | flipped L2 2.3, 2.4, 2.5 |
+| 5 | **SSH-key wizard step** (Bucket E) so wizard flips `PVEDatastoreAdmin` itself | ❌ **next** (~1 h, optional) | removes the last remaining human action in a fresh deploy; the wizard's copy-paste block is the current stand-in |
 
-**Total: ~3.5 h.** After this: full L1 ✅, ~7/18 L2 ✅, deployment is
-"open browser, click through, drill runs".
+### Where the L2 work sits
 
-### Why this order
-
-1. **#1 first** because it flips three L1 criteria without any PVE
-   work. Cheapest L1 closure.
-2. **#2 second** because `make verify` makes every later change safer
-   to ship (catches regressions locally + in CI).
-3. **#3 third** because the test UI is already the primary tool
-   you'll use to debug the next round of changes.
-4. **#4 fourth** because token middleware unblocks L2 properly
-   (currently `/api/v1/admin/*` and `/portal/*` are wide open).
-5. **#5 last** because it's the only item needing a one-time PVE
-   host SSH key — do it once L1 + L2-essentials are done.
+The remaining ~2.5 h to ship L2 is **not** in this table — it's in
+[§L2](#l2--trusted-colleague-lan-demo). Items 2.7 (rate-limit),
+2.8 (drill timeout), 2.11 (MinIO telemetry), 2.12 (after-action JSON)
+are queued next. Once those four ship: L2 ledger 15/18 ✅,
+tag `v0.2.0-l2`.
 
 ### Why we are NOT doing these next
 
@@ -218,16 +213,15 @@ Each is small enough to ship in one sitting.
   scope per Phase 2 of PLAN.md.
 - Real authn/authz (Keycloak/OIDC) — L3 (criteria 3.1–3.5).
 - Resilient queue workers — Phase 3+ (criteria 3.8–3.13).
-- PDF after-action reports — that's a single L2 item (2.12), slot it
-  in with the MinIO work (#5 above).
+- PDF after-action reports — L2 item 2.12, rolled into the L2 block
+  above (slots naturally with the MinIO work).
 
 ### Tracking these in the L1/L2 ledger
 
-Each item above maps to existing criteria:
-
-- #1 → L1 1.10 (cancel endpoint), 1.11 (live-cancel CLI), 1.12 (watcher).
-- #2 → L2 2.13 (make verify), 2.14 (CI).
-- #4 → L2 2.3, 2.4, 2.5, 2.9.
+- #1 → L1 1.10, 1.11, 1.12.
+- #2 → L2 2.13, 2.14.
+- #4 → L2 2.3, 2.4, 2.5 (2.9 partially — full audit attribution
+  needs the runner's `_audit()` hook updated to read the token subject).
 - #5 → not on the L1/L2 list as a single criterion, but enables
   "1.2 succeeds via wizard" so the operator never has to SSH for
   PVE perms again.

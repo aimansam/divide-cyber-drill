@@ -441,20 +441,23 @@ The runner's `_best_effort_teardown` already destroys the clone on
 
 ## 9. What's next (post-L1)
 
-L1 closes when the operator runs through §1–§8 above and tags
-`v0.1.0-phase1` on master. After that, the five next moves
-(from `docs/TEST-PRODUCT.md` §"Next plan"):
+L1 closed with run #11 (`status=succeeded`). The five next moves
+(from `docs/TEST-PRODUCT.md` §"Next plan") are now:
 
-| # | Item | Effort | PVE needed? | What it unblocks |
-|---|---|---|---|---|
-| 1 | **Cancel-path smoke tests** for `live-cancel` + `watch-drill` via MockProxmoxAdapter | 30 min | No | L1 1.10, 1.11, 1.12 → ✅ |
-| 2 | **`make verify` alias** (`lint && test && preflight && smoke`) | 30 min | No | L2 2.13 |
-| 3 | **Wire `make verify-drill` into CI** | 15 min | No | L2 2.14 |
-| 4 | **Token middleware + `divide issue-token` CLI** | 1.5 h | No | L2 2.3, 2.4, 2.5, 2.9 |
-| 5 | **SSH-key wizard step** (Bucket E) so the wizard flips `PVEDatastoreAdmin` itself | 1 h | One SSH key setup | Full autonomy for fresh deploys |
+| # | Item | Status |
+|---|---|---|
+| 1 | **Cancel-path smoke tests** for `live-cancel` + `watch-drill` via MockProxmoxAdapter | ✅ done (`tests/test_cancel_smoke.py`) |
+| 2 | **`make verify` alias** (`lint && test && preflight && smoke`) | ✅ done (commit `be36033`) |
+| 3 | **Wire `make verify-drill` into CI** | ✅ done (commit `be36033`) |
+| 4 | **Token middleware + `divide issue-token` CLI** | ✅ done (commit `90f7eaa`) |
+| 5 | **SSH-key wizard step** (Bucket E) so the wizard flips `PVEDatastoreAdmin` itself | ❌ optional (~1 h) — current stand-in is the wizard's copy-paste `pveum` block |
 
-After these, **L2 is buildable** (Token middleware is the longest
-item). L3 is a separate project — see [docs/TEST-PRODUCT.md](TEST-PRODUCT.md)
+**Remaining L2 work** (~2.5 h, no PVE required): items 2.7 (rate-limit
+on `POST /drills`), 2.8 (drill auto-timeout), 2.11 (MinIO telemetry
+sink), 2.12 (after-action JSON report). Once those ship: L2 ledger
+15/18 ✅, tag `v0.2.0-l2`.
+
+L3 is a separate project — see [docs/TEST-PRODUCT.md](TEST-PRODUCT.md)
 §L3 for the scope.
 
 ### Why these five (not others)

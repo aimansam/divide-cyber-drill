@@ -103,7 +103,7 @@ cp deploy/.env.example deploy/.env
 
 make build          # build the API container
 make up             # start the stack (waits for /healthz)
-make preflight      # confirm 9/9 PVE + stack health checks pass (expect 8/9 until template is uploaded)
+make preflight      # confirm 9/9 PVE + stack health checks pass
 make smoke          # curl the health, ready, and stub endpoints
 make logs           # tail logs
 ```
@@ -122,12 +122,18 @@ new containers, no new build step — just open the URL.
 
 ### Running a live drill (L1)
 
-Once preflight is 9/9:
+L1 is closed. Run #11 ended `succeeded` (`pve_vmid=109`, audit log
+populated, asset teardown to `stopped`). The drill command:
 
 ```bash
 make live-drill SCENARIO=first-live-drill TIMEOUT=300   # run the drill
 make verify-drill                                          # 4/4 checks pass on success
 ```
+
+For a fresh deploy on a new PVE host, the wizard at `/portal/` walks
+through everything (probe, ACL grant, template upload, first drill) in
+~10 minutes — no SSH into PVE required except for one `pveum acl modify`
+line.
 
 The full runbook is at [`docs/LIVE-DRILL-RUNBOOK.md`](docs/LIVE-DRILL-RUNBOOK.md).
 
@@ -241,17 +247,24 @@ CI runs on every PR — see `.github/workflows/ci.yml`.
 | 3     | Wazuh correlation + MISP publishing + PDF after-action reports      | ❌ not started |
 | 4     | RBAC via Keycloak + scheduled drills + scenarios marketplace         | ❌ not started |
 
-**Where we actually are**: between Phase 0 and Phase 2. The L1
+**Where we actually are**: between Phase 1 and Phase 2. The L1
 acceptance bar from [`docs/TEST-PRODUCT.md`](docs/TEST-PRODUCT.md) is
-met in code — all 243 tests pass, `make preflight` reports 8/9, and
-the wizard at `/portal/` covers the only remaining PVE-side action
-(template upload). One real drill + a `git tag v0.1.0-phase1` and L1
-is closed.
+met end-to-end — all 276 tests pass, `make preflight` reports 9/9, run
+#11 succeeded against real PVE (clone → boot → stop → destroy on a
+single `drill_vm` asset), and the wizard at `/portal/` covers the
+one-shot fresh-deploy path (probe → `pveum` grant → template upload →
+first drill).
 
-**Next move** (≈3.5 h, no PVE required): see
-[`docs/TEST-PRODUCT.md` §Next plan](docs/TEST-PRODUCT.md#next-plan-post-l1-ordered)
-— cancel-path smoke tests, `make verify` + CI, portal smoke, token
-middleware, SSH-key wizard step.
+**Next move** (~2.5 h, no PVE required): close the remaining L2 work
+listed in [`docs/TEST-PRODUCT.md` §L2](docs/TEST-PRODUCT.md#l2--trusted-colleague-lan-demo)
+— rate-limit on `POST /drills`, drill auto-timeout, MinIO telemetry
+sink, after-action JSON report. Once those land: L2 ledger to 15/18
+✅, tag `v0.2.0-l2`.
+
+**Optional polish** (~1 h, no PVE required): next-plan item #5
+(SSH-key wizard step) so the wizard flips `PVEDatastoreAdmin` itself
+and a fresh deploy needs zero SSH into PVE at all. See
+[`docs/TEST-PRODUCT.md` §Next plan](docs/TEST-PRODUCT.md#next-plan-post-l1-ordered).
 
 Full design: [`docs/PLAN.md`](docs/PLAN.md). Canonical status ledger:
 [`docs/TEST-PRODUCT.md`](docs/TEST-PRODUCT.md).

@@ -2,7 +2,8 @@
 
 ## Design & Architecture Plan
 
-> **Status:** Phase 0 — Foundations **DONE**. Stages 2, 2.5, 2.7, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12 **DONE**.
+> **Status:** Phase 0 — Foundations **DONE**. Stages 2, 2.5, 2.7, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18 **DONE**.
+> **Phase 1 — One-VM drill end-to-end ✅ CLOSED** (run #11, status=`succeeded`, VMID 109 cloned from `tpl-debian-cloudinit`, audit populated, asset teardown to `stopped`). `make preflight` 9/9 READY. 276 tests passing. L1 ledger 9/9 ✅.
 > PVE auth unblocked (PROXMOX_USER fix + PVE 9 GET /cluster/nextid).
 > First live drill is one `pveum acl` away.
 > See **[docs/TEST-PRODUCT.md](TEST-PRODUCT.md)** for L1/L2/L3 "test product" criteria and ETA per level.
@@ -389,7 +390,9 @@ On drill completion, report-builder extracts IOCs (IPs, domains, URLs, hashes) f
 - New preflight check: `check_acl_for_writes()` confirms `divide@pve@pam` has a write-role on `/v2/vm` (direct grant) or `/` with propagate=1 (inherited). Recognizes `PVEVMAdmin`, `PVEAdmin`, `PVEUserAdmin` as sufficient. Distinct FAIL messages for: no grant, wrong role, stale pveproxy cache.
 - 6 new preflight tests covering all four PASS paths + the two FAIL paths + the 502 error path.
 - Tests: 163 → 169 (+6). Lint clean.
-- Live verified: preflight now reports **7/9** (ACL stale-cache FAIL + template missing FAIL). Once `service pveproxy restart` runs on the PVE host, ACL check will PASS and preflight will report **8/9** (template is the only remaining blocker).
+- Live verified: preflight reports **9/9 READY** after the
+  `/access/permissions` switch + the `tpl-debian-cloudinit` template
+  creation (commit `556e642`).
 
 **Stage 12 — Verify-after-drill tool** ✅
 - New `tools/verify_drill.py` — post-drill sanity check that inspects DB state + audit log + `/metrics` and reports PASS/FAIL on four axes:
@@ -403,11 +406,109 @@ On drill completion, report-builder extracts IOCs (IPs, domains, URLs, hashes) f
 - New `make verify-drill` target — ergonomic wrapper accepting `RUN_ID=`, `RUN_EXPECT=`, `RUN_JSON=1`, `RUN_NO_DESTROY=1`.
 - Live verified: `make verify-drill RUN_EXPECT=failed RUN_NO_DESTROY=1` correctly reports run #7 (the prior template-missing failure) as PASS on the status check.
 
-**Phase 1 — One-VM drill end-to-end** (after Stage 12 — waiting on PVEproxy restart + template upload)
-- Single Ubuntu drill VM (vsftpd 2.3.4) — happy path with real PVE
-- Templates: `tpl-ubuntu-2204` + Kali template
-- Portal: list scenarios, start drill, see console, see artifact (PCAP), stop drill
-- Wazuh: drill group auto-created
+**Phase 1 — One-VM drill end-to-end** ✅
+- Single Ubuntu drill VM (vsftpd 2.3.4) — happy path with real PVE.
+- Template: `tpl-debian-cloudinit` (debian-13-genericcloud, qcow2 import
+  via `local: /upload?content=import` + `POST /qemu/{vmid}/config`
+  with `scsi0=local-lvm:0,import-from={volid}`).
+- Portal: `/portal/` setup wizard, `/portal/test/` operator tool.
+- Run #11 — `status=succeeded`, `pve_vmid=109`, audit
+  `run.started → asset.spawned → run.completed`, asset teardown
+  to `stopped`. `make preflight` 9/9 READY. L1 ledger 9/9 ✅.
+- Four PVE 9 schema fixes shipped with the closure commit
+  (`556e642`): upload generator → file handle, `net0` made optional
+  for SDN-managed PVE, `importdisk` → `config` with
+  `import-from=` syntax, `clone.post` split from `config.post` +
+  `resize.put`. Plus runner DNS-name sanitization
+  (`role="drill_vm"` → `drillvm`).
+- Tests: 256 → 276.
+
+**Stage 13 — Cancel-path smoke tests** ✅ (post-L1, item #1 of the
+post-L1 plan in TEST-PRODUCT.md)
+- New `tests/test_cancel_smoke.py` (5 tests) drives the
+  `live-cancel` + `watch_drill --cancel-after` paths through the
+  mock adapter, asserting run-status, audit, and metric-counter
+  invariants end-to-end. Flipped L1 1.10 / 1.11 / 1.12 to ✅
+  without any PVE work. Tests: 243 → 248 (+5).
+
+**Stage 14 — `make verify` aggregate gate** ✅ (post-L1, item #2+#3)
+- New `make verify` target chains `lint && test && preflight && smoke`
+  (preflight is `-`-prefixed so a PVE-unreachable dev box still passes
+  — useful for laptops).
+- `tests/test_verify_drill.py` + `tests/test_verify.py` exercise the
+  orchestrator and `verify_drill.main()` with mocked httpx, proving
+  end-to-end without a live drill in the DB. The CI workflow
+  (`.github/workflows/ci.yml`) now runs `make verify` on every push.
+- Flipped L2 2.13 + 2.14 to ✅. Tests: 248 → 256 (+8).
+
+**Stage 15 — Setup wizard at `/portal/`** ✅
+- 4-step browser UI (probe → ACL grant → template upload → first
+  drill) served by FastAPI `StaticFiles`. No SSH into PVE required
+  except for one `pveum acl modify /storage --users divide@pve@pam
+  --roles PVEDatastoreAdmin --propagate 1`.
+- `services/api/app/services/admin.py` (probe, upload, template
+  creation, set-template, progress polling) + `services/portal/index.html`.
+- API endpoints: `/api/v1/admin/{probe,storage,upload-qcow2,
+  create-template,set-template,progress,drill-template-status,
+  start-first-drill}`.
+- Tests: 236 → 243 (+7) covering endpoint shapes + UI render
+  invariants. Live verified at commit `496efd1`.
+
+**Stage 16 — Test UI at `/portal/test/`** ✅
+- 7 cards expose every control-plane endpoint as click buttons
+  (scenarios, drills with start/refresh/cancel, assets, audit,
+  metrics, Proxmox state). Plus 2 new read-only endpoints added
+  to support the cards: `GET /api/v1/drills/{id}` and
+  `GET /api/v1/drills/{id}/audit`.
+- `tests/test_portal_smoke.py` (6 tests) — static-analysis regex
+  on the HTML+JS catching "JS calls a path that doesn't exist on
+  the API" without a browser. Avoided Playwright to keep CI image
+  small.
+- Tests: 236 → 256 (+20 across stages 15-16).
+
+**Stage 17 — Token middleware + CLI** ✅ (post-L1, item #4)
+- `services/api/app/core/auth.py` — HMAC-SHA256 compact tokens
+  (`base64url-payload.base64url-signature`) carried in
+  `X-Divide-Token`. Three FastAPI deps: `current_token()`,
+  `require_token()`, `token_subject()`. Secret resolution:
+  explicit `DIVIDE_TOKEN_SECRET` > SHA-256(`PROXMOX_TOKEN_SECRET`)
+  (dev, warning) > per-process random (last-resort).
+- `tools/issue_token.py` — `divide issue-token --user alice --role
+  trainee --ttl 24h` prints a single line. TTL parser handles bare
+  seconds + `s/m/h/d` suffixes.
+- `tests/test_auth.py` (19 tests) — round-trip, expiry, tampering,
+  FastAPI dep + CLI subprocess coverage.
+- Flipped L2 2.3 / 2.4 / 2.5 to ✅. 2.9 partial — token subject
+  recorded in `runs.started_by` and `runs.cancel.actor`, but the
+  runner's `_audit()` hook still needs to read the token subject
+  for full attribution. Tests: 256 → 275 (+19).
+
+**Stage 18 — PVE 9 adapter fixes + first live drill** ✅
+- Fixed four PVE 9 incompatibilities surfaced only when the wizard's
+  upload + create-template actually ran against real PVE 9.1.7:
+    1. `upload_qcow2()` generator → raw file handle (httpx calls
+       `.read(n)` on the body, so a generator crashes with
+       `AttributeError`).
+    2. `_create_qemu_vm()` made `bridge` optional (the hard-coded
+       `net0=virtio,bridge=vmbr0` 403'd on SDN-managed PVE because
+       the drill token lacks `SDN.Use`).
+    3. `_import_disk()` switched from `POST /qemu/{vmid}/importdisk`
+       (PVE 9 returns 501) to `POST /qemu/{vmid}/config` with
+       `scsi0={target}:0,import-from={volid}`.
+    4. `clone_vm()` split into 3 calls: `clone.post` (name/newid
+       only) + `config.post` (cores/sockets/memory) + `resize.put`
+       (disk; PVE 9's new endpoint is `PUT /qemu/{vmid}/resize`
+       with `disk=scsi0&size=+XG`).
+- Runner: sanitize underscores from `asset.role` before embedding
+  in the clone name (PVE 9 enforces strict DNS-1123).
+- Plus upload field name `content` → `filename`, added
+  `?content=import` query param (PVE 9 needs both — `content` is
+  the storage content-type filter).
+- Docs: `PVEStorageAdmin` was a typo — the built-in role is
+  `PVEDatastoreAdmin`. PVE 9 expects `--roles` (plural), not
+  `--role`. Updated wizard HTML, `SETUP-UI.md`,
+  `LIVE-DRILL-RUNBOOK.md`, and the admin service docstring.
+- Tests: 275 → 276 (+1 regression test for the upload handle).
 
 **Phase 2 — Multi-VM + SDN**
 - Add `tpl-kali`, `tpl-win2022`, `tpl-pfsense`
