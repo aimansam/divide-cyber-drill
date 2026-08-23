@@ -6,7 +6,15 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy.ext.asyncio import create_async_engine
+
+# Set DIVIDE_PORTAL_DIR *before* any test module imports app.main,
+# because the app's create_app() reads settings at module import.
+# Without this, tests that run after the first create_app() call
+# see a stale /app/portal path that doesn't exist on the dev box.
+_REPO_ROOT = Path(__file__).resolve().parents[3]  # .../divide-cyber-drill
+_PORTAL_DIR = _REPO_ROOT / "services" / "portal"
+if _PORTAL_DIR.is_dir():
+    os.environ.setdefault("DIVIDE_PORTAL_DIR", str(_PORTAL_DIR))
 
 # --- live PG mode ---------------------------------------------------------
 #
@@ -34,6 +42,8 @@ def _env(monkeypatch_session):
     """Set sane defaults for tests."""
     monkeypatch_session.setenv("DIVIDE_ENV", "dev")
     monkeypatch_session.setenv("DIVIDE_LOG_LEVEL", "WARNING")
+    # DIVIDE_PORTAL_DIR is set at conftest import time (above) so it's
+    # already in os.environ before any test module imports app.main.
     if _live_pg_url():
         # Live PG mode — caller is responsible for pointing at a working DB.
         monkeypatch_session.setenv("DIVIDE_DB_URL", _live_pg_url())
@@ -71,8 +81,8 @@ def _create_tables():
         # We trust it and skip the alembic step (assume migrations are
         # already applied by the operator).
         os.environ["DIVIDE_DB_URL"] = live
-        from app.services import db as db_module
         from app.db import session as session_module
+        from app.services import db as db_module
 
         db_module._engine = None
         session_module._session_maker = None
@@ -140,9 +150,9 @@ def client() -> TestClient:
     # whatever URL a previous test left cached. Without this,
     # test_readyz_returns_503_when_db_unreachable poisons the engine
     # for all subsequent tests.
+    from app.core.config import get_settings
     from app.db import session as session_module
     from app.services import db as db_module
-    from app.core.config import get_settings
 
     get_settings.cache_clear()
     db_module._engine = None

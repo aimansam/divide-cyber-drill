@@ -14,6 +14,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.db import models as db_models
 from app.db.session import get_session
@@ -182,6 +183,118 @@ async def list_drills(session: AsyncSession = Depends(get_session)) -> dict:
                 "duration_sec": r.duration_sec,
                 "score_blue": r.score_blue,
                 "score_red": r.score_red,
+            }
+            for r in rows
+        ],
+        "total": len(rows),
+    }
+
+
+@router.get("/{run_id}", summary="Get one drill by id (with assets)")
+async def get_drill(
+    run_id: int,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Return a single Run with its Asset rows expanded.
+
+    Used by the test UI / drill inspector. Read-only -- does not touch
+    PVE. Returns 404 if the run_id doesn't exist.
+
+    Why we have this on top of /api/v1/drills (list):
+        The list endpoint returns summary rows only (no assets). The
+        inspector UI needs the assets + audit log for a *single* run,
+        and the cancel/stop endpoints both mutate state. A read-only
+        GET fills the gap.
+
+    Implementation note:
+        ``Run.duration_sec`` is a @property that touches ``started_at``
+        and ``ended_at`` columns; serializing it via the lazy ORM
+        would trigger a MissingGreenlet error inside the async session.
+        ``selectinload(assets)`` eagerly pulls the assets in the same
+        round-trip as the Run row, so serialization is in-memory.
+    """
+    stmt = (
+        select(db_models.Run)
+        .where(db_models.Run.id == run_id)
+        .options(selectinload(db_models.Run.assets))
+    )
+    run = (await session.execute(stmt)).scalar_one_or_none()
+    if run is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"run id={run_id} not found",
+        )
+    return {
+        "run_id": run.id,
+        "scenario_id": run.scenario_id,
+        "status": run.status.value,
+        "started_at": run.started_at.isoformat() if run.started_at else None,
+        "ended_at": run.ended_at.isoformat() if run.ended_at else None,
+        "started_by": run.started_by,
+        "duration_sec": run.duration_sec,
+        "score_blue": run.score_blue,
+        "score_red": run.score_red,
+        "error": run.error,
+        "assets": [
+            {
+                "asset_id": a.id,
+                "role": a.role,
+                "kind": a.kind,
+                "template": a.template,
+                "status": a.status.value,
+                "pve_vmid": a.pve_vmid,
+                "pve_node": a.pve_node,
+                "pve_ip": a.pve_ip,
+                "error": a.error,
+            }
+            for a in run.assets
+        ],
+    }
+
+
+@router.get(
+    "/{run_id}/audit",
+    summary="Get the audit-log entries for one drill",
+)
+async def get_drill_audit(
+    run_id: int,
+    session: AsyncSession = Depends(get_session),
+) -> dict:
+    """Return the append-only audit_log rows linked to this run, oldest first.
+
+    Read-only. Useful for the test UI to verify the lifecycle hooks fired
+    (run.started, asset.spawned, run.completed / run.cancelled).
+    Returns 404 if the run_id doesn't exist, but ``items=[]`` if the run
+    exists and just hasn't generated any audit entries yet.
+    """
+    # Verify run exists -- otherwise we can't tell "real run with no
+    # events yet" from "typo'd run_id".
+    exists = (
+        await session.execute(select(db_models.Run.id).where(db_models.Run.id == run_id))
+    ).scalar_one_or_none()
+    if exists is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"run id={run_id} not found",
+        )
+
+    rows = (
+        await session.execute(
+            select(db_models.AuditLog)
+            .where(db_models.AuditLog.run_id == run_id)
+            .order_by(db_models.AuditLog.at.asc())
+        )
+    ).scalars().all()
+    return {
+        "items": [
+            {
+                "id": r.id,
+                "at": r.at.isoformat() if r.at else None,
+                "action": r.action.value,
+                "actor": r.actor,
+                "scenario_id": r.scenario_id,
+                "asset_id": r.asset_id,
+                "details": r.details,
             }
             for r in rows
         ],

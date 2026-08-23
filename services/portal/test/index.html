@@ -1,0 +1,496 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>div:ide — test UI</title>
+<style>
+  :root {
+    --bg: #0e1117;
+    --panel: #161b22;
+    --border: #30363d;
+    --text: #c9d1d9;
+    --muted: #8b949e;
+    --green: #3fb950;
+    --red: #f85149;
+    --yellow: #d29922;
+    --blue: #58a6ff;
+    --purple: #bc8cff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    margin: 0;
+    padding: 24px;
+    line-height: 1.5;
+  }
+  .container { max-width: 1100px; margin: 0 auto; }
+  h1 { font-size: 1.5em; margin: 0 0 4px; color: var(--blue); }
+  .lede { color: var(--muted); margin-top: 0; }
+  .lede a { color: var(--blue); text-decoration: none; }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 14px 16px;
+    margin-bottom: 14px;
+  }
+  .card h2 {
+    font-size: 1em;
+    margin: 0 0 10px;
+    color: var(--text);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .card h2 .hint { color: var(--muted); font-weight: normal; font-size: 0.85em; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .row > * { flex: 0 0 auto; }
+  .grow { flex: 1 1 auto; min-width: 200px; }
+  input[type="text"], input[type="number"], select {
+    background: var(--bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 6px 10px;
+    font-family: inherit;
+    font-size: 0.95em;
+    min-width: 120px;
+  }
+  button {
+    background: var(--blue);
+    color: var(--bg);
+    border: 0;
+    border-radius: 4px;
+    padding: 6px 12px;
+    font-weight: 600;
+    cursor: pointer;
+    font-size: 0.95em;
+  }
+  button.secondary { background: var(--border); color: var(--text); }
+  button.danger { background: var(--red); color: white; }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  button:hover:not(:disabled) { filter: brightness(1.1); }
+  .output {
+    margin-top: 10px;
+    padding: 8px 10px;
+    background: #000;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.85em;
+    white-space: pre-wrap;
+    overflow-x: auto;
+    max-height: 280px;
+    overflow-y: auto;
+  }
+  .output.empty { color: var(--muted); font-style: italic; }
+  .pill {
+    display: inline-block;
+    padding: 1px 8px;
+    border-radius: 12px;
+    font-size: 0.8em;
+    font-weight: 600;
+    margin-right: 4px;
+  }
+  .pill.pending  { background: var(--muted); color: var(--bg); }
+  .pill.running  { background: var(--blue); color: var(--bg); }
+  .pill.started  { background: var(--purple); color: var(--bg); }
+  .pill.spawning { background: var(--yellow); color: var(--bg); }
+  .pill.succeeded { background: var(--green); color: var(--bg); }
+  .pill.failed    { background: var(--red); color: white; }
+  .pill.cancelled { background: var(--yellow); color: var(--bg); }
+  .pill.timeout   { background: var(--red); color: white; }
+  .pill.stopped   { background: var(--border); color: var(--text); }
+  .pill.orphaned  { background: var(--red); color: white; }
+  .pill.planned   { background: var(--muted); color: var(--bg); }
+  table { border-collapse: collapse; width: 100%; margin-top: 6px; font-size: 0.9em; }
+  th, td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 600; font-size: 0.85em; }
+  .err { color: var(--red); }
+  .ok  { color: var(--green); }
+  .muted { color: var(--muted); }
+  details summary { cursor: pointer; color: var(--muted); font-size: 0.85em; }
+  .raw { white-space: pre-wrap; word-break: break-all; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>div:ide — test UI</h1>
+  <p class="lede">
+    Every card below is a real API call. Operator tool for poking at scenarios,
+    drills, assets, audit, metrics, and Proxmox without leaving the browser.
+    See <a href="/docs/TEST-UI.md" target="_blank">docs/TEST-UI.md</a>.
+  </p>
+
+  <!-- ====================================================== Scenarios -->
+  <div class="card">
+    <h2>Scenario picker <span class="hint" id="scn-hint">loading scenarios...</span></h2>
+    <div class="row">
+      <select id="scn-select"></select>
+      <button onclick="loadScenario()">Load details</button>
+      <span id="scn-loaded-id" class="muted">no scenario selected</span>
+    </div>
+    <div id="scn-detail" class="output empty">no scenario loaded</div>
+  </div>
+
+  <!-- ====================================================== Run lifecycle -->
+  <div class="card">
+    <h2>Run lifecycle <span class="hint">POST /api/v1/drills, GET /api/v1/drills/{id}</span></h2>
+    <div class="row">
+      <button onclick="startDrill()">Start drill (uses loaded scenario)</button>
+      <span class="muted">run id:</span>
+      <input id="run-id" type="number" placeholder="(none)" class="grow" min="1">
+      <button class="secondary" onclick="refreshRun()">Refresh</button>
+      <button class="secondary" onclick="autoRefreshToggle()" id="auto-btn">Auto-refresh: off</button>
+    </div>
+    <div id="run-detail" class="output empty">no drill started</div>
+  </div>
+
+  <!-- ====================================================== Cancel -->
+  <div class="card">
+    <h2>Cancel <span class="hint">POST /api/v1/drills/{id}/cancel</span></h2>
+    <div class="row">
+      <input id="cancel-reason" type="text" placeholder="reason (default: user-requested)" class="grow">
+      <input id="cancel-actor" type="text" placeholder="actor (optional)" class="grow">
+      <button class="danger" onclick="cancelDrill()" id="cancel-btn" disabled>Cancel current drill</button>
+    </div>
+    <div id="cancel-result" class="output empty">no cancel yet</div>
+  </div>
+
+  <!-- ====================================================== Assets -->
+  <div class="card">
+    <h2>Assets <span class="hint">GET /api/v1/drills/{id}  (assets[] in body)</span></h2>
+    <div class="row">
+      <button class="secondary" onclick="refreshRun()">Refresh (also reloads assets)</button>
+    </div>
+    <div id="assets-list" class="output empty">no assets yet</div>
+  </div>
+
+  <!-- ====================================================== Audit -->
+  <div class="card">
+    <h2>Audit log <span class="hint">GET /api/v1/drills/{id}/audit</span></h2>
+    <div class="row">
+      <button class="secondary" onclick="loadAudit()">Load audit</button>
+      <span class="muted" id="audit-count"></span>
+    </div>
+    <div id="audit-list" class="output empty">no audit entries loaded</div>
+  </div>
+
+  <!-- ====================================================== Metrics -->
+  <div class="card">
+    <h2>Metrics <span class="hint">GET /metrics</span></h2>
+    <div class="row">
+      <button class="secondary" onclick="loadMetrics()">Refresh /metrics</button>
+      <span class="muted">filter:</span>
+      <input id="metrics-filter" type="text" placeholder="(substring match, e.g. divide_runs)" class="grow">
+      <button class="secondary" onclick="applyFilter()">Apply</button>
+      <button class="secondary" onclick="clearFilter()">Clear</button>
+    </div>
+    <pre id="metrics-output" class="output empty">no metrics loaded</pre>
+  </div>
+
+  <!-- ====================================================== Proxmox -->
+  <div class="card">
+    <h2>Proxmox <span class="hint">/api/v1/proxmox/health, /nodes, /templates</span></h2>
+    <div class="row">
+      <button class="secondary" onclick="proxmoxAll()">Refresh all</button>
+    </div>
+    <div id="pve-health" class="output empty">no health probe yet</div>
+    <div id="pve-nodes" class="output empty">no nodes yet</div>
+    <div id="pve-templates" class="output empty">no templates yet</div>
+  </div>
+</div>
+
+<script>
+// ----- helpers --------------------------------------------------------
+
+const $ = (id) => document.getElementById(id);
+
+function pill(status) {
+  const s = (status || "unknown").toLowerCase();
+  return `<span class="pill ${s}">${s}</span>`;
+}
+
+async function api(method, path, body) {
+  const opts = { method, headers: {} };
+  if (body !== undefined) {
+    opts.headers["Content-Type"] = "application/json";
+    opts.body = JSON.stringify(body);
+  }
+  const r = await fetch(path, opts);
+  let text;
+  try { text = await r.text(); } catch (e) { text = "(no body)"; }
+  let parsed;
+  try { parsed = JSON.parse(text); } catch (e) { parsed = text; }
+  return { status: r.status, ok: r.ok, body: parsed };
+}
+
+function render(elId, data, statusLabel) {
+  const el = $(elId);
+  if (data === null || data === undefined) {
+    el.classList.add("empty");
+    el.textContent = "(no data)";
+    return;
+  }
+  el.classList.remove("empty");
+  if (typeof data === "string") {
+    el.innerHTML = data;
+  } else {
+    el.innerHTML = `<div class="raw">` + (statusLabel || "") +
+      (typeof data === "object" ? JSON.stringify(data, null, 2) : String(data)) +
+      `</div>`;
+  }
+}
+
+// ----- scenarios ------------------------------------------------------
+
+let loadedScenarioId = null;
+
+async function loadScenarios() {
+  $("scn-hint").textContent = "loading scenarios...";
+  const r = await api("GET", "/api/v1/scenarios");
+  if (!r.ok) {
+    $("scn-hint").innerHTML = `<span class="err">HTTP ${r.status}</span>`;
+    render("scn-detail", r.body, `<div class="err">HTTP ${r.status}</div>`);
+    return;
+  }
+  const items = r.body.items || [];
+  $("scn-select").innerHTML = items
+    .map(s => `<option value="${s.id}" data-name="${(s.name || "").replace(/"/g, "&quot;")}">${s.name} (id=${s.id})</option>`)
+    .join("");
+  $("scn-hint").textContent = `${items.length} active scenario(s)`;
+  if (items.length) {
+    $("scn-select").value = String(items[0].id);
+    loadScenario();
+  }
+}
+
+async function loadScenario() {
+  const sel = $("scn-select");
+  const id = parseInt(sel.value);
+  if (!id) return;
+  loadedScenarioId = id;
+  $("scn-loaded-id").innerHTML = `<span class="ok">scenario id=${id} loaded</span>`;
+  const r = await api("GET", `/api/v1/scenarios/${sel.options[sel.selectedIndex].dataset.name}`);
+  render("scn-detail", r.body, r.ok ? "" : `<div class="err">HTTP ${r.status}</div>`);
+}
+
+// ----- run lifecycle --------------------------------------------------
+
+let autoTimer = null;
+
+async function startDrill() {
+  if (!loadedScenarioId) {
+    render("run-detail", `<span class="err">Load a scenario first.</span>`);
+    return;
+  }
+  const r = await api("POST", "/api/v1/drills", { scenario_id: loadedScenarioId });
+  if (r.ok) {
+    $("run-id").value = r.body.run_id;
+    render("run-detail", r.body, `<div class="ok">started run id=${r.body.run_id}</div>`);
+    autoRefreshStart();
+  } else {
+    render("run-detail", r.body, `<div class="err">HTTP ${r.status}</div>`);
+  }
+}
+
+async function refreshRun() {
+  const id = parseInt($("run-id").value);
+  if (!id) {
+    render("run-detail", `<span class="muted">enter a run id to refresh</span>`);
+    return;
+  }
+  const r = await api("GET", `/api/v1/drills/${id}`);
+  if (r.ok) {
+    render("run-detail", r.body);
+    renderAssets(r.body.assets || []);
+    updateCancelButton(r.body.status);
+    if (["pending","started","spawning","running"].includes(r.body.status)) {
+      autoRefreshStart();
+    } else {
+      autoRefreshStop();
+    }
+  } else {
+    render("run-detail", r.body, `<div class="err">HTTP ${r.status}</div>`);
+    if (r.status === 404) render("assets-list", `<span class="muted">run not found</span>`);
+  }
+}
+
+function updateCancelButton(status) {
+  const btn = $("cancel-btn");
+  const cancellable = ["pending","started","spawning","running"].includes(status);
+  btn.disabled = !cancellable;
+  btn.textContent = cancellable ? `Cancel run ${$("run-id").value}` : "Cancel (only active runs)";
+}
+
+function autoRefreshStart() {
+  if (autoTimer) return;
+  $("auto-btn").textContent = "Auto-refresh: on (2s)";
+  $("auto-btn").classList.remove("secondary");
+  autoTimer = setInterval(refreshRun, 2000);
+}
+
+function autoRefreshStop() {
+  if (!autoTimer) return;
+  clearInterval(autoTimer);
+  autoTimer = null;
+  $("auto-btn").textContent = "Auto-refresh: off";
+  $("auto-btn").classList.add("secondary");
+}
+
+function autoRefreshToggle() {
+  if (autoTimer) autoRefreshStop();
+  else if ($("run-id").value) autoRefreshStart();
+}
+
+// ----- cancel ---------------------------------------------------------
+
+async function cancelDrill() {
+  const id = parseInt($("run-id").value);
+  if (!id) return;
+  const body = {};
+  const reason = $("cancel-reason").value.trim();
+  const actor = $("cancel-actor").value.trim();
+  if (reason) body.reason = reason;
+  if (actor) body.actor = actor;
+  const r = await api("POST", `/api/v1/drills/${id}/cancel`, body);
+  if (r.ok) {
+    render("cancel-result", r.body, `<div class="ok">cancelled (HTTP ${r.status})</div>`);
+    refreshRun();
+  } else {
+    render("cancel-result", r.body, `<div class="err">HTTP ${r.status}</div>`);
+  }
+}
+
+// ----- assets ---------------------------------------------------------
+
+function renderAssets(assets) {
+  if (!assets.length) {
+    $("assets-list").classList.add("empty");
+    $("assets-list").textContent = "no assets on this run yet";
+    return;
+  }
+  $("assets-list").classList.remove("empty");
+  const rows = assets.map(a => `<tr>
+    <td>${a.role}</td>
+    <td>${a.kind || ""}</td>
+    <td>${pill(a.status)}</td>
+    <td>${a.pve_vmid ?? "<span class='muted'>-</span>"}</td>
+    <td>${a.pve_node ?? "<span class='muted'>-</span>"}</td>
+    <td>${a.pve_ip ?? "<span class='muted'>-</span>"}</td>
+  </tr>`).join("");
+  $("assets-list").innerHTML = `
+    <table>
+      <tr><th>role</th><th>kind</th><th>status</th><th>pve_vmid</th><th>node</th><th>ip</th></tr>
+      ${rows}
+    </table>
+  `;
+}
+
+// ----- audit ----------------------------------------------------------
+
+async function loadAudit() {
+  const id = parseInt($("run-id").value);
+  if (!id) {
+    render("audit-list", `<span class="muted">enter a run id first</span>`);
+    return;
+  }
+  const r = await api("GET", `/api/v1/drills/${id}/audit`);
+  if (r.ok) {
+    $("audit-count").textContent = `${r.body.total} entries`;
+    if (!r.body.items.length) {
+      render("audit-list", `<span class="muted">no audit entries for this run yet</span>`);
+      return;
+    }
+    const lines = r.body.items.map(a => {
+      const details = Object.keys(a.details || {}).length
+        ? "  details=" + JSON.stringify(a.details)
+        : "";
+      return `${a.at}  ${a.action.padEnd(20)}  actor=${a.actor ?? "-"}${details}`;
+    }).join("\n");
+    $("audit-list").classList.remove("empty");
+    $("audit-list").innerHTML = `<div class="raw">${lines}</div>`;
+  } else {
+    render("audit-list", r.body, `<div class="err">HTTP ${r.status}</div>`);
+  }
+}
+
+// ----- metrics --------------------------------------------------------
+
+let metricsCache = "";
+
+async function loadMetrics() {
+  const r = await fetch("/metrics");
+  const txt = await r.text();
+  metricsCache = txt;
+  applyFilter();
+}
+
+function applyFilter() {
+  const f = $("metrics-filter").value.trim().toLowerCase();
+  if (!metricsCache) {
+    $("metrics-output").classList.add("empty");
+    $("metrics-output").textContent = "click Refresh first";
+    return;
+  }
+  const lines = metricsCache.split("\n").filter(l =>
+    l.startsWith("divide_") && (!f || l.toLowerCase().includes(f))
+  );
+  if (!lines.length) {
+    $("metrics-output").classList.add("empty");
+    $("metrics-output").textContent = `(no divide_ lines match "${f}")`;
+    return;
+  }
+  $("metrics-output").classList.remove("empty");
+  $("metrics-output").textContent = lines.join("\n");
+}
+
+function clearFilter() {
+  $("metrics-filter").value = "";
+  applyFilter();
+}
+
+// ----- proxmox --------------------------------------------------------
+
+async function proxmoxAll() {
+  const h = await api("GET", "/api/v1/proxmox/health");
+  render("pve-health", h.body, h.ok ? "" : `<div class="err">HTTP ${h.status}</div>`);
+  const n = await api("GET", "/api/v1/proxmox/nodes");
+  if (n.ok) {
+    const items = n.body.items || [];
+    $("pve-nodes").classList.remove("empty");
+    $("pve-nodes").innerHTML = `<table><tr><th>node</th><th>status</th><th>level</th></tr>` +
+      items.map(x => `<tr><td>${x.node}</td><td>${pill(x.status)}</td><td>${x.level || ""}</td></tr>`).join("") +
+      `</table>`;
+  } else {
+    render("pve-nodes", n.body, `<div class="err">HTTP ${n.status}</div>`);
+  }
+  const t = await api("GET", "/api/v1/proxmox/templates");
+  if (t.ok) {
+    const items = t.body.items || [];
+    $("pve-templates").classList.remove("empty");
+    if (!items.length) {
+      $("pve-templates").innerHTML = `<span class="muted">no templates on PVE</span>`;
+    } else {
+      $("pve-templates").innerHTML = `<table><tr><th>name</th><th>vmid</th><th>node</th></tr>` +
+        items.map(x => `<tr><td>${x.name}</td><td>${x.vmid ?? ""}</td><td>${x.node ?? ""}</td></tr>`).join("") +
+        `</table>`;
+    }
+  } else {
+    render("pve-templates", t.body, `<div class="err">HTTP ${t.status}</div>`);
+  }
+}
+
+// ----- boot ----------------------------------------------------------
+
+window.addEventListener("load", () => {
+  loadScenarios();
+  loadMetrics();
+  proxmoxAll();
+});
+</script>
+</body>
+</html>
