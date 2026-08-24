@@ -9,6 +9,10 @@ import { SignInCard } from "@/components/portal/sign-in-card";
 import { TopNav } from "@/components/portal/top-nav";
 import { DashboardCard } from "@/components/portal/dashboard-card";
 import { DrillConsole } from "@/components/portal/drill-console";
+import { OperatorConsoleCard } from "@/components/portal/operator-console-card";
+import { ProfileCard } from "@/components/portal/profile-card";
+import { UserListCard } from "@/components/portal/user-list-card";
+import { ToastHost } from "@/components/portal/toast";
 import { useHashRoute } from "@/hooks/use-hash-route";
 import { useMe } from "@/lib/auth";
 
@@ -66,6 +70,7 @@ export default function App() {
   }
 
   return (
+    <ToastHost>
     <div className="min-h-screen bg-background">
       <TopNav activeView={activeView} onChangeView={setActiveView} />
       <main className="container mx-auto max-w-6xl space-y-6 px-4 py-8">
@@ -124,8 +129,10 @@ export default function App() {
               case "admin":
                 return (
                   <>
+                    <OperatorConsoleCard />
                     <PveOpsCard />
                     <ScenarioAuthoringCard />
+                    <UserListCard />
                   </>
                 );
               case "history":
@@ -137,13 +144,7 @@ export default function App() {
                   />
                 );
               case "profile":
-                return (
-                  <DashboardCard
-                    meRole={me.role}
-                    meSub={me.sub}
-                    onPickRun={onPickRunFromDashboard}
-                  />
-                );
+                return <ProfileCard meRole={me.role} meSub={me.sub} />;
               default: {
                 const _exhaustive: never = activeView;
                 void _exhaustive;
@@ -154,5 +155,6 @@ export default function App() {
       </main>
       <TokenBar />
     </div>
+    </ToastHost>
   );
 }

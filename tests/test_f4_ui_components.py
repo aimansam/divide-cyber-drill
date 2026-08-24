@@ -301,3 +301,172 @@ def test_assets_card_supports_compact():
 def test_audit_explorer_card_supports_compact():
     src = _read("services/portal/app/src/components/portal/audit-explorer-card.tsx")
     assert "compact" in src, "AuditExplorerCard must accept a compact prop"
+
+
+# ---------- UserListCard (F4-UI commit 3) -------------------------------
+
+
+def test_user_list_card_file_exists():
+    p = SRC_DIR / "components" / "portal" / "user-list-card.tsx"
+    assert p.is_file(), f"missing: {p}"
+
+
+def test_user_list_card_calls_auth_users():
+    src = _read("services/portal/app/src/components/portal/user-list-card.tsx")
+    assert "/api/v1/auth/users" in src, "UserListCard must call /api/v1/auth/users"
+
+
+def test_user_list_card_renders_empty_state():
+    """When the API returns [], the card shows EmptyState with
+    a hint about the bootstrap env vars."""
+    src = _read("services/portal/app/src/components/portal/user-list-card.tsx")
+    assert "EmptyState" in src
+    assert "DIVIDE_BOOTSTRAP_ADMIN" in src
+
+
+def test_user_list_card_shows_role_and_disabled():
+    src = _read("services/portal/app/src/components/portal/user-list-card.tsx")
+    for kw in ("role", "disabled", "active"):
+        assert kw in src
+
+
+def test_user_list_card_toggle_endpoint_documented():
+    """The disable/enable toggle endpoint is deferred to L3 admin
+    UI. The card calls it but the surface is a stub that surfaces
+    a 404/501."""
+    src = _read("services/portal/app/src/components/portal/user-list-card.tsx")
+    assert "/toggle-disabled" in src
+    # The handler treats 404 / 501 as the deferred case.
+    assert "404" in src or "501" in src
+
+
+# ---------- ProfileCard -------------------------------------------------
+
+
+def test_profile_card_file_exists():
+    p = SRC_DIR / "components" / "portal" / "profile-card.tsx"
+    assert p.is_file()
+
+
+def test_profile_card_uses_dashboard_card():
+    """ProfileCard is a DashboardCard scoped to the current user."""
+    src = _read("services/portal/app/src/components/portal/profile-card.tsx")
+    assert "DashboardCard" in src
+
+
+# ---------- OperatorConsoleCard -----------------------------------------
+
+
+def test_operator_console_card_file_exists():
+    p = SRC_DIR / "components/portal/operator-console-card.tsx"
+    assert p.is_file(), f"missing: {p}"
+
+
+def test_operator_console_card_calls_drills_endpoint():
+    src = _read("services/portal/app/src/components/portal/operator-console-card.tsx")
+    assert "/api/v1/drills" in src
+    assert "/stop" in src, "Stop button must hit POST /api/v1/drills/{id}/stop"
+
+
+def test_operator_console_card_polling():
+    """The console should auto-refresh so the operator doesn't have
+    to click Refresh every few seconds."""
+    src = _read("services/portal/app/src/components/portal/operator-console-card.tsx")
+    assert "setInterval" in src
+    assert "5000" in src
+
+
+def test_operator_console_card_filters_to_live_runs():
+    src = _read("services/portal/app/src/components/portal/operator-console-card.tsx")
+    assert "running" in src and "pending" in src
+
+
+def test_operator_console_card_shows_deferred_message_for_reset_inject():
+    """Reset and Inject are F7 / F8 features. The button should
+    surface a clear 'coming soon' message so the operator knows
+    the click was a no-op."""
+    src = _read("services/portal/app/src/components/portal/operator-console-card.tsx")
+    assert "F7" in src or "F8" in src
+    assert "operator-reset" in src
+    assert "operator-inject" in src
+
+
+# ---------- Toast / ToastHost -------------------------------------------
+
+
+def test_toast_file_exists():
+    p = SRC_DIR / "components/portal/toast.tsx"
+    assert p.is_file()
+
+
+def test_toast_exports_host_and_hook():
+    src = _read("services/portal/app/src/components/portal/toast.tsx")
+    assert "export function ToastHost" in src
+    assert "export function useToasts" in src
+
+
+def test_toast_supports_three_kinds():
+    src = _read("services/portal/app/src/components/portal/toast.tsx")
+    assert "info" in src and "success" in src and "error" in src
+
+
+def test_toast_has_auto_dismiss():
+    """Toasts must auto-dismiss after the timeout (default 4s)."""
+    src = _read("services/portal/app/src/components/portal/toast.tsx")
+    assert "setTimeout" in src and "dismiss" in src
+
+
+def test_toast_host_mounted_in_app_tsx():
+    """ToastHost must wrap the entire app tree so any component
+    can fire toasts via useToasts()."""
+    src = _read("services/portal/app/src/app.tsx")
+    assert "<ToastHost>" in src
+
+
+# ---------- MyRunsCard status filter -----------------------------------
+
+
+def test_my_runs_card_has_status_filter():
+    """F4-UI commit 3: MyRunsCard gets a status filter row so the
+    History tab can narrow to e.g. 'only failed runs'."""
+    src = _read("services/portal/app/src/components/portal/my-runs-card.tsx")
+    assert "statusFilter" in src
+    assert "my-runs-filter" in src
+
+
+def test_my_runs_card_filter_options_include_all():
+    """The filter must include 'all' as a default."""
+    src = _read("services/portal/app/src/components/portal/my-runs-card.tsx")
+    assert '"all"' in src or "'all'" in src
+    assert "succeeded" in src and "failed" in src
+
+
+# ---------- App.tsx wiring for the new cards ----------------------------
+
+
+def test_app_tsx_renders_user_list_card_in_admin():
+    src = _read("services/portal/app/src/app.tsx")
+    assert "UserListCard" in src, "app.tsx must import + render UserListCard"
+    # Check it's in the admin view case.
+    m = re.search(r'case "admin":\s*\n(.*?)case "history":', src, re.DOTALL)
+    assert m, "admin case not found in app.tsx"
+    assert "UserListCard" in m.group(1), "UserListCard must render in admin view"
+
+
+def test_app_tsx_renders_operator_console_in_admin():
+    src = _read("services/portal/app/src/app.tsx")
+    m = re.search(r'case "admin":\s*\n(.*?)case "history":', src, re.DOTALL)
+    assert m
+    assert "OperatorConsoleCard" in m.group(1)
+
+
+def test_app_tsx_renders_profile_card_in_profile_view():
+    src = _read("services/portal/app/src/app.tsx")
+    assert "ProfileCard" in src
+    # The Profile view should render ProfileCard, not DashboardCard directly.
+    m = re.search(r'case "profile":\s*\n(.*?)default:', src, re.DOTALL)
+    assert m, "profile case not found"
+    assert "ProfileCard" in m.group(1)
+    # But not a bare DashboardCard (which would mean the profile
+    # view was never specialised).
+    assert "<DashboardCard" not in m.group(1)
