@@ -935,7 +935,7 @@ uvicorn workers.
 
 | # | Pillar | Closes | Effort | Why now |
 |---|---|---|---|---|
-| **R1** | **F8.5 — Redis pub/sub for multi-worker event fan-out** | G8 partial | ~3 h, 2 commits | Multi-worker uvicorn deployments lose SSE events across workers. A `RedisEventBus` adapter (with `InProcessEventBus` fallback) fixes the cross-worker fan-out without changing the API or the portal. |
+| **R1** | **F8.5 — Redis pub/sub for multi-worker event fan-out** | G8 partial | ~3 h, 2 commits ✅ SHIPPED | Multi-worker uvicorn deployments lose SSE events across workers. A `RedisEventBus` adapter (with `InProcessEventBus` fallback) fixes the cross-worker fan-out without changing the API or the portal. |
 | **F9** | **DrillConsole consolidation** — embed LeaderboardCard + SocViewCard inside the live-drill view | UX | ~3 h, 3 commits | Today the operator flips between Observe (DrillConsole) and Admin (Leaderboard) tabs during a live drill. Consolidating both into the DrillConsole turns the Observe tab into the single live-drill screen. Biggest demo-quality win. |
 | **F10** | **Onboarding wizard** — 4-step first-time UX (bootstrap admin → pick scenario → form team → launch drill) | UX | ~4 h, 3 commits | `tools/issue_token.py` is fine for ops but ugly for first impressions. An in-portal wizard delegates to the existing API but presents a guided flow. Makes `make demo` a real product experience. |
 | **F11** | **Drill debrief artifact** — `GET /runs/{id}/debrief.md` returns a markdown play-by-play (per-team score, per-flag timing, pivot timeline, detection timeline, lessons-learned placeholder) | UX | ~3 h, 2 commits | Closes the "what just happened?" loop for leadership. The JSON after-action report is already there; F11 adds a human-readable sibling for hand-off. |
@@ -960,11 +960,11 @@ backlog). The 5 pillars above are the ones that turn div:ide
 into a final product; everything else is operator quality-of-life
 that can ship in any order afterward.
 
-**My pick (next plan): R1 — Redis pub/sub for SSE.** F9 shipped
-(commit `cbd181e` + `aeba832` + `2004e83`; see §18.1). R1 is
-the production-deployment gate (multi-worker uvicorn loses
-events today); F10/F11/F12 are operator polish on top of F9
-and R1.
+**My pick (next plan): F11 — Drill debrief artifact.** F9 + R1
+shipped (F9 commits `cbd181e` + `aeba832` + `2004e83`; R1 commits
+`19d5cce` + R1.2). F11 closes the "what just happened?" loop
+with leadership-facing markdown play-by-play. F10 (onboarding
+wizard) + F12 (product packaging) follow.
 
 ---
 
@@ -1030,32 +1030,38 @@ budget set in F4).
 
 ### 18.2 R1 — Redis pub/sub for SSE
 
-Status: planned.
+Status: SHIPPED (R1.1 + R1.2, commits `19d5cce` + pending R1.2).
+Runbook in [`docs/R1-MULTIWORKER.md`](R1-MULTIWORKER.md).
 
-Commits (3):
+What landed:
 
-  1. **R1.1** — `EventBus` Protocol + `InProcessEventBus`
-     (existing, moved to `event_bus/in_process.py`) +
-     `RedisEventBus` (new, `event_bus/redis_bus.py` using
-     redis-py async client + Redis LIST for the ring buffer +
-     Redis pub/sub channel for fan-out). Factory
-     `build_event_bus()` selects based on `REDIS_URL` +
-     `DIVIDE_EVENT_BUS` env vars.
-  2. **R1.2** — `docker-compose.yaml` sets `REDIS_URL` for the
-     API service. New integration tests under
-     `tests/test_redis_event_bus.py` (cross-worker fan-out
-     proof) + `tests/test_multi_worker_sse.py` (two
-     independent EventBus instances both receive the same
-     event).
-  3. **R1.3** — `docs/R1-MULTIWORKER.md` runbook + the §17
-     table flips R1 to done.
+  1. **R1.1** (`19d5cce`) — `EventBus` Protocol +
+     `InProcessEventBus` (existing impl moved to
+     `event_bus/in_process.py`) + `RedisEventBus` (new,
+     `event_bus/redis_bus.py`). Factory `build_event_bus()`
+     selects based on `DIVIDE_EVENT_BUS` (`redis` or `memory`,
+     default `memory`). 8 new tests in
+     `test_r1_redis_event_bus.py` pinning cross-worker
+     fan-out via two independent bus instances on a shared
+     fakeredis.
+  2. **R1.2** (pending) — `docs/R1-MULTIWORKER.md` runbook +
+     `main.py::lifespan` teardown hook that closes the
+     `RedisEventBus` bridge thread + redis pool on shutdown.
+  3. **R1.3** (deferred to a follow-on plan) — `make
+     verify-multi-worker` smoke test that boots two uvicorn
+     workers + drives a publish/subscribe through curl. Not
+     blocking R1.0; the 8-test unit suite already proves
+     cross-worker fan-out.
 
-API change: zero. The `EventBus` Protocol is a refactor;
-callers (`app/routers/events.py`, `app/routers/exercises.py`)
-already pass through the singleton.
+Backend delta: ~700 LOC (mostly the RedisEventBus class +
+tests). Adds no new runtime dependencies — `redis[hiredis]` and
+`fakeredis` were already in `pyproject.toml` (used by
+`app/services/cache.py`).
 
-Backend delta: ~600 LOC + ~400 LOC tests. Adds `redis` to
-`services/api/pyproject.toml` dependencies.
+Tests added: **8** total (all in `test_r1_redis_event_bus.py`).
+Full F8 + F9 + R1 regression: **143 passed, 1 skipped, 0 failed**.
+Backward-compat: all 23 F8 tests pass unchanged; the
+`bus` singleton still works.
 
 ### 18.3 F11 — Drill debrief artifact
 

@@ -112,6 +112,18 @@ async def lifespan(app: FastAPI):
 
     yield
 
+    # R1: tear down the RedisEventBus bridge thread + redis pool.
+    # InProcessEventBus has nothing to close. The factory caches
+    # the bus at module load; we close the cached instance.
+    try:
+        from app.services.event_bus import build_event_bus
+
+        bus = build_event_bus()
+        if hasattr(bus, "close"):
+            bus.close()
+    except Exception as exc:  # pragma: no cover - best-effort
+        log.warning("divide_api.event_bus.close_failed", error=str(exc))
+
     log.info("divide_api.stop")
 
 
