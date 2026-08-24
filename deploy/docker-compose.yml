@@ -19,6 +19,11 @@ services:
       DIVIDE_LOG_LEVEL: ${DIVIDE_LOG_LEVEL:-INFO}
       DIVIDE_DB_URL: postgresql+asyncpg://divide:${POSTGRES_PASSWORD:-divide}@postgres:5432/divide
       DIVIDE_REDIS_URL: redis://redis:6379/0
+      # R1: opt into the Redis-backed event bus. With multiple
+      # uvicorn workers this is the only way to deliver SSE events
+      # across workers. Single-worker deployments can leave this
+      # unset (DIVIDE_EVENT_BUS=memory).
+      DIVIDE_EVENT_BUS: ${DIVIDE_EVENT_BUS:-memory}
       DIVIDE_MINIO_ENDPOINT: minio:9000
       DIVIDE_MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-divide}
       DIVIDE_MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-dividedividedivide}

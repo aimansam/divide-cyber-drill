@@ -1,38 +1,13 @@
-"""F8: in-process event bus for live SSE.
+"""F8 InProcessEventBus: in-process ring buffer + asyncio pub/sub.
 
-The bus is a tiny pub/sub for TelemetryEvent-shaped dicts:
-
-  * ``publish(event)`` -- add an event to the ring buffer + fan
-    out to all subscribed ``asyncio.Queue`` instances.
-  * ``subscribe()`` -- return a queue + an ``unsubscribe`` handle.
-    SSE handlers use this to wait for the next event.
-  * ``recent(n)`` -- the last ``n`` events from the ring buffer.
-    Used by ``GET /runs/{id}/events/recent`` for cold-connect
-    replay.
-
-Persistence is *separate* from the bus. The bus is a transient
-fan-out -- it does not survive process restart. The DB is the
-durable record (insert in ``app.routers.events.ingest``).
-
-Why an in-process bus?
-  * SSE handlers run inside the same Python process as the API.
-    A bus is the cheapest fan-out.
-  * Multi-worker deployments (uvicorn workers > 1) mean the
-    subscriber and the publisher may live in different processes.
-    For F8 we accept this: each worker only fans out events it
-    sees. Live cross-worker events are deferred to F8.5 with
-    Redis pub/sub or similar.
-
-Why a ring buffer?
-  * ``recent(n)`` is O(1) -- a single list slice.
-  * Bounded memory: even a busy range producing 1k events/sec
-    stays well under 1 MB of buffer.
+See ``app.services.event_bus.__init__`` for the API contract
+(``EventBus`` Protocol) and the factory that selects this
+backend by default.
 """
 from __future__ import annotations
 
 import asyncio
 from collections import deque
-from datetime import datetime, timezone
 from threading import Lock
 from typing import Any, Callable
 
@@ -43,8 +18,13 @@ from typing import Any, Callable
 _RING_SIZE = 1024
 
 
-class EventBus:
-    """Per-process pub/sub for TelemetryEvent-shaped dicts."""
+class InProcessEventBus:
+    """Single-process pub/sub for TelemetryEvent-shaped dicts.
+
+    Lock-protected ring buffer + a list of asyncio.Queue
+    subscribers. See ``app.services.event_bus.__init__`` for
+    the Protocol this class implements.
+    """
 
     def __init__(self) -> None:
         # Ring buffer of events (newest at the right).
@@ -84,7 +64,9 @@ class EventBus:
                 # have a bounded queue so they don't leak memory.
                 pass
 
-    def subscribe(self, maxsize: int = 256) -> tuple[asyncio.Queue, Callable[[], None]]:
+    def subscribe(
+        self, maxsize: int = 256
+    ) -> tuple[asyncio.Queue, Callable[[], None]]:
         """Return ``(queue, unsubscribe)``.
 
         ``queue.get()`` returns the next event. The handler is
@@ -107,20 +89,13 @@ class EventBus:
             buf = list(self._buffer)
         return buf[-n:]
 
+    def reset(self) -> None:
+        """Clear the buffer + subscribers. Test-only.
 
-# Singleton -- one bus per process. Reset between pytest
-# runs via ``reset_for_tests()`` if needed.
-bus = EventBus()
-
-
-def reset_for_tests() -> None:
-    """Clear the bus. Test-only."""
-    with bus._lock:
-        bus._buffer.clear()
-        bus._subscribers.clear()
-
-
-def utcnow_iso() -> str:
-    """ISO-8601 UTC timestamp. Used as ``ts`` when caller doesn't
-    supply one."""
-    return datetime.now(timezone.utc).isoformat()
+        Replaces the module-level ``reset_for_tests()`` from
+        pre-R1 code; the package's ``__init__.py`` exposes a
+        convenience wrapper that delegates here.
+        """
+        with self._lock:
+            self._buffer.clear()
+            self._subscribers.clear()
