@@ -1,11 +1,11 @@
 # Section 9 — DrillConsole Consolidation (F9.1)
 
-> **Status:** F9.1 + F9.2 shipped. The Observe tab is the single
-> live-drill screen: status / topology / assets / console / audit
-> feed / leaderboard / live SOC stream — no more tab flipping
-> during a multi-team drill. F9.2 added 5s leaderboard polling
-> for embed mode. F9.3 lands the keyboard shortcuts + bundle
-> budget test.
+> **Status:** F9.1 + F9.2 + F9.3 shipped. The Observe tab is the
+> single live-drill screen: status / topology / assets / console /
+> audit feed / leaderboard (5s polling) / live SOC stream — no more
+> tab flipping during a multi-team drill. ``make verify-bundle``
+> enforces the 280 KB ceiling; ``make verify`` runs it as the 5th
+> step. F9 milestone is CLOSED.
 
 ## What F9.1 changes
 
@@ -130,21 +130,53 @@ Total tests after F9.1: **864** (was 859 + 5 new).
 | Pre-F9.1 (post-§15 closure) | 246.45 KB | 33.55 KB |
 | F9.1 | 260.55 KB | 19.45 KB |
 | F9.2 | 260.68 KB | 19.32 KB |
+| F9.3 | 260.68 KB | 19.32 KB (gzip: 77.45 KB) |
 
 F9.1 added ~14 KB (the LeaderboardCard + SocViewCard imports
 inside DrillConsole's already-loaded module graph). F9.2 added
-~130 bytes (the polling interval logic). F9.3 is net-zero on the
-bundle (keyboard shortcuts + bundle-budget test).
+~130 bytes (the polling interval logic). F9.3 is bundle-neutral
+(Makefile + pytest only); the bytes are unchanged.
 
-## What's deferred to F9.3
+Total tests added across F9: **10** (5 in `test_f9_drill_console.py`
++ 5 in `test_f9_bundle_budget.py`).
 
-  * **F9.3** — keyboard shortcut to focus the Leaderboard /
-    SOC sections in DrillConsole; sidebar nav anchor;
-    `make verify-bundle` target that fails the build if the
-    portal bundle exceeds the 280 KB budget.
+## F9.3 — bundle-budget gate
 
-These are UX polish; the live-drill single-screen property is
-already in place after F9.1 + F9.2.
+The 280 KB ceiling was previously enforced only by reviewer
+discipline (the §15 closure summary noted the bundle was "still
+under 280 KB"). F9.3 makes it a hard gate:
+
+  * **`Makefile::verify-bundle`** — builds the portal and fails
+    if the JS bundle exceeds 280 KB. Uses python3 for size +
+    comparison so it works in minimal containers (no `bc`/`stat`
+    required).
+  * **`make verify`** — now a 5-step gate. The bundle-budget
+    step runs last, after lint + test + preflight + smoke.
+  * **`tests/test_f9_bundle_budget.py`** — 5 tests pinning the
+    threshold, the inclusive boundary, the failure path, and
+    the real-portal-bundle size. The Makefile target is the
+    canonical gate; this test is the in-process regression net.
+
+Output on a clean tree:
+
+```
+bundle: 254.57 KB (limit 280.00 KB)
+OK: bundle within budget
+```
+
+The threshold (280 KB) and the comparison logic are exercised
+both in `make verify-bundle` (canonical) and in `make test`
+(regression net).
+
+## What's deferred to F9.x (post-F9.3)
+
+  * Keyboard shortcut to focus the Leaderboard / SOC sections
+    in DrillConsole.
+  * Sidebar nav anchor for the F9 panels.
+
+These are UX polish on top of the F9 milestone; the live-drill
+single-screen property is fully in place after F9.1 + F9.2 +
+F9.3.
 
 ## Migration / rollout
 

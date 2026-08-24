@@ -960,9 +960,11 @@ backlog). The 5 pillars above are the ones that turn div:ide
 into a final product; everything else is operator quality-of-life
 that can ship in any order afterward.
 
-**My pick (next plan): F9 — DrillConsole consolidation.** Single
-biggest demo-quality win, three small commits, zero new endpoints.
-R1 follows immediately after (multi-worker is the production gate).
+**My pick (next plan): R1 — Redis pub/sub for SSE.** F9 shipped
+(commit `cbd181e` + `aeba832` + `2004e83`; see §18.1). R1 is
+the production-deployment gate (multi-worker uvicorn loses
+events today); F10/F11/F12 are operator polish on top of F9
+and R1.
 
 ---
 
@@ -975,25 +977,35 @@ bundle delta.
 
 ### 18.1 F9 — DrillConsole consolidation
 
-Status: planned.
+Status: SHIPPED (F9.1 + F9.2 + F9.3, commits `cbd181e` + `aeba832`
++ `2004e83`). Runbook in [`docs/SECTION-9-INTEGRATION.md`](SECTION-9-INTEGRATION.md).
 
-Commits (3):
+What landed:
 
-  1. **F9.1** — `DrillConsole` reads `run.exercise_id` from
-     `GET /api/v1/drills/{id}`. If set, render `LeaderboardCard`
-     + `SocViewCard` below the existing topology/assets/audit
-     sections. If null (single-team Run), hide the two new
-     sections gracefully.
-  2. **F9.2** — `LeaderboardCard` gets a `pollIntervalMs` prop
-     (default 5000). Embed mode uses 5s polling. `SocViewCard`
-     is already wired for live SSE; verify the `runId` flows
-     through correctly when embedded in DrillConsole. Layout:
-     2-column responsive grid on desktop, stacked on mobile.
-  3. **F9.3** — `docs/SECTION-9-INTEGRATION.md` runbook +
-     bundle-budget test + pin tests in `test_portal_app_smoke.py`.
+  1. **F9.1** (`cbd181e`) — `DrillConsole` reads `run.exercise_id`
+     from `GET /api/v1/drills/{id}`. If set, render
+     `LeaderboardCard` + `SocViewCard` below the existing
+     topology/assets/audit sections. If null (single-team Run),
+     hide the two new sections gracefully. The endpoint gained
+     one additive field (`exercise_id`); no migration, no model
+     change. 5 new tests in `test_f9_drill_console.py`.
+  2. **F9.2** (`aeba832`) — `LeaderboardCard` gets a
+     `pollIntervalMs` prop (default 0 = fetch-once-on-mount,
+     preserving Admin-tab behavior). DrillConsole embed passes
+     `5000` so the leaderboard ticks live alongside the SOC
+     stream. Bundle +130 bytes.
+  3. **F9.3** (`2004e83`) — `make verify-bundle` enforces the
+     280 KB ceiling; `make verify` runs it as the 5th step.
+     `tests/test_f9_bundle_budget.py` adds 5 pytest pins. Plus
+     per-test DB cleanup in the F9 test module so the suite
+     stays isolated.
 
-What this is NOT: no new endpoint, no new portal component, no
-backend work. F8's SSE + ring buffer + DB record cover everything.
+Bundle delta: 246.45 KB → 260.68 KB (+14.23 KB). 19.32 KB
+headroom under the 280 KB budget.
+
+Tests added: **10** total (5 drill-console + 5 bundle-budget).
+Full F9 + reports + routers + SOC + multi-team + admin + auth
+regression: **128 passed, 1 skipped, 0 failed**.
 
 API/UI matrix:
 
@@ -1104,9 +1116,11 @@ Commits (3):
 
 After all five pillars ship:
 
-  * ~877 tests passing (current 859 + ~18 new).
-  * Portal bundle ~268 KB (still under the 280 KB budget).
-  * `make verify` includes the new multi-worker SSE test.
+  * ~877 tests passing (current 869 + ~8 new for R1/F10/F11/F12).
+  * Portal bundle ~268 KB (still under the 280 KB budget;
+    F9 already at 260.68 KB leaves 19.32 KB of headroom).
+  * `make verify` includes the bundle-budget gate (F9.3 done)
+    + the new multi-worker SSE test (R1).
   * `README.md` walkthrough reproducible from a clean clone
     on a fresh Proxmox host.
   * div:ide ships as a self-contained cyber-range product.
