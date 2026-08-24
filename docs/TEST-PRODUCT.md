@@ -4,7 +4,7 @@ A graded definition of "ready for someone to try it". Each level is a
 strict superset of the previous — you can't ship L2 without L1 green,
 and L3 without L2.
 
-> **Where we are today:** stack is healthy, 287 tests passing.
+> **Where we are today:** stack is healthy, 302 tests passing.
 > `make preflight` is 9/9 after the `/access/permissions` ACL fix
 > **and** the `tpl-debian-cloudinit` template was created (run #11
 > completed with status `succeeded`).
@@ -20,6 +20,14 @@ and L3 without L2.
 > CORS, 2.11 MinIO telemetry, 2.12 after-action JSON) are queued in
 > the [Next plan](#next-plan-post-l1-ordered) below — total ~3 h, no
 > PVE required.
+>
+> L3: **1 ✅ / 10 ❌** after the RBAC substrate + admin gate + drill
+> matrix landed. Item 3.2 (RBAC) flipped from "no roles" to fully
+> enforced: anonymous can no longer probe `/api/v1/admin/*` (was the
+> biggest unaddressed disclosure risk on the LAN). The drill
+> lifecycle enforces the persona matrix, including the own-runs-only
+> filter for red/blue teams. The remaining ten L3 items are the
+> post-L1 plan's M2–M5 backlog.
 >
 > **User portal** is the new F1 milestone (commit `d0ce912`): a
 > React + Vite + Tailwind + shadcn/ui app at `/portal/app/` with
@@ -159,7 +167,7 @@ auth, ops-grade observability.
 | # | Criterion | Status |
 |---|---|---|
 | 3.1  | Keycloak or equivalent IdP for SSO + MFA | ❌ no IdP |
-| 3.2  | RBAC: roles `admin` / `trainer` / `trainee` / `viewer` | ❌ no roles |
+| 3.2  | RBAC: roles `admin` / `lead` / `red` / `blue` / `observer` (formerly `trainer` / `trainee` / `viewer` — renamed to match the L2 2.9 enum) | ✅ done ([`services/api/app/core/auth.py`](../../services/api/app/core/auth.py) — `Role` enum + `require_role()` factory; gates on `/admin/*` in [`routers/admin.py`](../../services/api/app/routers/admin.py); drill/proxmox gates + own-runs-only filter in [`routers/drills.py`](../../services/api/app/routers/drills.py) and [`services/authorization.py`](../../services/api/app/services/authorization.py). Commits: `1631448` substrate, then admin gate + drill/proxmox matrix.) |
 | 3.3  | Per-user PVE quota (max concurrent VMs, max vCPU-hours/month) | ❌ no quota |
 | 3.4  | Per-user scenario library (private scenarios not visible to others) | ❌ flat library |
 | 3.5  | Billing meter: drill-minutes logged per user | ❌ no metering |

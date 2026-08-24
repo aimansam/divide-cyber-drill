@@ -1,7 +1,11 @@
 """Admin/setup endpoints for the PVE setup wizard.
 
-Exposed at ``/api/v1/admin/*`` (no auth required for now -- this is a
-LAN-only tool for the initial setup). Routes:
+Exposed at ``/api/v1/admin/*``. All routes in this module require an
+``X-Divide-Token`` header carrying a token whose role is in the
+``admin`` allow-list (see :class:`app.core.auth.Role` and
+:func:`app.core.auth.require_role`). The gate is registered at the
+router level so it's applied uniformly to every endpoint here,
+including future additions. Routes:
 
   * ``GET  /probe``                         — one-shot PVE snapshot
   * ``GET  /storage``                       — list storage pools
@@ -13,8 +17,12 @@ LAN-only tool for the initial setup). Routes:
   * ``GET  /drill-template-status``         — does the canonical template exist?
   * ``POST /start-first-drill``             — convenience: run first-live-drill
 
-Security note: this whole module assumes a trusted LAN. Once L2 lands
-(token middleware), these routes will be gated behind an admin role.
+Security note: this whole module used to be LAN-only. As of L2 2.9
+it's hard-gated on admin role. The setup wizard runs in the
+operator's browser, mints an admin token via ``tools/issue_token.py``
+during step 1, and forwards it on every ``fetch()`` call (see
+``docs/SETUP-UI.md``). The user-facing portals (``/portal/app/``)
+do not hit any ``/admin/*`` endpoint.
 """
 from __future__ import annotations
 
@@ -22,13 +30,22 @@ import os
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, BackgroundTasks, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile, status
 from pydantic import BaseModel
 
+from app.core.auth import Role, require_role
 from app.services import admin as admin_svc
 from app.services.proxmox import ProxmoxAPIError, ProxmoxNotConfiguredError, list_storage
 
-router = APIRouter()
+# Router-level gate: every endpoint in this module requires an admin
+# token. ``dependencies=`` is a FastAPI feature that runs the listed
+# dependencies before each route handler, but doesn't inject their
+# return value into the handler signature. That's exactly what we
+# want here -- the handler shouldn't care about the token, only the
+# framework's auth check does. The ``require_role`` factory chains
+# ``require_token`` underneath, so missing-header is 401 and
+# wrong-role is 403.
+router = APIRouter(dependencies=[Depends(require_role(Role.ADMIN))])
 
 
 class ProbeResponse(BaseModel):
