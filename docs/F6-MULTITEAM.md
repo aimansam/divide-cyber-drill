@@ -1,6 +1,6 @@
 # F6 Runbook — Multi-Team Exercises
 
-> **Status:** F6 shipped (`5386096` + `d7e69f9` + `aba76b2`).
+> **Status:** F6 shipped (`5386096` + `d7e69f9` + `aba76b2`). (✅ shipped; see [PLAN.md §15.6](PLAN.md) for the full §15 closure summary.)
 > Scenarios can declare multiple teams; an Exercise binds them;
 > each team has its own Run; flag captures aggregate into a
 > team score that the leaderboard reads.

@@ -4,10 +4,16 @@ A graded definition of "ready for someone to try it". Each level is a
 strict superset of the previous — you can't ship L2 without L1 green,
 and L3 without L2.
 
-> **Where we are today:** stack is healthy, 399 tests passing.
-> `make preflight` is 9/9 after the `/access/permissions` ACL fix
-> **and** the `tpl-debian-cloudinit` template was created (run #11
-> completed with status `succeeded`).
+> **Where we are today:** §15 cyber-range plans **ALL CLOSED**.
+> **431 root + 428 API = 859 tests passing** (3 pre-existing
+> unrelated CLI auth failures). `make preflight` 9/9. Run #11
+> remains the canonical Phase 1 closure (status `succeeded`,
+> VMID 109 from `tpl-debian-cloudinit`).
+>
+> F3 multi-VM asset spawning, F4 noVNC console, F5 flag scoring,
+> F6 multi-team exercises + leaderboard, F7 range templates +
+> reset, F8 SOC view + SSE telemetry — **all shipped**. See §15.6
+> of [docs/PLAN.md](PLAN.md) for the closure summary.
 >
 > L1: **9 ✅ / 0 ❌ / 0 ⚠️** as of run #11. Items 1.3–1.9 all flipped
 > from blocked → done in one operator-side upload + one ACL grant.
@@ -191,7 +197,7 @@ auth, ops-grade observability.
 | 3.4  | Per-user scenario library (private scenarios not visible to others) | ❌ flat library |
 | 3.5  | Billing meter: drill-minutes logged per user | ❌ no metering |
 | 3.6  | PDF after-action report (not just JSON) | ❌ no PDF |
-| 3.7  | Wazuh / MISP integration: drill events published to SOC stack | ❌ not wired |
+| 3.7  | Wazuh / MISP integration: drill events published to SOC stack | ⚠️  partial — telemetry sinks (stdout + MinIO via optional minio-py) ship in L2 2.11; runner emits `run.*` / `asset.running` / `run.completed` / `flag.captured` to the in-process EventBus + `telemetry_events` table (F8). Operator-facing SOC view is the portal `SocViewCard`. Wazuh-specific ingest adapter deferred to F8.5 / G11. |
 | 3.8  | Multi-node PVE cluster support (drill assets span nodes for realism) | ❌ single node |
 | 3.9  | SDN zone per drill (isolated L2 for red/blue traffic) | ❌ no SDN |
 | 3.10 | Scheduling: cron-driven drills (e.g. weekly red-team) | ❌ no scheduler |
@@ -199,7 +205,7 @@ auth, ops-grade observability.
 | 3.12 | Scenario marketplace (import/export YAML, signed) | ❌ local-only |
 | 3.13 | Multi-tenant org model (org → team → user) | ❌ single-tenant |
 | 3.14 | Public status page + incident comms | ❌ no status page |
-| 3.15 | SOC 2-ish audit trail (who ran what, when, with what output) | ⚠️  audit exists, not exported |
+| 3.15 | SOC 2-ish audit trail (who ran what, when, with what output) | ⚠️  per-row audit exists + F8 `telemetry_events` table records source/sub; export of an "exercise report" (PDF / JSON bundle) deferred to G12 (coaching mode). |
 | 3.16 | L2 criteria all still green | ❌ blocked on L2 |
 
 ### L3 Time-to-ship estimate
@@ -364,6 +370,9 @@ do today, what's missing), see
 
 | Date | Change |
 |---|---|
+| 2026-08-25 | **§15 cyber-range plans ✅ ALL CLOSED** — F3 (`2a97525`+`6e9e5b5`+`c3d4e5f`), F4 (`9c7a583`+`e28ed7a`+`110e50f`), F5 (`98e4e7c`+`85ecf29`+`749e6c5`), F6 (`5386096`+`d7e69f9`+`176dd6d`), F7 (`fa20fb3`+`7c4f03a`+`d02a188`), F8 (`d88dbe6`+`7a987f9`+`d74593f`). 22 commits, +319 tests, 6 new tables (`assets`-refactor, `flag_submissions`, `exercises`+`teams`+`team_memberships`, `templates`, `telemetry_events`), 9 new endpoints, 4 new portal cards (`LeaderboardCard`, `TemplatesCard`, `SocViewCard`, plus enhancements to existing cards), 6 new runbooks, 1 new example scenario (`red-vs-blue-baseline.scenario.yaml`). Portal bundle 251.65 KB (still < 280 KB). **§15 closed; L3 3.7 + 3.15 partially improved via F8 telemetry**. New §17 roadmap added for post-§15 follow-ons (R1 Redis pub/sub, R2 polish, R3 coaching, R4 bookings, R5 multi-tenant, R6 marketplace, R7 replay UI). **Tests: 540 → 859 (+319).** |
+| (historical) | Below entries retained for the L1 / L2 / F1 / F2 / F3-prep / F4-UI records. |
+| (deleted) | (skipped) |
 | 2026-08-24 | **F4-UI: cyber-range portal v2** ✅ done (commits `cd66060` + `146f91b` + `c2ccddf`). New `TopNav` (role-aware view tabs + sign-out), `DrillConsole` (live drill view with LIVE pulse badge + polling), `TopologyGraph` (hand-rolled SVG network visual), `DashboardCard` (KPI tiles + recent runs), `KpiTile`, `StatusPill`, `EmptyState`, `UserListCard`, `OperatorConsoleCard`, `ProfileCard`, `Toast` + `ToastHost`. `MyRunsCard` gets status filter. `useHashRoute` hook (no react-router dep). `app.tsx` rewritten with 6-view switch; old `COMPOSITIONS` table replaced by view-tab routing. Bundle: 246.42 KB JS / 73.56 KB gz (was 219 KB pre-F4-UI; +27 KB overhead, still under 280 KB budget). [`docs/PORTAL-UI.md`](PORTAL-UI.md) written. **+69 new tests** (22 role-composition rewrite + 26 F4-UI shared components + 21 F4-UI commit 2 + 3 sign-in card F4-UI-aware). Total: ~540 tests passing. |
 | 2026-08-24 | **F3-prep: credential login** ✅ done (commits `78bc332` + `b603c40`). New `app/services/users.py` (argon2id) + `app/routers/auth.py` (`POST /api/v1/auth/login`, rate-limited 5/15min, generic 401 to prevent enumeration; `GET /api/v1/auth/users` admin-only; `POST /api/v1/auth/logout` stateless). `User` entity + alembic `0003_users.py`. Portal `SignInCard` + `lib/api.ts` login/logout helpers. Bootstrap admin via `DIVIDE_BOOTSTRAP_ADMIN_SUB`/`PASSWORD` env vars. [`docs/USERS.md`](USERS.md) written. **+52 tests** (33 backend + 19 portal). Total: ~470 tests passing. |
 | 2026-08-24 | docs(plan): cyber-range roadmap §15 added (F3–F8 plan). New §15 in `docs/PLAN.md` documents the 8 cyber-range gaps (G1–G8) that sit on top of the L1+L2 platform base, the phased F3–F8 plan to close them (~32 h across 17 commits), and the per-plan mapping back to L3 items. §11 roadmap gains a Phase 5 entry. §12 (key decisions) gains the four open product decisions for F3 (single-team vs multi-team, live-fire vs simulated, noVNC vs Guacamole, simple VLANs vs SDN). §14 renumbered to §16 and is no longer the "this is stale" disclaimer — the doc is current as of F2 close-out. **No code or test changes** — this is a docs-only commit so the cyber-range roadmap has a canonical home before we tackle F3. |

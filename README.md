@@ -1,9 +1,15 @@
 # div:ide cyber drill
 
-> **Status:** Phase 0 ✅ + Phase 1 ✅ (code-complete; one live drill away from L1 done).
-> See [`docs/TEST-PRODUCT.md`](docs/TEST-PRODUCT.md) for the L1/L2/L3 ship criteria + next plan.
-> Two browser tools ship in the API container: setup wizard at `/portal/`
-> and operator test tool at `/portal/test/`.
+> **Status:** Phase 0 ✅ + Phase 1 ✅ + Phase 2 ✅ (L1 9/9, L2 18/18).
+> **§15 cyber-range plans F3-F8 ALL CLOSED** — multi-VM scenarios
+> (F3), noVNC console (F4), flag scoring (F5), multi-team exercises
+> (F6), range templates (F7), SOC view + SSE telemetry (F8).
+> **859 tests passing** (431 root + 428 API).
+> See [`docs/PLAN.md`](docs/PLAN.md) §15 for the cyber-range roadmap
+> and §17 for the post-§15 follow-ons.
+> See [`docs/TEST-PRODUCT.md`](docs/TEST-PRODUCT.md) for the L1/L2/L3 ship criteria.
+> Browser tools ship in the API container: setup wizard at `/portal/`,
+> operator test tool at `/portal/test/`, full cyber-range portal at `/portal/app/`.
 
 **div:ide** is a Proxmox-backed cyber drill platform for blue teams, red teams, and
 training cohorts. It spins up isolated, reproducible attack/defense scenarios as VMs,

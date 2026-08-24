@@ -1,8 +1,10 @@
 # div:ide Demo — Show Off the Cyber Range in 5 Minutes
 
-> **Status:** F4-UI demo runner shipped (commit `a76f4ee`).
-> **Audience:** anyone demoing div:ide to a colleague, investor,
-> customer, or trainer.
+> **Status:** F4-UI + §15 cyber-range plans F3-F8 all closed.
+> Demo runner includes the multi-team red-vs-blue flow
+> (`make demo`) which exercises F6 (multi-team exercises) +
+> F8 (SOC view). **Audience:** anyone demoing div:ide to a
+> colleague, investor, customer, or trainer.
 
 ## TL;DR
 

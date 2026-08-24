@@ -1,6 +1,10 @@
 # div:ide Portal UI — Cyber-Range View Layer
 
-> **Status:** F4-UI complete (commits `cd66060` + `146f91b` + `c2ccddf`).
+> **Status:** F4-UI complete + **§15 cyber-range plans F3-F8 all
+> closed** (commits `2a97525`..`d74593f`). F6 added the
+> `LeaderboardCard` to the Admin tab, F7 added `TemplatesCard`,
+> F8 added `SocViewCard` to the Observe tab. Portal bundle:
+> 251.65 KB JS / 75.11 KB gzipped (well under the 280 KB budget).
 > **Audience:** operators (anyone with a verified div:ide identity).
 
 ## What is F4-UI?

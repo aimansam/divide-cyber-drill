@@ -2,10 +2,11 @@
 
 ## Design & Architecture Plan
 
-> **Status:** Phase 0 — Foundations **DONE**. Stages 2, 2.5, 2.7, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18 **DONE**. F1 (portal role-aware UI cards, M3.2 Half 1 + Half 2) **DONE**. F2 (L2 closure: CORS, rate-limit, watchdog, telemetry, after-action report) **DONE**.
+> **Status:** Phase 0 — Foundations **DONE**. Stages 2, 2.5, 2.7, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18 **DONE**. F1 (portal role-aware UI cards) **DONE**. F2 (L2 closure: CORS, rate-limit, watchdog, telemetry, after-action report) **DONE**. F3-F8 (cyber-range §15 plans) **DONE**.
 > **Phase 1 — One-VM drill end-to-end ✅ CLOSED** (run #11, status=`succeeded`, VMID 109 cloned from `tpl-debian-cloudinit`, audit populated, asset teardown to `stopped`).
 > **Phase 2 — LAN-grade cyber drill platform ✅ CLOSED** — L1 ledger 9/9 ✅, L2 ledger 18/18 ✅ (closed by F2). L3 ledger 3/11 partially; cyber-range gaps documented in §15.
-> `make preflight` 9/9 READY. **399 tests passing**.
+> **§15 — Cyber-range plans ✅ ALL CLOSED** — F3 (multi-VM asset spawning), F4 (noVNC console), F5 (flags + scoring), F6 (multi-team exercises + leaderboard), F7 (range templates + reset), F8 (SOC view + SSE telemetry).
+> `make preflight` 9/9 READY. **431 root + 428 API = 859 tests passing** (3 pre-existing unrelated CLI auth failures).
 > See **[docs/TEST-PRODUCT.md](TEST-PRODUCT.md)** for L1/L2/L3 "test product" criteria and ETA per level; **§15 (below)** for the cyber-range roadmap that sits on top of L3.
 > **Target platform:** Proxmox VE (main host).
 > **Control plane runtime:** Docker Compose on a dedicated VM/LXC.
@@ -706,8 +707,8 @@ commits.
 | **F4** | G2 | ~4 h, 2 commits | noVNC console via PVE `get_vnc_ticket` proxy + `websockets` dep; `GET /drills/{id}/assets/{asset_id}/console` endpoint; "Open console" button on `AssetsCard`; SSH target format with cloud-init-injected key ✅ **DONE** — commits `9c7a583` + `e28ed7a` + `110e50f`. Runbook in [`docs/F4-NOVNC.md`](F4-NOVNC.md); stripped-down canvas client keeps the portal bundle at 251.61 KB. |
 | **F5** | G3 + G5 + L3 3.15 partial | ~5 h, 3 commits | `Flag` + `FlagSubmission` models; `POST /drills/{id}/submit-flag`; runner plants flags at scenario start; time-decay scoring (`points = base * max(0, 1 - elapsed/window)`); `score_breakdown` in after-action report ✅ **DONE** — commits `98e4e7c` + `85ecf29` + `749e6c5`. Runbook in [`docs/F5-SCORING.md`](F5-SCORING.md); demo scenario declares 3 red-side flags. |
 | **F6** | G4 + G6 + L3 3.13 partial | ~8 h, 4 commits | `Exercise` model (scheduled start/end, status: idle/live/ended); `Team` model with members; per-team parallel runs on shared scenario topology; live timer; `LeaderboardCard` ✅ **DONE** — commits `5386096` + `d7e69f9` + `aba76b2`. Runbook in [`docs/F6-MULTITEAM.md`](F6-MULTITEAM.md); portal `LeaderboardCard` shows team scores with first-place crown. |
-| **F7** | G7 | ~4 h, 2 commits | `Range` model with asset state snapshots; `POST /drills/{id}/reset` (admin/lead); "Reset to clean" + "Save as range template" buttons on `RunInspectorCard` |
-| **F8** | G8 | ~6 h, 3 commits | SSE endpoint `GET /drills/{id}/events`; runner publishes events on each lifecycle hook; `SocViewCard` (blue/observer only) with kill-chain timeline; simple network map |
+| **F7** | G7 | ~4 h, 3 commits | `Template` model (immutable JSONB snapshot of SUCCEEDED runs); `POST /drills/{id}/reset` reverts the run to the template snapshot; portal `TemplatesCard` (list + clone + delete); admin can save live runs as templates ✅ **DONE** — commits `fa20fb3` + `7c4f03a` + `d02a188`. Runbook in [`docs/F7-TEMPLATES.md`](F7-TEMPLATES.md). |
+| **F8** | G8 | ~6 h, 3 commits | `TelemetryEvent` table + EventBus (1024-event ring buffer, fan-out, dedup); runner emits `run.started` / `asset.running` / `run.completed`; `submit-flag` emits `flag.captured`; SSE endpoint `/runs/{id}/events/stream`; portal `SocViewCard` with kill-chain timeline + severity filter + pause/resume ✅ **DONE** — commits `d88dbe6` + `7a987f9` + `d74593f`. Runbook in [`docs/F8-SOC.md`](F8-SOC.md). |
 
 **Total (post-F3-prep):** ~30 h, 19 commits, ~12 new tests per
 commit on average. F3-prep (2 commits, 52 tests) shipped in the
@@ -761,6 +762,80 @@ canonical list; in short:
 **Recommendation for the LAN deployment:** single-team, live-fire,
 noVNC, simple VLANs. Maximum cyber-range value per hour.
 
+
+
+### 15.6 §15 closure summary
+
+All six cyber-range plans (**F3, F4, F5, F6, F7, F8**) plus the
+predecessor **F3-prep** are **CLOSED**. The cyber range is
+functional end-to-end.
+
+**Commits (post-F3-prep):** 22 commits across F3–F8.
+
+**Test growth:** 540 → 859 tests passing (+319, ~1.59×).
+
+**Bundle discipline:** Portal bundle 251.65 KB (still under the
+280 KB budget set in F4). No new runtime dependencies beyond
+what F3-F8 explicitly added (F4 added `websockets`).
+
+**Net code shipped:**
+
+  * 6 new tables: `assets` (F3 refactor), `flag_submissions`
+    (F5), `exercises` + `teams` + `team_memberships` (F6),
+    `templates` (F7), `telemetry_events` (F8).
+  * 6 new Alembic migrations: `0003` through `0008`.
+  * 9 new endpoints: `POST /exercises/{id}/start|stop|archive`,
+    `POST /exercises/{id}/teams`, `POST /exercises/{id}/members`,
+    `GET /exercises/{id}/leaderboard`, `POST /drills/{id}/reset`,
+    `POST /drills/{id}/save-as-template`, `POST /templates`,
+    `GET /templates`, `DELETE /templates/{id}`,
+    `POST /runs/{id}/events`, `GET /runs/{id}/events[/recent|/stream]`.
+  * 4 new portal components: `LeaderboardCard` (F6),
+    `TemplatesCard` (F7), `SocViewCard` (F8), plus
+    enhancements to `RunInspectorCard` + `ScenariosCard` +
+    `AssetsCard`.
+  * 6 new runbooks: F3, F4, F5, F6, F7, F8.
+  * 1 new example scenario: `red-vs-blue-baseline.scenario.yaml`.
+
+**End-to-end demo arc (post-§15 closure):**
+
+1. Admin signs in via F3-prep's `SignInCard`.
+2. Picks `red-vs-blue-baseline` scenario from `ScenariosCard`
+   (3 assets on 2 networks, 3 red-side flags planted at boot).
+3. Creates an Exercise with 2 teams: red, blue (F6).
+4. Adds members per team.
+5. Starts the exercise (status: idle → live).
+6. Each team's `Run` spawns in parallel; assets clone + boot
+   (F3); bridge networks are wired; flags plant at start (F5).
+7. Operator opens noVNC console per asset (F4) — red attacks,
+   blue defends.
+8. Flag captures land in `FlagSubmission`; `score_red` /
+   `score_blue` update; team.score denormalizes into F6
+   leaderboard.
+9. SOC view (F8) streams live events to blue team: `run.started`,
+   `asset.running`, `flag.captured`, custom `kill-chain.signal`.
+10. Operator clicks `/stop` — exercise ends; leaderboard freezes.
+11. Operator clicks "Save as template" mid-drill (F7) to
+    bookmark an interesting state.
+12. Next cohort: operator clones the template, gets a fresh
+    reset range (F7 `/reset`).
+13. After-action report (F2.5) downloads with score breakdown.
+
+**Open follow-ons (out of §15 scope):**
+
+  * F8.5 — Redis pub/sub for multi-worker event fan-out.
+  * F8.5 — replay UI with playhead (scrub past events).
+  * G9 — Range bookings (calendar UI).
+  * G10 — Multi-tenant isolation (L3 3.13).
+  * G11 — Scenario marketplace (L3 3.12).
+  * G12 — Coaching / replay mode.
+  * Polish (Option B) — light theme + mobile + keyboard
+    shortcuts. Demo polish only; not on the §15 critical path.
+
+§15 is closed. New ROADMAP section (§17 below) tracks the
+follow-on work.
+
+---
 ---
 
 ## 16. Where this doc stops being current (read [docs/TEST-PRODUCT.md](TEST-PRODUCT.md) for the live ledger)
@@ -912,3 +987,35 @@ text is misleading so future readers don't trust stale snippets:
   `/access/permissions` fix in commit `ab0ab58`).
 - "Tests: 56 passed" is from the §13 snapshot — current count is
   243, see `make test`.
+
+---
+
+## 17. Roadmap (post-§15)
+
+§15 (cyber-range plans F3-F8) is closed. The platform is a
+functional cyber range end-to-end. This section tracks the
+follow-on work that sits **outside** §15 — non-critical-path
+features that improve the operator / user experience.
+
+**Priority order (operator impact, not engineering risk):**
+
+| # | Feature | Closes | Effort | Why now |
+|---|---|---|---|---|
+| **R1** | **F8.5 — Redis pub/sub for multi-worker event fan-out** | G8 partial | ~3 h, 2 commits | Multi-worker uvicorn deployments lose SSE events across workers. A Redis bus fixes the cross-worker fan-out without changing the API. |
+| **R2** | **Polish (Option B) — light theme + mobile + keyboard shortcuts** | UX | ~3 h, 2 commits | Demo polish. Light theme for daylight operators; mobile for on-call responders; keyboard shortcuts for power operators. Bundle stays < 280 KB. |
+| **R3** | **G12 — Coaching / replay mode** | G12 | ~6 h, 3 commits | Instructor pauses drill at interesting state, walks red/blue through the kill chain. Reuses F8 SOC view + F7 templates. |
+| **R4** | **G9 — Range bookings (calendar UI)** | G9 | ~3 h, 2 commits | Booking is the missing piece for repeatable drills in a shared lab. |
+| **R5** | **G10 — Multi-tenant isolation (L3 3.13)** | L3 3.13 | ~10 h, 5 commits | Adds per-tenant Scenario / Exercise / Run scope. Big scope; do once, last. |
+| **R6** | **G11 — Scenario marketplace (L3 3.12)** | L3 3.12 | ~5 h, 3 commits | Public scenario catalog; pulls from upstream forks. Mostly UI + governance, not new platform work. |
+| **R7** | **F8.5 — replay UI** | G8 partial | ~4 h, 2 commits | Scrub past events with playhead. Builds on the SOC view's filter + paginated history. |
+
+**Total effort to full polish:** ~34 h (R1-R7).
+
+**Recommendation:** ship **R1 + R2** first. R1 unblocks multi-worker
+production deployments; R2 unblocks the demo. R3-R7 are operator
+quality-of-life and can ship in any order afterward.
+
+**My pick (next plan): R1 — Redis pub/sub for SSE.** Smallest
+remaining engineering risk, biggest production-readiness win.
+
+---

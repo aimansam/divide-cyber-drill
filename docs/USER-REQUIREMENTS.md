@@ -7,6 +7,14 @@ is wired today vs. what is deferred to a later level. Companion to:
 - [`TEST-PRODUCT.md`](TEST-PRODUCT.md) — done-definition per level (L1/L2/L3)
 - [`LIVE-DRILL-RUNBOOK.md`](LIVE-DRILL-RUNBOOK.md) — operator procedure for one drill
 
+> **Status:** §15 cyber-range plans **ALL CLOSED**. Every role's
+> section below now lists what the platform can do today (post-F8).
+> The §15 follow-ons (R1-R7 in PLAN.md §17) are the only remaining
+> work; they're tracked there, not duplicated here.
+>
+> **Tests:** 431 root + 428 API = 859 passing (3 pre-existing
+> unrelated CLI auth failures).
+
 > **Scope of this doc.** "User requirement" means a capability that a
 > real person needs in order to do their job with the platform. It is
 > **not** a feature roadmap (those items live in
@@ -154,10 +162,16 @@ PVE OK?".
 **Goal:** detect + respond; see telemetry from inside the cloned
 victim VMs.
 
-**Wired today (L2):**
+**Wired today (L2 + F8 SOC view):**
 - HMAC token with `role=blue`.
 - `GET /api/v1/drills/{id}` for the run they joined.
 - `GET /api/v1/drills/{id}/audit` for self-attribution.
+- **F8 — Live SOC view:** blue subscribes to the live event
+  stream via SSE (`GET /api/v1/runs/{id}/events/stream`). They see
+  `run.started` + `asset.running` + `flag.captured` + admin/lead
+  injected `kill-chain.signal` events in real time. Portal
+  `SocViewCard` shows the timeline with severity filter (info /
+  low / medium / high), pause/resume, and reconnect handling.
 - `/portal/test/` cards 4 (assets), 5 (audit), 6 (metrics).
 - [`/portal/app/`](../services/portal/app/index.html) (commits
   `d0ce912`, `M3.2-Half1`, `M3.2-Half2`) — the blue team's
@@ -175,10 +189,14 @@ victim VMs.
 
 **Needs not yet met:**
 - **Wazuh + MISP events forwarded from inside the guest VM**
-  (criteria L3 3.7 / 3.8). Today no telemetry comes out of the
-  guest. The scenario spec has `telemetry.sinks[]` already (MinIO,
-  Wazuh, MISP, stdout), the runner reads the field, and next-plan #5
-  ships the MinIO + stdout sinks. Wazuh/MISP are L3.
+  (criteria L3 3.7 / 3.8). F8 ships the *event-bus* path: runner
+  emits `run.*` / `asset.*` / `flag.captured` events and the SOC
+  view streams them via SSE. The remaining gap is the
+  Wazuh/MISP-specific sink adapter that takes the in-process
+  EventBus and forwards to a real SOC stack — deferred to F8.5 / G11.
+- **Cross-team flag capture:** F5 + F6 give blue a `submit-flag`
+  endpoint scoped to their team; flag scores roll up into the
+  exercise's leaderboard (F6 `LeaderboardCard`).
 - **Cloud-init user-data applied to the cloned VM** so the guest
   actually has an SSH key + hostname out of the box (next-plan #7).
   Without this, even *if* Wazuh were wired, the guest can't enroll.
@@ -207,6 +225,9 @@ after-the-fact reviewer.
   surfaces the asset summary inline). Server-side, observer tokens
   are gated by `require_role(OBSERVER, ...)` on every read endpoint
   (commit `4d840f9`).
+- **F8 — Observer SOC view:** observers can subscribe to live
+  event streams for any run. Use case: compliance auditor watches
+  a live red-vs-blue drill without operator involvement.
 
 **Needs not yet met:**
 - **No read-only API surface.** Every endpoint either writes

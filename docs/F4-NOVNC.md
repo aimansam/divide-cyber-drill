@@ -1,6 +1,6 @@
 # F4 Runbook — noVNC Console Per Asset
 
-> **Status:** F4 shipped (`9c7a583` + `e28ed7a`). Every running
+> **Status:** F4 shipped (`9c7a583` + `e28ed7a`). Every running (✅ shipped; see [PLAN.md §15.6](PLAN.md) for the full §15 closure summary.)
 > asset now exposes a noVNC console via
 > `GET /api/v1/drills/{id}/assets/{a}/console` + WebSocket proxy.
 >

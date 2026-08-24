@@ -1,6 +1,6 @@
 # F7 Runbook — Range Templates
 
-> **Status:** F7 shipped (`fa20fb3` + `7c4f03a` + `aba76b2`).
+> **Status:** F7 shipped (`fa20fb3` + `7c4f03a` + `aba76b2`). (✅ shipped; see [PLAN.md §15.6](PLAN.md) for the full §15 closure summary.)
 > Templates let operators snapshot a Run's end-state and replay
 > it deterministically.  Drills become repeatable artifacts
 > instead of one-shot experiments.

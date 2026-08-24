@@ -1,6 +1,6 @@
 # F3 Runbook — Bridge Provisioning on Proxmox VE
 
-> **Status:** F3 shipped (`2a97525` + `6e9e5b5`). The runner now iterates
+> **Status:** F3 shipped (`2a97525` + `6e9e5b5`). The runner now iterates (✅ shipped; see [PLAN.md §15.6](PLAN.md) for the full §15 closure summary.)
 > `spec.networks[]` and `spec.assets[].networks[]`, creating one Linux
 > bridge per network declaration and attaching NICs to each asset.
 >

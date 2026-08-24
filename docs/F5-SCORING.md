@@ -1,6 +1,6 @@
 # F5 Runbook — Flags, Scoring, and Captures
 
-> **Status:** F5 shipped (`98e4e7c` + `85ecf29`). Scenarios can
+> **Status:** F5 shipped (`98e4e7c` + `85ecf29`). Scenarios can (✅ shipped; see [PLAN.md §15.6](PLAN.md) for the full §15 closure summary.)
 > declare `spec.flags[]`; teams capture flags via
 > `POST /api/v1/drills/{id}/submit-flag`; the API scores them
 > with linear time-decay.
