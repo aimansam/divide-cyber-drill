@@ -157,6 +157,13 @@ class Run(Base, TimestampMixin):
         ForeignKey("exercises.id", ondelete="SET NULL"),
         nullable=True,
     )
+    # F7: optional template this run was spawned from. When set,
+    # the template's ``snapshot`` JSON describes the desired end
+    # state (assets, flags, networks) -- used by /drills/{id}/reset.
+    template_id: Mapped[int | None] = mapped_column(
+        ForeignKey("templates.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     # F6: nullable for backward compat. Defaults to "red" so
     # legacy single-team runs continue to attribute flag
     # submissions to the red team.
@@ -674,3 +681,62 @@ class TeamMembership(Base, TimestampMixin):
             f"<TeamMembership sub={self.sub!r} team={self.team_id} "
             f"exercise={self.exercise_id} role={self.role.value}>"
         )
+
+
+# --- F7 range templates: Template model ---------------------------------
+
+
+class Template(Base, TimestampMixin):
+    """A reusable, immutable snapshot of an ended Run.
+
+    Templates let operators:
+
+      * Replay a drill with identical assets / flags / networks
+        without re-typing the scenario YAML.
+      * Hand a working state to a peer range (port + clone).
+      * Train against a known-good configuration.
+
+    Lifecycle:
+      * Created from a SUCCEEDED Run (admin POST /templates).
+      * Read-only once persisted: ``snapshot`` is a JSONB blob;
+        we never update it (no PATCH endpoint). If you need a
+        different snapshot, create a new template.
+      * Deletable by admin only; cascades to NULL on Run FK.
+
+    Snapshot contents:
+      * ``scenario_id``: int (the scenario the source run used).
+      * ``assets``: list[dict] -- frozen asset state (role, kind,
+        template, networks).
+      * ``flags``: list[dict] -- the planted flags at run-end.
+      * ``networks``: list[dict] -- network topology.
+      * ``scoring``: dict -- red/blue scoring rules.
+    """
+
+    __tablename__ = "templates"
+    __table_args__ = (
+        Index("ix_templates_scenario_id", "scenario_id"),
+        Index("ix_templates_created_by", "created_by"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    title: Mapped[str] = mapped_column(String(120), nullable=False)
+    description: Mapped[str] = mapped_column(String(512), nullable=False, default="")
+    # Source run this template was created from. Nullable so we
+    # can author a template by hand (future use case).
+    from_run_id: Mapped[int | None] = mapped_column(
+        ForeignKey("runs.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    # The scenario this template plays against. Always populated.
+    scenario_id: Mapped[int] = mapped_column(
+        ForeignKey("scenarios.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    snapshot: Mapped[dict[str, Any]] = mapped_column(
+        JSON, nullable=False
+    )
+    created_by: Mapped[str] = mapped_column(String(64), nullable=False)
+
+    def __repr__(self) -> str:  # pragma: no cover
+        return f"<Template id={self.id} name={self.name!r}>"
