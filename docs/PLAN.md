@@ -6,6 +6,8 @@
 > **Phase 1 — One-VM drill end-to-end ✅ CLOSED** (run #11, status=`succeeded`, VMID 109 cloned from `tpl-debian-cloudinit`, audit populated, asset teardown to `stopped`).
 > **Phase 2 — LAN-grade cyber drill platform ✅ CLOSED** — L1 ledger 9/9 ✅, L2 ledger 18/18 ✅ (closed by F2). L3 ledger 3/11 partially; cyber-range gaps documented in §15.
 > **§15 — Cyber-range plans ✅ ALL CLOSED** — F3 (multi-VM asset spawning), F4 (noVNC console), F5 (flags + scoring), F6 (multi-team exercises + leaderboard), F7 (range templates + reset), F8 (SOC view + SSE telemetry).
+> **§17 — Roadmap (post-§15) ✅ REVISED** — five final-product pillars (R1 Redis multi-worker, F9 DrillConsole consolidation, F10 onboarding wizard, F11 debrief artifact, F12 product packaging). Detail in §18.
+> **§7 — Drill Lifecycle** ✅ UPDATED — replaced aspirational `DRAFT→SCHEDULED→PROVISIONING→LIVE` flow with the actual shipped state machines (Run: pending→running→terminal; Exercise: idle→live→ended→archived).
 > `make preflight` 9/9 READY. **431 root + 428 API = 859 tests passing** (3 pre-existing unrelated CLI auth failures).
 > See **[docs/TEST-PRODUCT.md](TEST-PRODUCT.md)** for L1/L2/L3 "test product" criteria and ETA per level; **§15 (below)** for the cyber-range roadmap that sits on top of L3.
 > **Target platform:** Proxmox VE (main host).
@@ -223,25 +225,113 @@ Proxmox SDN with VxLAN zones, one per drill. Control-plane bridge is *not* attac
 
 ---
 
-## 7. Drill Lifecycle (state machine)
+## 7. Drill Lifecycle (state machines)
+
+The platform has **two** state machines: one for a single-team
+`Run` (the F1-F8 path) and one for a multi-team `Exercise`
+(introduced in F6). The diagram below was never shipped; the
+shipped state machines are described in §7.1 and §7.2.
+
+### 7.1 Run state machine (single-team, F1-F8)
 
 ```
-DRAFT ──submit──> SCHEDULED ──worker pick──> PROVISIONING ──ready──> LIVE
-   │                                                       │           │
-   │                                                       │           ├── pause ──> PAUSED
-   │                                                       │           ├── inject ──> LIVE (with event)
-   │                                                       │           └── ttl ──> TEARING_DOWN
-   │                                                       │
-   └────────────────── cancel anytime ◄────────────────────┘
-                                                           ▼
-                                                       COLLECTING
-                                                           ▼
-                                                        REPORTED
-                                                           ▼
-                                                       ARCHIVED
+PENDING ──worker pick──> RUNNING ──terminal──> (SUCCEEDED | FAILED | TIMEOUT | CANCELLED)
 ```
 
-Persisted as `drills.status` in Postgres; every transition appends to `drill_events` (audit trail) and is forwarded to Wazuh.
+Transitions (enforced in `app/db/models.py::RunStatus`):
+
+  * `pending → running` — the worker picks up the run; the
+    runner begins cloning assets.
+  * `running → succeeded` — every asset reached `running` AND
+    the runner's win conditions evaluated to `pass` for the
+    declaring team.
+  * `running → failed` — an unrecoverable error (PVE clone
+    5xx, asset boot timeout, etc.); the runner records the
+    cause in `runs.error`.
+  * `running → timeout` — the run exceeded the scenario's
+    `duration_min` (default 30 m; max 24 h).
+  * `running → cancelled` — the operator POSTed
+    `/api/v1/drills/{id}/stop` (or the API received a `SIGTERM`
+    during teardown). Cancellation is **cooperative** — the
+    runner marks the run `cancelled` and tears down assets in
+    the background.
+
+Every transition appends to `audit_log` (polymorphic FK with
+`ON DELETE SET NULL`) and emits a `TelemetryEvent` for the
+SSE bus (§7.3 below).
+
+### 7.2 Exercise state machine (multi-team, F6)
+
+```
+IDLE ──start──> LIVE ──stop──> ENDED ──reopen──> LIVE
+  │              │              │
+  └──────────────┴──────────────┴── archive ──> ARCHIVED
+```
+
+Transitions (enforced in `app/db/models.py::ExerciseStatus.can_transition`):
+
+  * `idle → live` — operator POSTs `/api/v1/exercises/{id}/start`;
+    per-team `Run`s are spawned in parallel; the leaderboard
+    becomes live.
+  * `live → ended` — operator POSTs `/api/v1/exercises/{id}/stop`,
+    OR the exercise's `scheduled_end_at` passes; the leaderboard
+    freezes; teams can no longer submit flags.
+  * `ended → live` — operator reopens a paused exercise (re-starts
+    the timer + un-freezes scoring); useful for partial-class
+    rehearsals.
+  * `any → archived` — admin POSTs `/api/v1/exercises/{id}/archive`;
+    the exercise becomes a frozen snapshot for post-mortem.
+
+Single-team `Run`s bypass this state machine entirely: a `Run`
+created without an `Exercise` is the F5-and-earlier flow, with
+its own `pending → running → (terminal)` progression.
+
+### 7.3 Telemetry fan-out (F8)
+
+Both state machines emit events through `app/services/event_bus/`:
+
+  * `run.started` (severity: info) — every Run transition into
+    `running`.
+  * `asset.running` (severity: info) — every asset reaches
+    `running`.
+  * `flag.captured` (severity: warn) — a team submitted a flag
+    that matches a planted one.
+  * `kill-chain.signal` (severity: critical) — runner-emitted
+    custom event for blue-team SOC view.
+  * `run.completed` (severity: info) — every Run transition into
+    a terminal state, with the terminal state in the payload.
+
+The `EventBus` protocol has two implementations: `InProcessEventBus`
+(default, single-worker) and `RedisEventBus` (set `REDIS_URL` +
+`DIVIDE_EVENT_BUS=redis`; cross-worker fan-out for multi-worker
+uvicorn deployments — see §18 R1).
+
+SSE consumers connect to `GET /api/v1/runs/{id}/events/stream` and
+filter by `run_id` client-side. The portal `SocViewCard` is the
+canonical consumer.
+
+### 7.4 Why two state machines (not one)
+
+The original §7 proposed a single `DRAFT → SCHEDULED →
+PROVISIONING → LIVE` flow that conflated exercise scheduling with
+run execution. In practice the platform grew:
+
+  * **Single-team drill (F1-F5)** — one Run, scheduled ad-hoc
+    via `POST /api/v1/drills`. No scheduling horizon; no
+    per-team coordination. Simple `RunStatus` FSM is enough.
+  * **Multi-team exercise (F6)** — N teams, scheduled start/end,
+    leaderboard, parallel Runs on the same scenario topology.
+    Needs its own FSM for the *coordinator* lifecycle, with
+    the `RunStatus` FSM nested per team.
+
+The two FSMs share the `TelemetryEvent` bus (§7.3) so the SOC
+view sees events from both paths uniformly.
+
+Persisted as `runs.status` and `exercises.status` in Postgres.
+Every transition appends to `audit_log` (polymorphic FK with
+`ON DELETE SET NULL`) and forwards a `TelemetryEvent` to the
+EventBus. Wazuh integration (Phase 3) will subscribe to the
+same bus rather than poll Postgres.
 
 ---
 
@@ -831,27 +921,213 @@ follow-on work.
 §15 (cyber-range plans F3-F8) is closed. The platform is a
 functional cyber range end-to-end. This section tracks the
 follow-on work that sits **outside** §15 — non-critical-path
-features that improve the operator / user experience.
+features that improve the operator / user experience and turn
+div:ide from "a working cyber range" into "a shippable cyber-range
+**product**".
 
-**Priority order (operator impact, not engineering risk):**
+**Goal of the post-§17 roadmap:** a single-tenant div:ide that an
+enterprise SOC or training team can install with `make up`, run
+their first drill in under five minutes, hand leadership a
+markdown debrief afterward, and operate at scale with multiple
+uvicorn workers.
 
-| # | Feature | Closes | Effort | Why now |
+**Five pillars for the final product:**
+
+| # | Pillar | Closes | Effort | Why now |
 |---|---|---|---|---|
-| **R1** | **F8.5 — Redis pub/sub for multi-worker event fan-out** | G8 partial | ~3 h, 2 commits | Multi-worker uvicorn deployments lose SSE events across workers. A Redis bus fixes the cross-worker fan-out without changing the API. |
-| **R2** | **Polish (Option B) — light theme + mobile + keyboard shortcuts** | UX | ~3 h, 2 commits | Demo polish. Light theme for daylight operators; mobile for on-call responders; keyboard shortcuts for power operators. Bundle stays < 280 KB. |
-| **R3** | **G12 — Coaching / replay mode** | G12 | ~6 h, 3 commits | Instructor pauses drill at interesting state, walks red/blue through the kill chain. Reuses F8 SOC view + F7 templates. |
-| **R4** | **G9 — Range bookings (calendar UI)** | G9 | ~3 h, 2 commits | Booking is the missing piece for repeatable drills in a shared lab. |
-| **R5** | **G10 — Multi-tenant isolation (L3 3.13)** | L3 3.13 | ~10 h, 5 commits | Adds per-tenant Scenario / Exercise / Run scope. Big scope; do once, last. |
-| **R6** | **G11 — Scenario marketplace (L3 3.12)** | L3 3.12 | ~5 h, 3 commits | Public scenario catalog; pulls from upstream forks. Mostly UI + governance, not new platform work. |
-| **R7** | **F8.5 — replay UI** | G8 partial | ~4 h, 2 commits | Scrub past events with playhead. Builds on the SOC view's filter + paginated history. |
+| **R1** | **F8.5 — Redis pub/sub for multi-worker event fan-out** | G8 partial | ~3 h, 2 commits | Multi-worker uvicorn deployments lose SSE events across workers. A `RedisEventBus` adapter (with `InProcessEventBus` fallback) fixes the cross-worker fan-out without changing the API or the portal. |
+| **F9** | **DrillConsole consolidation** — embed LeaderboardCard + SocViewCard inside the live-drill view | UX | ~3 h, 3 commits | Today the operator flips between Observe (DrillConsole) and Admin (Leaderboard) tabs during a live drill. Consolidating both into the DrillConsole turns the Observe tab into the single live-drill screen. Biggest demo-quality win. |
+| **F10** | **Onboarding wizard** — 4-step first-time UX (bootstrap admin → pick scenario → form team → launch drill) | UX | ~4 h, 3 commits | `tools/issue_token.py` is fine for ops but ugly for first impressions. An in-portal wizard delegates to the existing API but presents a guided flow. Makes `make demo` a real product experience. |
+| **F11** | **Drill debrief artifact** — `GET /runs/{id}/debrief.md` returns a markdown play-by-play (per-team score, per-flag timing, pivot timeline, detection timeline, lessons-learned placeholder) | UX | ~3 h, 2 commits | Closes the "what just happened?" loop for leadership. The JSON after-action report is already there; F11 adds a human-readable sibling for hand-off. |
+| **F12** | **Product packaging** — `README.md` with architecture diagram + screenshot of DrillConsole + 5-min walkthrough; `tools/demo.sh --record` produces a captured walkthrough; production-grade `docker-compose.production.yaml` (TLS termination, Authentik prod config); versioned release notes | UX | ~5 h, 3 commits | The outer shell. The platform is functional; this turns it into something you can hand to a customer. |
 
-**Total effort to full polish:** ~34 h (R1-R7).
+**Priority order (operator impact ÷ effort):**
 
-**Recommendation:** ship **R1 + R2** first. R1 unblocks multi-worker
-production deployments; R2 unblocks the demo. R3-R7 are operator
-quality-of-life and can ship in any order afterward.
+1. **F9** — biggest demo-quality win per hour. The Observe tab
+   becomes the single live-drill screen.
+2. **R1** — smallest remaining engineering risk; biggest
+   production-readiness win. Closes the multi-worker SSE gap.
+3. **F11** — high-leverage artifact (leadership-facing).
+4. **F10** — onboarding UX (closes the "first-time user" gap).
+5. **F12** — packaging (the demo outer shell).
 
-**My pick (next plan): R1 — Redis pub/sub for SSE.** Smallest
-remaining engineering risk, biggest production-readiness win.
+**Total effort to shippable product:** ~18 h, ~13 commits.
+
+**Deprecation:** the previously-planned R2 (light theme + mobile
++ keyboard shortcuts) and R3-R7 (coaching / replay / bookings /
+multi-tenant / scenario marketplace) are moved to §19 (post-§18
+backlog). The 5 pillars above are the ones that turn div:ide
+into a final product; everything else is operator quality-of-life
+that can ship in any order afterward.
+
+**My pick (next plan): F9 — DrillConsole consolidation.** Single
+biggest demo-quality win, three small commits, zero new endpoints.
+R1 follows immediately after (multi-worker is the production gate).
 
 ---
+
+## 18. Final-product milestones (current focus)
+
+Detailed commit-level plans for the five pillars in §17 live
+here as they ship. Each milestone gets its own subsection with
+the commits, the API changes (if any), the test delta, and the
+bundle delta.
+
+### 18.1 F9 — DrillConsole consolidation
+
+Status: planned.
+
+Commits (3):
+
+  1. **F9.1** — `DrillConsole` reads `run.exercise_id` from
+     `GET /api/v1/drills/{id}`. If set, render `LeaderboardCard`
+     + `SocViewCard` below the existing topology/assets/audit
+     sections. If null (single-team Run), hide the two new
+     sections gracefully.
+  2. **F9.2** — `LeaderboardCard` gets a `pollIntervalMs` prop
+     (default 5000). Embed mode uses 5s polling. `SocViewCard`
+     is already wired for live SSE; verify the `runId` flows
+     through correctly when embedded in DrillConsole. Layout:
+     2-column responsive grid on desktop, stacked on mobile.
+  3. **F9.3** — `docs/SECTION-9-INTEGRATION.md` runbook +
+     bundle-budget test + pin tests in `test_portal_app_smoke.py`.
+
+What this is NOT: no new endpoint, no new portal component, no
+backend work. F8's SSE + ring buffer + DB record cover everything.
+
+API/UI matrix:
+
+```
+Run.exercise_id === null         Run.exercise_id !== null
+  (legacy single-team)             (F6 multi-team exercise)
+  +----------------------+         +----------------------+
+  | status header         |         | status header         |
+  | topology              |         | topology              |
+  | assets                |         | assets                |
+  | picked asset -> console|       | picked asset -> console|
+  | audit feed            |         | audit feed            |
+  |                       |         |                       |
+  |                       |         | --- F9 NEW ---        |
+  |                       |         | leaderboard           |
+  |                       |         | live SOC stream       |
+  +----------------------+         +----------------------+
+```
+
+Bundle delta: ~246 KB -> ~256 KB (still 24 KB under the 280 KB
+budget set in F4).
+
+### 18.2 R1 — Redis pub/sub for SSE
+
+Status: planned.
+
+Commits (3):
+
+  1. **R1.1** — `EventBus` Protocol + `InProcessEventBus`
+     (existing, moved to `event_bus/in_process.py`) +
+     `RedisEventBus` (new, `event_bus/redis_bus.py` using
+     redis-py async client + Redis LIST for the ring buffer +
+     Redis pub/sub channel for fan-out). Factory
+     `build_event_bus()` selects based on `REDIS_URL` +
+     `DIVIDE_EVENT_BUS` env vars.
+  2. **R1.2** — `docker-compose.yaml` sets `REDIS_URL` for the
+     API service. New integration tests under
+     `tests/test_redis_event_bus.py` (cross-worker fan-out
+     proof) + `tests/test_multi_worker_sse.py` (two
+     independent EventBus instances both receive the same
+     event).
+  3. **R1.3** — `docs/R1-MULTIWORKER.md` runbook + the §17
+     table flips R1 to done.
+
+API change: zero. The `EventBus` Protocol is a refactor;
+callers (`app/routers/events.py`, `app/routers/exercises.py`)
+already pass through the singleton.
+
+Backend delta: ~600 LOC + ~400 LOC tests. Adds `redis` to
+`services/api/pyproject.toml` dependencies.
+
+### 18.3 F11 — Drill debrief artifact
+
+Status: planned.
+
+Commits (2):
+
+  1. **F11.1** — `GET /api/v1/runs/{id}/debrief.md` returns
+     a markdown report assembled from `runs` + `assets` +
+     `flag_submissions` + `telemetry_events`. Sections:
+     summary, per-team score, per-flag timing (capture time +
+     decay-adjusted points), pivot timeline (red events),
+     detection timeline (blue events), asset capture table,
+     "Lessons learned" placeholder.
+  2. **F11.2** — "View debrief" button next to "Download
+     report" in `DrillConsole`. `docs/SECTION-11-DEBRIEF.md`
+     runbook + tests.
+
+API delta: 1 endpoint, ~150 LOC.
+
+### 18.4 F10 — Onboarding wizard
+
+Status: planned.
+
+Commits (3):
+
+  1. **F10.1** — `services/portal/app/src/components/portal/onboarding-wizard.tsx`
+     with 4 steps (bootstrap admin -> pick scenario -> form team
+     -> launch drill). Each step is a form posting to the
+     existing endpoint (`/api/v1/auth/login`, scenario list,
+     `/api/v1/exercises`, `/api/v1/exercises/{id}/start`).
+  2. **F10.2** — `app.tsx` routes `/onboarding` to the wizard;
+     if user has no `me.role` (anonymous), redirect there
+     instead of `operate`.
+  3. **F10.3** — `docs/SECTION-10-ONBOARDING.md` + portal tests.
+
+Bundle delta: ~256 KB -> ~268 KB (still 12 KB under the 280 KB
+budget).
+
+### 18.5 F12 — Product packaging
+
+Status: planned.
+
+Commits (3):
+
+  1. **F12.1** — `README.md` rewrite: architecture diagram,
+     feature list, "5-minute first drill" walkthrough, link
+     to `docs/SECTION-9-INTEGRATION.md` + `DEMO.md`.
+  2. **F12.2** — `tools/demo.sh --record` produces a markdown
+     walkthrough by hitting the API in sequence and capturing
+     curl output + JSDOM render snippets. Writes
+     `examples/demo-output.md`.
+  3. **F12.3** — `docker-compose.production.yaml` (Traefik with
+     Let's Encrypt, Authentik in prod mode, Redis required,
+     production logging). `docs/SECTION-12-PRODUCTION.md`.
+
+### 18.6 §18 closure (target)
+
+After all five pillars ship:
+
+  * ~877 tests passing (current 859 + ~18 new).
+  * Portal bundle ~268 KB (still under the 280 KB budget).
+  * `make verify` includes the new multi-worker SSE test.
+  * `README.md` walkthrough reproducible from a clean clone
+    on a fresh Proxmox host.
+  * div:ide ships as a self-contained cyber-range product.
+
+---
+
+## 19. Backlog (post-§18)
+
+Items previously listed under §17 R2-R7 are deferred here. Each
+is operator quality-of-life and can ship in any order after the
+five §18 pillars close.
+
+  * **R2** — Light theme + mobile + keyboard shortcuts.
+  * **R3** — Coaching / replay mode (G12).
+  * **R4** — Range bookings calendar (G9).
+  * **R5** — Multi-tenant isolation (L3 3.13, G10).
+  * **R6** — Scenario marketplace (L3 3.12, G11).
+  * **R7** — Replay UI with playhead (G8 partial).
+
+**Total estimated backlog effort:** ~34 h. No committed delivery
+date; revisit after §18 closure.
+
+---
+
