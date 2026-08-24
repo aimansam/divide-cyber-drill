@@ -699,6 +699,35 @@ are stale. For the live ledger of what's done / what's next, see:
     static-check tests already reserve the kind names so the
     table comment is the only thing that needs updating.
 
+20. **Role-aware UI composition (M3.2 Half 2 closed — F1 plan
+    complete)** ✅ — single commit landing:
+    * cards: `RunInspectorCard` (full run detail — status,
+      started_by, duration, assets, error), `AssetsCard`
+      (copy-to-clipboard SSH targets per asset, falls back to
+      `document.execCommand` for older browsers), `AuditExplorerCard`
+      (append-only timeline with tone per action: RUN_COMPLETED
+      green, RUN_FAILED red, ASSET_SPAWNED sky, etc.), `PveOpsCard`
+      (admin-only read-only PVE health summary: probe + storage +
+      drill-template-status via three parallel GETs; the wizard
+      at `/portal/` stays the deploy surface for the upload +
+      create-template flows), `ScenarioAuthoringCard` (admin + lead —
+      paste YAML + Import; list active with Archive; list archived
+      with Restore; uses inline `fetch` for DELETE since api.ts only
+      has get+post).
+    * role router: `CardKind` union extended from 4 to 9 kinds;
+      `COMPOSITIONS` table extended per the matrix. Read-only
+      roles (blue, observer) don't get the cards that have write
+      buttons.
+    * production JS bundle: 215 KB (66 KB gzipped), still under
+      the 280 KB lazy-load trigger. If we add the wizard's
+      upload-QCOW2 flow to PveOpsCard in a follow-up we'll need
+      to start React.lazy.
+    Tests: 360 → 362 (+2 — composition file expanded the
+    parametrized cases + added the documented-role-set check;
+    bundle-size test was renamed Half-2 budget). Total now
+    **362 tests passing**. The F1 portal-cards plan is complete
+    — L3 3.11 flips from "partial closed" to "fully closed".
+
 The rest of this section calls out specific places where PLAN.md's
 text is misleading so future readers don't trust stale snippets:
 

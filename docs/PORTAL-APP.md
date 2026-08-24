@@ -111,20 +111,44 @@ defense — a misbehaving client can't bypass the gate, but
 rendering the wrong cards for a role would produce "click and get
 403" UX, so we hide them instead.
 
-| Role       | Cards shown                                              |
-|------------|----------------------------------------------------------|
-| anonymous  | ScenariosCard, SignInBanner                              |
-| admin      | ScenariosCard, MyRunsCard (as "All runs"), RunLifecycleCard |
-| lead       | ScenariosCard, MyRunsCard (as "All runs"), RunLifecycleCard |
-| red        | ScenariosCard, MyRunsCard (as "My runs"), RunLifecycleCard  |
-| blue       | ScenariosCard, MyRunsCard (as "My runs") — read-only     |
-| observer   | ScenariosCard, MyRunsCard (as "All runs") — read-only    |
+| Role       | Cards shown |
+|------------|-------------|
+| anonymous  | ScenariosCard, SignInBanner |
+| admin      | ScenariosCard, PveOpsCard, ScenarioAuthoringCard, MyRunsCard ("All runs"), RunLifecycleCard, RunInspectorCard, AssetsCard, AuditExplorerCard |
+| lead       | ScenariosCard, ScenarioAuthoringCard, MyRunsCard ("All runs"), RunLifecycleCard, RunInspectorCard, AssetsCard, AuditExplorerCard |
+| red        | ScenariosCard, MyRunsCard ("My runs"), RunLifecycleCard, RunInspectorCard, AssetsCard, AuditExplorerCard |
+| blue       | ScenariosCard, MyRunsCard ("My runs"), RunInspectorCard, AssetsCard, AuditExplorerCard (read-only) |
+| observer   | ScenariosCard, MyRunsCard ("All runs"), RunInspectorCard, AuditExplorerCard (read-only) |
+
+Read-only roles (blue, observer) don't get the cards that have
+write buttons: `RunLifecycleCard` (Start + Cancel), `ScenarioAuthoringCard`
+(Import + Archive + Restore), `PveOpsCard` (future upload flow).
+`AssetsCard` is shown to blue but not observer — observer sees the
+asset summary inline in `RunInspectorCard`, since asset detail
+(vmids, IPs, SSH targets) is operator-facing.
 
 The matrix is pinned by `tests/test_portal_app_role_composition.py`
-(18 tests, +matrix). Adding a new role is a two-place change: append
-to `Role` in `services/api/app/core/auth.py` AND to `COMPOSITIONS`
+(20 tests). Adding a new role is a two-place change: append to
+`Role` in `services/api/app/core/auth.py` AND to `COMPOSITIONS`
 in `app.tsx`. The static-check test fails loudly if either side
-drifts.
+drifts. Each card file documents its role set in its module
+docstring (e.g. `pve-ops-card.tsx` says "admin only"); a separate
+test asserts the documentation is present so future cards can't
+silently drop their role attribution.
+
+## Card catalog
+
+| Card | LOC | Purpose | Endpoints |
+|------|-----|---------|-----------|
+| `ScenariosCard` | ~110 | List + pick a scenario | `GET /api/v1/scenarios` |
+| `TokenBar` | ~135 | Sign-in form, X-Divide-Token injection | `GET /api/v1/me` (identity) |
+| `MyRunsCard` | ~120 | "My runs" / "All runs" list | `GET /api/v1/drills` |
+| `RunLifecycleCard` | ~340 | Start / refresh / cancel own-only | `POST /api/v1/drills`, `GET /api/v1/drills/{id}`, `POST /api/v1/drills/{id}/cancel` |
+| `RunInspectorCard` | ~140 | Full run detail (status, started_by, duration, assets) | `GET /api/v1/drills/{id}` |
+| `AssetsCard` | ~190 | Copy-to-clipboard SSH target per asset | `GET /api/v1/drills/{id}` (assets[] section) |
+| `AuditExplorerCard` | ~150 | Append-only audit timeline | `GET /api/v1/drills/{id}/audit` |
+| `PveOpsCard` | ~250 | Read-only PVE health + storage + template status (admin) | `GET /api/v1/admin/probe`, `GET /api/v1/admin/storage`, `GET /api/v1/admin/drill-template-status` |
+| `ScenarioAuthoringCard` | ~310 | Import / Archive / Restore YAML (admin + lead) | `POST /api/v1/scenarios`, `DELETE /api/v1/scenarios/{name}`, `POST /api/v1/scenarios/{name}/restore` |
 
 ## When to use this vs the wizard vs the test UI
 

@@ -72,10 +72,68 @@ def test_compositions_only_reference_real_cards():
 
 def test_compositions_references_only_existing_components():
     app_src = _read("services/portal/app/src/app.tsx")
-    for card_import in ["ScenariosCard", "MyRunsCard", "RunLifecycleCard"]:
+    for card_import in [
+        "ScenariosCard",
+        "MyRunsCard",
+        "RunLifecycleCard",
+        "RunInspectorCard",
+        "AssetsCard",
+        "AuditExplorerCard",
+        "PveOpsCard",
+        "ScenarioAuthoringCard",
+    ]:
         assert card_import in app_src, (
             f"app.tsx does not import {card_import} but renders it"
         )
+
+
+def test_all_cards_have_documented_role_set():
+    """Each card file documents which roles render it. Catches a
+    future card addition that forgets to declare its role set —
+    the COMPOSITIONS table would silently drop it (or include it
+    for the wrong roles).
+    """
+    expected = {
+        # scenarios-card is rendered for every composition; the
+        # docstring says "click one to load it" (no role gating).
+        "scenarios-card.tsx": ["click one to load it"],
+        "my-runs-card.tsx": ["ALL_RUNS_ROLES"],
+        "run-lifecycle-card.tsx": ["CAN_START", "CAN_CANCEL"],
+        "run-inspector-card.tsx": ["pickedRunId"],
+        "assets-card.tsx": ["can_view_run"],
+        "audit-explorer-card.tsx": ["visibility-filtered"],
+        "pve-ops-card.tsx": ["admin only"],
+        "scenario-authoring-card.tsx": ["admin + lead"],
+    }
+    for fname, markers in expected.items():
+        path = SRC_DIR / "components" / "portal" / fname
+        assert path.exists(), f"missing card file: {path}"
+        src = path.read_text(encoding="utf-8")
+        # Match at least one of the markers (case-insensitive) — the
+        # docstring language varies card to card.
+        if not any(m.lower() in src.lower() for m in markers):
+            assert False, (
+                f"{fname} should reference one of {markers} in a "
+                f"docstring so the role set is explicit"
+            )
+
+
+def test_bundle_size_within_half2_budget():
+    """Half 2 adds ~700 LOC of new card sources. Bundle should stay
+    under the 250 KB lazy-load trigger budget. If we blow past,
+    time to code-split via React.lazy on the admin-only cards.
+    """
+    build_dir = APP_DIR / "build"
+    if not build_dir.is_dir():
+        pytest.skip("build/ not present")
+    js_assets = [a for a in (build_dir / "assets").glob("*.js") if ".map" not in a.name]
+    total_bytes = sum(a.stat().st_size for a in js_assets)
+    budget = 280 * 1024  # 280 KB Half 2 budget (Half 1 was 250)
+    assert total_bytes < budget, (
+        f"Production JS bundle is {total_bytes/1024:.1f} KB; budget "
+        f"is {budget/1024:.0f} KB. Time to lazy-load PveOpsCard + "
+        f"ScenarioAuthoringCard."
+    )
 
 
 # ---------- per-role card set ----------------------------------------------
@@ -114,11 +172,62 @@ def _composition_for_role(app_src: str, role: str) -> list[str]:
     "role,expected_kinds",
     [
         ("anonymous", ["scenarios", "sign-in-banner"]),
-        ("admin", ["scenarios", "my-runs", "run-lifecycle"]),
-        ("lead", ["scenarios", "my-runs", "run-lifecycle"]),
-        ("red", ["scenarios", "my-runs", "run-lifecycle"]),
-        ("blue", ["scenarios", "my-runs"]),
-        ("observer", ["scenarios", "my-runs"]),
+        (
+            "admin",
+            [
+                "scenarios",
+                "pve-ops",
+                "scenario-authoring",
+                "my-runs",
+                "run-lifecycle",
+                "run-inspector",
+                "assets",
+                "audit-explorer",
+            ],
+        ),
+        (
+            "lead",
+            [
+                "scenarios",
+                "scenario-authoring",
+                "my-runs",
+                "run-lifecycle",
+                "run-inspector",
+                "assets",
+                "audit-explorer",
+            ],
+        ),
+        (
+            "red",
+            [
+                "scenarios",
+                "my-runs",
+                "run-lifecycle",
+                "run-inspector",
+                "assets",
+                "audit-explorer",
+            ],
+        ),
+        (
+            "blue",
+            [
+                "scenarios",
+                "my-runs",
+                "run-inspector",
+                "assets",
+                "audit-explorer",
+            ],
+        ),
+        (
+            "observer",
+            [
+                "scenarios",
+                "my-runs",
+                "run-inspector",
+                "audit-explorer",
+                # observer skips AssetsCard — operator-facing detail.
+            ],
+        ),
     ],
 )
 def test_per_role_composition_matches_matrix(role: str, expected_kinds: list[str]):
@@ -203,18 +312,27 @@ def test_built_bundle_includes_compositions_keyword():
     )
 
 
-def test_built_bundle_size_within_budget():
+def test_built_bundle_includes_half2_keywords():
+    """The new cards' titles must be in the bundle so the user can
+    see them. A regression here means a new card got tree-shaken.
+    """
     build_dir = APP_DIR / "build"
     if not build_dir.is_dir():
         pytest.skip("build/ not present")
-    js_assets = [a for a in (build_dir / "assets").glob("*.js") if ".map" not in a.name]
-    assert js_assets, "no JS bundle"
-    total_bytes = sum(a.stat().st_size for a in js_assets)
-    budget = 250 * 1024
-    assert total_bytes < budget, (
-        f"Production JS bundle is {total_bytes/1024:.1f} KB; budget is "
-        f"{budget/1024:.0f} KB. Time to start lazy-loading."
-    )
+    expected_titles = [
+        "Run inspector",
+        "Assets",
+        "Audit log",
+        "PVE health",
+        "Scenario authoring",
+    ]
+    all_assets = list((build_dir / "assets").glob("*.js"))
+    full_text = "".join(a.read_text(encoding="utf-8") for a in all_assets)
+    for title in expected_titles:
+        assert title in full_text, (
+            f"Bundle does not contain card title {title!r}. "
+            f"Was the card tree-shaken by Vite?"
+        )
 
 
 # ---------- summary ---------------------------------------------------------

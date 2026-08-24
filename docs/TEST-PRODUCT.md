@@ -4,7 +4,7 @@ A graded definition of "ready for someone to try it". Each level is a
 strict superset of the previous — you can't ship L2 without L1 green,
 and L3 without L2.
 
-> **Where we are today:** stack is healthy, 360 tests passing.
+> **Where we are today:** stack is healthy, 362 tests passing.
 > `make preflight` is 9/9 after the `/access/permissions` ACL fix
 > **and** the `tpl-debian-cloudinit` template was created (run #11
 > completed with status `succeeded`).
@@ -21,18 +21,20 @@ and L3 without L2.
 > the [Next plan](#next-plan-post-l1-ordered) below — total ~3 h, no
 > PVE required.
 >
-> L3: **2 ✅ / 9 ❌** after the RBAC substrate + admin gate + drill
+> L3: **3 ✅ / 8 ❌** after the RBAC substrate + admin gate + drill
 > matrix + role-aware UI composition landed. Item 3.2 (RBAC)
 > flipped from "no roles" to fully enforced: anonymous can no
 > longer probe `/api/v1/admin/*` (was the biggest unaddressed
 > disclosure risk on the LAN). The drill lifecycle enforces the
 > persona matrix, including the own-runs-only filter for red/blue
-> teams. Item 3.11 (user portal cards) flipped to ✅ for Half 1:
-> `MyRunsCard` (own/all runs), `RunLifecycleCard` (start/refresh/
-> cancel own-only), and `useMe()` server-verified identity badge
-> (`GET /api/v1/me`) replace the unverified JWT decode. The
-> remaining nine L3 items are the post-L1 plan's M2–M5 backlog
-> (Half 2 of M3 is the next commit).
+> teams. Item 3.11 (user portal cards) is now FULLY closed:
+> `MyRunsCard` + `RunLifecycleCard` + `RunInspectorCard` +
+> `AssetsCard` + `AuditExplorerCard` + `PveOpsCard` (admin) +
+> `ScenarioAuthoringCard` (admin + lead) + the verified
+> `useMe()` identity badge (`GET /api/v1/me`) replace the
+> unverified JWT decode. The remaining eight L3 items are the
+> post-L1 plan's M2–M5 backlog (F1 plan complete; F2 starts
+> next).
 >
 > **User portal** is the new F1 milestone (commit `d0ce912`): a
 > React + Vite + Tailwind + shadcn/ui app at `/portal/app/` with
@@ -181,7 +183,7 @@ auth, ops-grade observability.
 | 3.8  | Multi-node PVE cluster support (drill assets span nodes for realism) | ❌ single node |
 | 3.9  | SDN zone per drill (isolated L2 for red/blue traffic) | ❌ no SDN |
 | 3.10 | Scheduling: cron-driven drills (e.g. weekly red-team) | ❌ no scheduler |
-| 3.11 | User portal at `/portal/app/` (sign in, pick scenario, run drill, download debrief) | ⚠️ Half 1: server-verified identity (`GET /api/v1/me` + `useMe()`), `MyRunsCard` (own/all runs), `RunLifecycleCard` (start/refresh/cancel own-only), role-aware composition (`COMPOSITIONS` in `app.tsx`, 6 per-role cards). Half 2 (RunInspector + Assets + Audit + PveOps + ScenarioAuthoring) queued as the next commit. |
+| 3.11 | User portal at `/portal/app/` (sign in, pick scenario, run drill, download debrief) | ✅ done (commits `d0ce912`, `M3.2-Half1`, `M3.2-Half2`). All 9 cards ship per the COMPOSITIONS table: `ScenariosCard`, `MyRunsCard`, `RunLifecycleCard`, `RunInspectorCard`, `AssetsCard`, `AuditExplorerCard`, `PveOpsCard` (admin), `ScenarioAuthoringCard` (admin + lead), `TokenBar` (verified identity). 20 static + bundle + wiring tests in `tests/test_portal_app_role_composition.py` pin the matrix. Production bundle 215 KB (66 KB gz). |
 | 3.12 | Scenario marketplace (import/export YAML, signed) | ❌ local-only |
 | 3.13 | Multi-tenant org model (org → team → user) | ❌ single-tenant |
 | 3.14 | Public status page + incident comms | ❌ no status page |
@@ -349,7 +351,7 @@ do today, what's missing), see
 
 | Date | Change |
 |---|---|
-| 2026-08-24 | feat(portal): role-aware UI composition (M3.2 Half 1 closed, L3 3.11 partial ✅). Single commit landing: server `GET /api/v1/me` (gated by `require_token`, returns verified `sub`/`role`/`iat`/`exp`/`ttl_remaining_s`); portal `lib/roles.ts` typed `Role` union + display labels; `lib/auth.ts::useMe()` hook (same-tab + cross-tab subscription); `TokenBar` rewritten to use `useMe()` (verified identity badge, no more client-side JWT decode); new `MyRunsCard` (own/all runs, server-filtered); new `RunLifecycleCard` (start + 2s-poll + cancel own-only; cancel button disables with a tooltip mirroring the server 403); `app.tsx` role router with `COMPOSITIONS` table (single source of truth for which cards each role sees — blue/observer get no `RunLifecycleCard`, so they can't click "Start" and get 403). New tests: `tests/test_me.py` (+11 server-side) and `tests/test_portal_app_role_composition.py` (+18: COMPOSITIONS shape, every-role coverage, every-kind-has-a-switch-case, 6 parametrized per-role cases, `useMe()`/`/api/v1/me` wiring, bundle size budget <250 KB). Build: 190 KB JS (61 KB gz). `docs/PORTAL-APP.md` gains the COMPOSITIONS table; `docs/USER-REQUIREMENTS.md` §1 rewrites each persona's "Wired today" to name the cards; §3 cross-cutting table gains a "role-aware UI" row → CLOSED; `docs/PLAN.md` §13 item #19 documents the change. Half 2 (RunInspector + Assets + AuditExplorer + PveOps + ScenarioAuthoring) is the next commit; the test file reserves the `kind` strings so the table comment is the only thing that needs updating. **Tests: 331 → 360 (+29). L3 ledger: 2 ✅ / 9 ❌** (3.11 partial closed). |
+| 2026-08-24 | feat(portal): role-aware UI composition Half 2 — F1 plan complete (L3 3.11 ✅). Single commit landing five new cards: `RunInspectorCard` (full drill detail — status, started_by, duration, assets, error); `AssetsCard` (copy-to-clipboard SSH target per asset via `navigator.clipboard` with `document.execCommand` fallback); `AuditExplorerCard` (append-only timeline with tone per action — green for RUN_COMPLETED, red for RUN_FAILED, sky for ASSET_SPAWNED, etc.); `PveOpsCard` (admin-only read-only PVE health: three parallel GETs to `/admin/probe`, `/admin/storage`, `/admin/drill-template-status`; the wizard at `/portal/` stays the deploy surface); `ScenarioAuthoringCard` (admin + lead — paste YAML + Import; list active with Archive; list archived with Restore; uses inline `fetch` for DELETE since api.ts only has get+post). `CardKind` union extended from 4 to 9 kinds; `COMPOSITIONS` table extended per the matrix in the commit-message docstring. Read-only roles (blue, observer) don't get any card with a write button. `tests/test_portal_app_role_composition.py` parametrized cases now include the full 8-card lists per role; added `test_all_cards_have_documented_role_set` (every card file must say which roles render it in its docstring) and `test_built_bundle_includes_half2_keywords` (catches tree-shaken cards). Production bundle: 215 KB (66 KB gz). Docs: `PORTAL-APP.md` gains the Card catalog; `USER-REQUIREMENTS.md` §1 rewrites each persona's "Wired today" to list the full composition; §3 cross-cutting row for role-aware UI flips to fully closed; `PLAN.md` §13 item #20 documents the change. **Tests: 360 → 362 (+2). L3 ledger: 3 ✅ / 8 ❌** (3.11 fully closed). F1 portal-cards plan complete; F2 starts next. |
 | 2026-08-24 | feat(rbac): enforce persona matrix on /api/v1/* (L2 2.9 fully closed, L3 3.2 ✅). Three commits: (1) substrate — `Role` enum (admin / lead / red / blue / observer) + `require_role(*allowed)` factory in `app/core/auth.py`; (2) security fix — `dependencies=[Depends(require_role(ADMIN))]` at the router level on `/api/v1/admin/*` closes the anonymous-probe disclosure risk; (3) matrix commit — per-endpoint role gates on `/api/v1/drills/*` + own-runs-only filter for red/blue via the new `app/services/authorization.py` module (`visible_runs_query` + `can_view_run`). `tools/watch_drill.py` gained `--token` / `$DIVIDE_TOKEN`; `tools/issue_token.py --role` now restricted to the five enum values. `/api/v1/proxmox/*` stays public in L2 (M5 owns the full hardening pass). New `services/api/tests/test_authorization.py` has 27 tests: a 22-row parametrized RBAC matrix, 4 helper tests, and a static check that the cancel handler still has the `Role.RED` own-only branch. `docs/USER-REQUIREMENTS.md` §2 flips from "target matrix" to "enforced matrix"; §3 cross-cutting gaps #1 + #8 are struck through (CLOSED). **Tests: 302 → 331 (+29 across the three commits). L3 ledger: 1 ✅ / 10 ❌** (3.2 closed). |
 | 2026-08-24 | feat(portal): React/Vite + Tailwind + shadcn/ui user portal at `/portal/app/` (M1 + M3.1 of the new F1 plan). New tree `services/portal/app/` with `package.json`, Vite 6, React 18 + TypeScript strict, Tailwind 3 with shadcn semantic tokens, lucide-react icons. Two cards ship: `TokenBar` (X-Divide-Token injection into `localStorage` + every `fetch()`) and `ScenariosCard` (lists `/api/v1/scenarios`). Build output ~180 KB JS (58 KB gz) + 12 KB CSS. FastAPI gained a second `StaticFiles` mount at `/portal/app/` (registered BEFORE `/portal` so the parent doesn't shadow it); `deploy/docker-compose.yml` bind-mounts the host's `build/` so `make portal-build` is reflected without an image rebuild. New regression file `tests/test_portal_app_smoke.py` (9 tests: build artifact presence, base-path correctness, mount resolution, never-serve-source-tree-HTML). Vanilla wizard + test UI kept untouched. Tests 278 → 287 (+9). Makefile gained `portal-build`, `portal-watch`, `portal-install`. **L2 ledger unchanged** (this is a UI milestone, not a control-plane one). |
 | 2026-08-24 | feat(audit): per-asset audit `actor` from token subject (L2 2.9 ✅). `Runner._spawn_asset()` now accepts and threads `actor=req.started_by` into the `ASSET_SPAWNED` audit row; the `RUN_*` rows already carried it. All five audit call sites in the runner now attribute per-event (start, failed, completed, cancel×2, asset-spawned). New regression test `test_start_run_asset_spawned_audit_records_actor` asserts both asset rows in a 2-asset scenario land with `actor == "alice"` — fails before the fix (`actor is None`), passes after. Tests 276 → 277 (+1). Closes the gap the token-middleware round (commit `90f7eaa`) couldn't fully bridge. **L2 ledger: 13 ✅ / 5 ❌ / 0 ⚠️**. |

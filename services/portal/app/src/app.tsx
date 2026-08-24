@@ -3,40 +3,65 @@ import { ScenariosCard, type Scenario } from "@/components/portal/scenarios-card
 import { TokenBar } from "@/components/portal/token-bar";
 import { MyRunsCard, type RunRow } from "@/components/portal/my-runs-card";
 import { RunLifecycleCard } from "@/components/portal/run-lifecycle-card";
+import { RunInspectorCard } from "@/components/portal/run-inspector-card";
+import { AssetsCard } from "@/components/portal/assets-card";
+import { AuditExplorerCard } from "@/components/portal/audit-explorer-card";
+import { PveOpsCard } from "@/components/portal/pve-ops-card";
+import { ScenarioAuthoringCard } from "@/components/portal/scenario-authoring-card";
 import { useMe } from "@/lib/auth";
 import { ROLE_LABELS, ROLES, type Role } from "@/lib/roles";
 
 /**
  * Top-level portal layout.
  *
- * Role-aware composition (M3.2, Half 1):
+ * Role-aware composition (M3.2 Half 2 — complete):
  *
  *   * anonymous  → ScenariosCard + SignInBanner
- *   * admin      → ScenariosCard + MyRunsCard (as "All runs") + RunLifecycleCard
- *   * lead       → ScenariosCard + MyRunsCard (as "All runs") + RunLifecycleCard
- *   * red        → ScenariosCard + MyRunsCard (as "My runs")    + RunLifecycleCard
- *   * blue       → ScenariosCard + MyRunsCard (as "My runs")    (read-only)
- *   * observer   → ScenariosCard + MyRunsCard (as "All runs")   (read-only)
+ *   * admin      → ScenariosCard + PveOpsCard + ScenarioAuthoringCard
+ *                  + MyRunsCard + RunLifecycleCard + RunInspectorCard
+ *                  + AssetsCard + AuditExplorerCard
+ *   * lead       → ScenariosCard + ScenarioAuthoringCard + MyRunsCard
+ *                  + RunLifecycleCard + RunInspectorCard + AssetsCard
+ *                  + AuditExplorerCard
+ *   * red        → ScenariosCard + MyRunsCard + RunLifecycleCard
+ *                  + RunInspectorCard + AssetsCard + AuditExplorerCard
+ *   * blue       → ScenariosCard + MyRunsCard + RunInspectorCard
+ *                  + AssetsCard + AuditExplorerCard (read-only)
+ *   * observer   → ScenariosCard + MyRunsCard + RunInspectorCard
+ *                  + AuditExplorerCard (read-only)
  *
- * The composition table is the single source of truth: blue and
- * observer don't get RunLifecycleCard at all, so they can't click
- * "Start drill" and get 403. The server-side matrix in
- * `app/routers/drills.py` (commit 4d840f9) is the second line of
- * defense; if a misbehaving client tried to POST /drills anyway,
- * the role gate would still 403.
+ * The composition table is the single source of truth.
+ *
+ *   * Read-only roles (blue, observer) don't get the cards that
+ *     have write buttons (RunLifecycleCard with Start + Cancel,
+ *     ScenarioAuthoringCard with Import + Archive + Restore).
+ *   * Operator roles (admin, lead) get the authoring + PVE-health
+ *     surfaces; lead gets authoring but not PVE; admin gets both.
+ *   * Red gets the lifecycle (start, refresh, cancel own-only) +
+ *     the run-detail + asset + audit reads.
+ *   * Observer skips AssetsCard because it's operator-facing detail
+ *     (vmids, IPs); RunInspectorCard already surfaces the asset
+ *     summary inline.
+ *
+ * The server-side matrix in `app/routers/drills.py` (commit
+ * `4d840f9`) is the second line of defense; if a misbehaving
+ * client tried to POST /drills anyway, the role gate would still
+ * 403.
  *
  * Identity comes from useMe() which hits GET /api/v1/me. The portal
  * no longer trusts the unverified JWT decode for the identity badge.
- *
- * Half 2 will add: RunInspectorCard, AssetsCard, AuditExplorerCard,
- * PveOpsCard (admin), ScenarioAuthoringCard (admin + lead).
  */
 
-/** Card kinds the role router knows about. Half 2 will extend. */
+/** Card kinds the role router knows about. */
 type CardKind =
   | "scenarios"
   | "my-runs"
   | "run-lifecycle"
+  | "run-inspector"
+  | "assets"
+  | "audit-explorer"
+  | "pve-ops"
+  | "scenario-authoring"
   | "sign-in-banner";
 
 interface CardSpec {
@@ -50,28 +75,50 @@ const COMPOSITIONS: Record<"anonymous" | Role, CardSpec[]> = {
   ],
   admin: [
     { kind: "scenarios" },
+    { kind: "pve-ops" }, // admin: read-only PVE health + storage + template
+    { kind: "scenario-authoring" }, // admin: import / archive / restore scenarios
     { kind: "my-runs" }, // admin sees "All runs" via ALL_RUNS_ROLES
     { kind: "run-lifecycle" },
+    { kind: "run-inspector" },
+    { kind: "assets" },
+    { kind: "audit-explorer" },
   ],
   lead: [
     { kind: "scenarios" },
+    { kind: "scenario-authoring" }, // lead: import / archive / restore scenarios
     { kind: "my-runs" }, // lead sees "All runs" via ALL_RUNS_ROLES
     { kind: "run-lifecycle" },
+    { kind: "run-inspector" },
+    { kind: "assets" },
+    { kind: "audit-explorer" },
   ],
   red: [
     { kind: "scenarios" },
     { kind: "my-runs" },
     { kind: "run-lifecycle" },
+    { kind: "run-inspector" },
+    { kind: "assets" },
+    { kind: "audit-explorer" },
   ],
   blue: [
     { kind: "scenarios" },
     { kind: "my-runs" },
-    // blue is read-only — no RunLifecycleCard.
+    // blue is read-only — no RunLifecycleCard, no PveOpsCard,
+    // no ScenarioAuthoringCard.
+    { kind: "run-inspector" },
+    { kind: "assets" },
+    { kind: "audit-explorer" },
   ],
   observer: [
     { kind: "scenarios" },
     { kind: "my-runs" }, // observer sees "All runs" via ALL_RUNS_ROLES
-    // observer cannot start — no RunLifecycleCard.
+    // observer cannot start, cannot modify — no RunLifecycleCard,
+    // no PveOpsCard, no ScenarioAuthoringCard.
+    { kind: "run-inspector" },
+    { kind: "audit-explorer" },
+    // observer doesn't get AssetsCard either — assets are
+    // operator-facing detail. (run-inspector surfaces the
+    // asset count and vmid/ip summary inline.)
   ],
 };
 
@@ -146,6 +193,33 @@ export default function App() {
                   pickedRunId={pickedRun?.id ?? null}
                 />
               ) : null;
+            case "run-inspector":
+              return me ? (
+                <RunInspectorCard
+                  key="run-inspector"
+                  pickedRunId={pickedRun?.id ?? null}
+                />
+              ) : null;
+            case "assets":
+              return me ? (
+                <AssetsCard
+                  key="assets"
+                  pickedRunId={pickedRun?.id ?? null}
+                />
+              ) : null;
+            case "audit-explorer":
+              return me ? (
+                <AuditExplorerCard
+                  key="audit-explorer"
+                  pickedRunId={pickedRun?.id ?? null}
+                />
+              ) : null;
+            case "pve-ops":
+              return me ? <PveOpsCard key="pve-ops" /> : null;
+            case "scenario-authoring":
+              return me ? (
+                <ScenarioAuthoringCard key="scenario-authoring" />
+              ) : null;
             case "sign-in-banner":
               return (
                 <div
@@ -166,12 +240,24 @@ export default function App() {
           }
         })}
 
-        {pickedScenario && (
+        {(pickedScenario || pickedRun) && (
           <div className="rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground">
-            Loaded scenario:{" "}
-            <span className="font-mono">{pickedScenario.name}</span>{" "}
-            (id={pickedScenario.id}). Half 2 will plug the
-            RunInspectorCard here for full detail + audit + assets.
+            {pickedScenario ? (
+              <>
+                Selected scenario:{" "}
+                <span className="font-mono">{pickedScenario.name}</span>{" "}
+                (id={pickedScenario.id}).
+              </>
+            ) : null}
+            {pickedRun ? (
+              <>
+                {pickedScenario ? " · " : ""}Selected run:{" "}
+                <span className="font-mono">#{pickedRun.id}</span>{" "}
+                ({pickedRun.status}
+                {pickedRun.started_by ? ` · ${pickedRun.started_by}` : ""}).
+                See Run inspector + Assets + Audit log below.
+              </>
+            ) : null}
           </div>
         )}
       </main>
