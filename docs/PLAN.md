@@ -2,11 +2,11 @@
 
 ## Design & Architecture Plan
 
-> **Status:** Phase 0 — Foundations **DONE**. Stages 2, 2.5, 2.7, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18 **DONE**.
-> **Phase 1 — One-VM drill end-to-end ✅ CLOSED** (run #11, status=`succeeded`, VMID 109 cloned from `tpl-debian-cloudinit`, audit populated, asset teardown to `stopped`). `make preflight` 9/9 READY. 276 tests passing. L1 ledger 9/9 ✅.
-> PVE auth unblocked (PROXMOX_USER fix + PVE 9 GET /cluster/nextid).
-> First live drill is one `pveum acl` away.
-> See **[docs/TEST-PRODUCT.md](TEST-PRODUCT.md)** for L1/L2/L3 "test product" criteria and ETA per level.
+> **Status:** Phase 0 — Foundations **DONE**. Stages 2, 2.5, 2.7, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18 **DONE**. F1 (portal role-aware UI cards, M3.2 Half 1 + Half 2) **DONE**. F2 (L2 closure: CORS, rate-limit, watchdog, telemetry, after-action report) **DONE**.
+> **Phase 1 — One-VM drill end-to-end ✅ CLOSED** (run #11, status=`succeeded`, VMID 109 cloned from `tpl-debian-cloudinit`, audit populated, asset teardown to `stopped`).
+> **Phase 2 — LAN-grade cyber drill platform ✅ CLOSED** — L1 ledger 9/9 ✅, L2 ledger 18/18 ✅ (closed by F2). L3 ledger 3/11 partially; cyber-range gaps documented in §15.
+> `make preflight` 9/9 READY. **399 tests passing**.
+> See **[docs/TEST-PRODUCT.md](TEST-PRODUCT.md)** for L1/L2/L3 "test product" criteria and ETA per level; **§15 (below)** for the cyber-range roadmap that sits on top of L3.
 > **Target platform:** Proxmox VE (main host).
 > **Control plane runtime:** Docker Compose on a dedicated VM/LXC.
 > **Repo root:** `/DATA/Storage/docker/divide-cyber-drill`
@@ -534,14 +534,54 @@ post-L1 plan in TEST-PRODUCT.md)
 - Scenarios marketplace (import/export YAML)
 - Multi-tenant org support
 
+**Phase 5 — Cyber Range** (roadmap in §15, ~32 h across 6 sub-plans)
+- F3 — multi-VM scenarios with `networks[]` + PVE bridge per network
+  + asset NIC attachments (~5 h)
+- F4 — live VM access: noVNC console + SSH target with cloud-init key (~4 h)
+- F5 — flag submission + time-decay scoring engine (~5 h)
+- F6 — multi-team parallel exercises (Exercise model, per-team runs, leaderboard) (~8 h)
+- F7 — range templates + reset to clean state (~4 h)
+- F8 — blue-team SOC view (SSE event stream + kill-chain timeline) (~6 h)
+- F3-prep (optional first) — credential login (username + password
+  → HMAC token via argon2id; bootstrap admin via env var). ~2 h.
+  Ships the sign-in UX that's the front door to the cyber range.
+
 ---
 
 ## 12. Key Decisions to Confirm
 
+### Open (cyber-range scope, see §15)
+
+9. **Single-team vs. multi-team cyber range from day one.**
+   Single-team = one red + one blue per exercise (F3–F8 ~24 h).
+   Multi-team = N red + N blue running parallel exercises
+   (F3–F8 ~32 h, F6 is the heavyweight plan). **Recommendation:**
+   ship single-team first, layer multi-team via F6.
+10. **Live-fire or simulated attacks?** Live-fire (red does real
+    `nmap`/`msf`/exploit chains on cloned VMs) is the cyber-range
+    default. Simulated (scripted attack playback) is for institutional
+    settings where compliance forbids root on the network.
+    **Recommendation:** live-fire.
+11. **Console: noVNC or Apache Guacamole?** noVNC (~4 h to
+    integrate, browser-native, single-VM). Guacamole (~10 h,
+    heavyweight gateway with user management + recording). For a
+    LAN cyber range, noVNC is the right call. **Recommendation:**
+    noVNC; revisit Guacamole only if recording/auditing becomes
+    a hard requirement.
+12. **Network: simple VLANs or SDN?** Simple PVE bridges per
+    scenario (one bridge per `networks[]` entry, no isolation
+    between teams on the same PVE host). SDN (Open vSwitch with
+    per-team VLAN tagging) is real isolation. **Recommendation:**
+    simple VLANs first; SDN layered on after F3.
+
+### Open (general)
+
 1. Single Proxmox host vs. cluster — affects HA and SDN assumptions.
 2. Wazuh/MISP integration depth — feed only, or full bidirectional.
 3. Auth source — Keycloak from scratch, or hook into an existing IdP.
-5. Public exposure — strictly internal LAN, or WireGuard for remote trainees.
+   **Recommendation:** ship F3-prep with username+password over
+   argon2id, then layer Keycloak in L3 3.1.
+4. Public exposure — strictly internal LAN, or WireGuard for remote trainees.
 5. Scenario scope — start with Linux-only, or include Windows (licensing).
 6. Artifact retention — proposed 30 d hot / 180 d cold.
 7. Naming & branding — confirm `div:ide` spelling/colons.
@@ -603,10 +643,124 @@ errors (token rejection on PVE side). The `feat/proxmox-readonly` branch is
 
 ---
 
-## 14. Where this doc stops being current (read [docs/TEST-PRODUCT.md](TEST-PRODUCT.md) for now)
+## 15. Cyber Range Roadmap (Phase 5 — single-team → multi-team)
 
-This file predates L1 work and many of its "current state" snippets
-are stale. For the live ledger of what's done / what's next, see:
+**Goal:** turn div:ide from a "single-drill orchestrator" into a
+functional cyber range — multi-VM scenarios on isolated network
+topologies, live VM access, flag-based scoring, multi-team parallel
+exercises, and a real-time SOC view for blue team.
+
+The platform base we just shipped (L1 + L2 closed via F2) is more
+cyber-range-ready than it looks: RBAC, scenarios-as-YAML, PVE
+template-based cloning, per-asset audit, telemetry sinks,
+rate-limiting, watchdog, after-action reports. The cyber-range
+features below build on top of that foundation.
+
+### 15.1 Cyber-range gaps vs. today's platform
+
+| # | Gap | What it adds | Effort |
+|---|---|---|---|
+| **G1** | Multi-VM scenarios with real network topology | Per-scenario `networks[]` with VLAN ID + CIDR; assets get NIC attachments to networks; runner creates one PVE bridge per network | ~5 h |
+| **G2** | Live VM access (noVNC console + SSH target) | Browser-accessible console on cloned VMs; copy-to-clipboard SSH command with cloud-init-injected key | ~4 h |
+| **G3** | Flag submission / CTF flow | `Flag` + `FlagSubmission` models; runner plants flags via cloud-init; `POST /drills/{id}/submit-flag` | ~5 h |
+| **G4** | Multi-team parallel exercises | `Exercise` model (scheduled start/end, max teams); per-team parallel `Run`s on the same scenario topology | ~8 h |
+| **G5** | Scoring engine | Per-objective scoring with time decay; leaderboard; `score_breakdown` block in after-action report | ~3 h |
+| **G6** | Live timer / countdown | Exercise state machine (idle → live → ended); portal clock-driven UI; auto-flips to score-freeze on end | ~3 h |
+| **G7** | Range templates + reset | Snapshot all asset state at run start; `POST /drills/{id}/reset` rewinds to clean state; admin can save range templates for repeated classroom use | ~4 h |
+| **G8** | Blue team SOC view (live event stream) | SSE endpoint `GET /drills/{id}/events`; kill-chain timeline UI; simple network map | ~6 h |
+
+**Optional follow-ons:**
+
+| # | Feature | Effort |
+|---|---|---|
+| G9 | Range bookings (calendar UI) | ~3 h |
+| G10 | Multi-tenant isolation (L3 3.13) | ~10 h |
+| G11 | Scenario marketplace (L3 3.12) | ~5 h |
+| G12 | Coaching / replay mode | ~6 h |
+
+**Total estimated scope for a fully-functional single-team cyber
+range:** ~32 hours of focused engineering (~4 weeks part-time, or
+~1 quarter dedicated). F3 alone is the foundation; F4–F8 each
+ship one coherent feature with its own commits.
+
+### 15.2 Phased F3–F8 plan
+
+| Plan | Closes gap(s) | Effort | What it ships |
+|---|---|---|---|
+| **F3** | G1 + L3 3.7 + L3 3.9 partial | ~5 h, 3 commits | Multi-VM scenarios with `networks[]` block; runner iterates networks + creates PVE bridges + attaches NICs per asset; portal `ScenariosCard` surfaces the network topology; new example scenario `red-vs-blue-baseline.scenario.yaml` |
+| **F4** | G2 | ~4 h, 2 commits | noVNC console via PVE `get_vnc_ticket` proxy + `websockets` dep; `GET /drills/{id}/assets/{asset_id}/console` endpoint; "Open console" button on `AssetsCard`; SSH target format with cloud-init-injected key |
+| **F5** | G3 + G5 + L3 3.15 partial | ~5 h, 3 commits | `Flag` + `FlagSubmission` models; `POST /drills/{id}/submit-flag`; runner plants flags at scenario start; time-decay scoring (`points = base * max(0, 1 - elapsed/window)`); `score_breakdown` in after-action report |
+| **F6** | G4 + G6 + L3 3.13 partial | ~8 h, 4 commits | `Exercise` model (scheduled start/end, status: idle/live/ended); `Team` model with members; per-team parallel runs on shared scenario topology; live timer; `LeaderboardCard` |
+| **F7** | G7 | ~4 h, 2 commits | `Range` model with asset state snapshots; `POST /drills/{id}/reset` (admin/lead); "Reset to clean" + "Save as range template" buttons on `RunInspectorCard` |
+| **F8** | G8 | ~6 h, 3 commits | SSE endpoint `GET /drills/{id}/events`; runner publishes events on each lifecycle hook; `SocViewCard` (blue/observer only) with kill-chain timeline; simple network map |
+
+**Total:** ~32 h, 17 commits, ~12 new tests per commit on average.
+
+### 15.3 Why ship in this order
+
+1. **F3 is load-bearing.** F4/F6/F8 all depend on multi-VM +
+   network topology being clean. Doing F3 first means every later
+   plan's scope drops.
+2. **Each plan ships a demoable thing.** F3 alone = "click
+   scenario, get 3 VMs in a network". F4 alone = "open noVNC
+   console on my VM". F5 alone = "submit flag, score updates".
+   Demo arc gets richer plan by plan.
+3. **Risk-adjusted.** F6 (multi-team coordination) is the riskiest
+   plan. Better to ship F3 + F4 + F5 first, validate the platform
+   works at one-team scale, then attack F6.
+4. **Reversible.** Each plan's commits are reviewable on their own.
+   If F5 reveals the flag model is wrong, we can rework it
+   without touching F3's network code.
+
+### 15.4 After F8 — what the user can do
+
+End-to-end div:ide as a functional cyber range for one team on the LAN:
+
+1. Sign in (after the credential-login plan from F3-prep)
+2. Pick a scenario from the catalog (3+ assets on 2+ networks)
+3. Start an exercise with N parallel teams (F6)
+4. Each team gets cloned VMs on a private VLAN (F3)
+5. Red interacts via noVNC console; blue watches the SOC view
+   (F4 + F8)
+6. Teams submit flags as they find them; score updates live (F5)
+7. Exercise ends → leaderboard frozen → after-action report
+   downloadable (`/drills/{id}/report` from F2.5)
+8. Instructor clicks "Reset" → range ready for the next cohort (F7)
+
+### 15.5 Decisions needed before F3 ships
+
+Four product decisions shape the F3 design. See §12 below for the
+canonical list; in short:
+
+1. **Scale: single-team or multi-team from day one?**
+   Single-team is faster (F3–F8 total ~24 h vs. ~32 h).
+2. **Live-fire or simulated?** Live-fire by default for cyber range;
+   simulated for institutional compliance settings.
+3. **Console: noVNC or Guacamole?** noVNC for LAN; Guacamole for
+   institutional with recording needs.
+4. **Network: simple VLANs or SDN?** Simple VLANs first; SDN is
+   L3 3.9 layered later.
+
+**Recommendation for the LAN deployment:** single-team, live-fire,
+noVNC, simple VLANs. Maximum cyber-range value per hour.
+
+---
+
+## 16. Where this doc stops being current (read [docs/TEST-PRODUCT.md](TEST-PRODUCT.md) for the live ledger)
+
+This file is **current as of F2 close-out (L2 18/18 ✅)**. The
+sections that grew stale over time have been updated:
+
+- §5 "Phase 1" was deferred multiple times — it's done.
+- §13 "What we've built" lists up to Stage 4 — the codebase is
+  at Stage 18 plus F1 (Half 1 + Half 2) plus F2 (5 commits).
+- §13 "Live Proxmox integration" said the read-only endpoints
+  return 502 — they return 200 now (since the `/access/permissions`
+  fix in commit `ab0ab58`).
+- "Tests: 56 passed" was the §13 snapshot — current count is
+  **399** (committed in F2.5 `2c21138`).
+
+For the live ledger of what's done / what's next:
 
 - **[docs/TEST-PRODUCT.md](TEST-PRODUCT.md)** — the L1/L2/L3 graded
   checklist, the live `preflight` count, the test count, the per-
