@@ -261,3 +261,50 @@ def test_console_card_typed_for_run_and_asset():
     assert "asset_id: number" in src
     assert "role?: string" in src
     assert "ConsoleTicket" in src
+
+
+# ---------- F6 multi-team leaderboard portal pins -----------------------
+
+
+def test_app_source_has_leaderboard_card():
+    """F6: the LeaderboardCard component exists and is exported."""
+    card = SRC_DIR / "components" / "portal" / "leaderboard-card.tsx"
+    assert card.is_file(), "F6 plan: leaderboard-card.tsx must exist"
+    src = card.read_text()
+    assert "export function LeaderboardCard" in src
+
+
+def test_leaderboard_card_typed_for_team_payload():
+    """The LeaderboardCard reads the F6 leaderboard API contract."""
+    card = (SRC_DIR / "components" / "portal" / "leaderboard-card.tsx").read_text()
+    assert "leaderboard" in card.lower()
+    # Required keys per team
+    for k in ("rank", "team_id", "name", "color", "score"):
+        assert k in card, f"LeaderboardCard missing key {k!r}"
+    # It hits the /leaderboard endpoint
+    assert "/leaderboard" in card
+
+
+def test_leaderboard_card_renders_first_place_crown():
+    """The #1 team shows a Crown icon."""
+    card = (SRC_DIR / "components" / "portal" / "leaderboard-card.tsx").read_text()
+    assert "Crown" in card
+    assert "first place" in card.lower() or "isFirst" in card
+
+
+def test_leaderboard_card_handles_empty_teams():
+    """Empty teams[] surfaces a friendly message."""
+    card = (SRC_DIR / "components" / "portal" / "leaderboard-card.tsx").read_text()
+    assert "No teams yet" in card
+
+
+def test_portal_bundle_under_budget_after_f6():
+    """F6 adds the leaderboard card; bundle must stay under 280 KB."""
+    assets = BUILD_DIR / "assets"
+    if not assets.is_dir():
+        pytest.skip("build/ not present")
+    js_files = [a for a in assets.glob("*.js") if ".map" not in a.name]
+    total = sum(p.stat().st_size for p in js_files)
+    assert total < 280 * 1024, (
+        f"F6 portal bundle grew to {total/1024:.1f} KB; expected <280 KB"
+    )
