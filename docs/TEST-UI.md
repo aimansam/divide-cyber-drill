@@ -96,18 +96,21 @@ These are all real, first-class endpoints. None of them are wizard-only.
 added specifically to support this UI (the previous list endpoint
 returned summary rows only and didn't expose assets or audit).
 
-## When to use this vs the wizard vs curl
+## When to use this vs the other portals vs curl
 
 | Tool | Best for |
 |---|---|
-| `/portal/test/` | poking at state: "did my drill start? what status?", "what templates does PVE have?", "show me the audit log for run N" |
+| `/portal/app/` (user portal, React/Vite) | the actual product — trainee-facing sign-in, scenario pick, run lifecycle, debrief. Day-1 ships the shell + scenarios card; the other cards land in the next plan. |
+| `/portal/test/` (this UI, vanilla) | poking at state: "did my drill start? what status?", "what templates does PVE have?", "show me the audit log for run N". Once `/portal/app/` has full card coverage, `/portal/test/` becomes a legacy dev tool. |
 | `/portal/` (wizard) | setting up a fresh deployment; not useful once setup is done |
 | curl / httpx | scripting, CI, anything that needs reproducibility |
 
 ## When NOT to use this
 
-- **For real drills.** Use `make live-drill` or the future portal
-  (L2). This UI doesn't render progress bars or drill-specific state.
+- **For real drills.** Use `make live-drill` or
+  [`/portal/app/`](../services/portal/app/index.html) (the user
+  portal). This UI doesn't render progress bars or drill-specific
+  state.
 - **In production.** It's a dev tool. No auth, no rate limiting, no
   audit of UI clicks. Don't expose port 8000 to the public internet.
 

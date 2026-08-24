@@ -408,6 +408,47 @@ The runner's `_best_effort_teardown` already destroys the clone on
 
 ---
 
+## 8.5. Try it from the user portal
+
+The CLI flow above is the canonical CI path. For human-in-the-loop,
+the user portal at `/portal/app/` is now the recommended entry
+point.
+
+1. Mint a short-lived token:
+
+   ```bash
+   python3 tools/issue_token.py --user alice --role trainee --ttl 1h
+   # prints: <token>
+   ```
+
+2. Open `http://localhost:8000/portal/app/` in a browser.
+
+3. Paste the token into the top bar. The bar flips to
+   `signed in as alice · trainee`.
+
+4. Click any scenario in the **Scenarios** card. Today the run
+   lifecycle is still rolling out (next-plan M3.2–M3.7), so for
+   actually starting a drill from the portal use the curl form
+   below — the rest of the cards are queued in the [next plan](TEST-PRODUCT.md#next-plan-post-l1-ordered).
+
+   ```bash
+   # Start a drill (paste scenario_id from the portal click)
+   curl -s -X POST http://localhost:8000/api/v1/drills \
+     -H "X-Divide-Token: <token>" \
+     -H "Content-Type: application/json" \
+     -d '{"scenario_id": 3}' | python3 -m json.tool
+
+   # Watch it (returns the new run_id above)
+   curl -s http://localhost:8000/api/v1/drills/<run_id> \
+     -H "X-Divide-Token: <token>" | python3 -m json.tool
+   ```
+
+The portal also serves `/portal/test/` (the operator diagnostic UI)
+and `/portal/` (the setup wizard you ran in §4). All three share
+the same FastAPI mount under `/portal/`. See [PORTAL-APP.md](PORTAL-APP.md).
+
+---
+
 ## Troubleshooting matrix
 
 | Symptom | Likely cause | Fix |

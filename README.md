@@ -110,21 +110,22 @@ make smoke          # curl the health, ready, and stub endpoints
 make logs           # tail logs
 ```
 
-### Two browser tools ship with the API
+### Three browser tools ship with the API
 
-After `make up`, browse to:
+After `make up` (and `make portal-build` once, for the React one), browse to:
 
-| URL | Purpose | Doc |
-|---|---|---|
-| `http://localhost:8000/portal/`       | Setup wizard — stand up a fresh PVE-backed deployment without SSH-ing into Proxmox | [`docs/SETUP-UI.md`](docs/SETUP-UI.md) |
-| `http://localhost:8000/portal/test/`  | Operator test tool — every control-plane endpoint as a click button | [`docs/TEST-UI.md`](docs/TEST-UI.md) |
-| `http://localhost:8000/portal/app/`   | User portal — sign in, pick a scenario, run a drill (React + Vite) | [`docs/PORTAL-APP.md`](docs/PORTAL-APP.md) |
+| URL | Audience | Purpose | Doc |
+|---|---|---|---|
+| `http://localhost:8000/portal/`       | Operator (first run)   | Setup wizard — stand up a fresh PVE-backed deployment without SSH-ing into Proxmox | [`docs/SETUP-UI.md`](docs/SETUP-UI.md) |
+| `http://localhost:8000/portal/test/`  | Operator (day-to-day)  | Test tool — every control-plane endpoint as a click button | [`docs/TEST-UI.md`](docs/TEST-UI.md) |
+| `http://localhost:8000/portal/app/`   | Trainee + lead         | User portal — sign in, pick a scenario, run a drill, download a debrief (React + Vite) | [`docs/PORTAL-APP.md`](docs/PORTAL-APP.md) |
 
 The first two are vanilla HTML + JS — no build step. The third is a
 Vite-built React app; `make portal-build` produces the bundle that
-the API container serves. All three share FastAPI's `StaticFiles`
-mount under `/portal/`. No new containers, no new runtime —
-just open the URL.
+the API container serves (the bind mount in `deploy/docker-compose.yml`
+means a rebuild propagates without rebuilding the API image).
+All three share FastAPI's `StaticFiles` mount under `/portal/`.
+No new containers, no new runtime — just open the URL.
 
 ### Running a live drill (L1)
 

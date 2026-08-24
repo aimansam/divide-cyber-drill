@@ -214,3 +214,18 @@ have warned about this.
 **Step 4 "Start first-live-drill" returns 500.**
 Check `docker compose logs api`. Most common: scenario not in DB —
 run `make sync-scenarios`.
+
+## Where to go next
+
+The wizard is one-time use. Once the template is registered, the
+platform is ready for actual drills — and the entry point changes:
+
+- **Trainee / lead:** open [`/portal/app/`](../services/portal/app/index.html)
+  — the user portal. React/Vite + Tailwind + shadcn/ui. Sign in with
+  a token (mint one with `python3 tools/issue_token.py --user
+  alice --role trainee --ttl 1h`), pick a scenario, run a drill.
+  See [`PORTAL-APP.md`](PORTAL-APP.md).
+- **Operator (day-to-day):** open [`/portal/test/`](../services/portal/test/index.html)
+  — this UI. Poke at state, see what's running, inspect audit
+  logs. See [`TEST-UI.md`](TEST-UI.md).
+- **CLI for CI / scripts:** `make live-drill SCENARIO=first-live-drill TIMEOUT=300`.

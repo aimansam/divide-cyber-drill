@@ -132,8 +132,15 @@ divide-cyber-drill/
 │   │   ├── pyproject.toml
 │   │   └── Dockerfile
 │   ├── orchestrator/            # background workers (RQ)
-│   ├── portal/                  # Next.js UI
-│   └── guacamole/               # noVNC/Guac stack
+│   ├── portal/                  # browser portals
+│   │   ├── index.html           # /portal/ setup wizard (vanilla)
+│   │   ├── test/index.html      # /portal/test/ operator tool (vanilla)
+│   │   └── app/                 # /portal/app/ user portal (React/Vite)
+│   │       ├── src/             #    TypeScript + React components
+│   │       ├── package.json
+│   │       ├── vite.config.ts
+│   │       └── build/           #    gitignored output
+│   └── guacamole/               # noVNC/Guac stack (Phase 2+)
 ├── proxmox/
 │   ├── terraform-templates/     # cloud-init snippets
 │   ├── vm-templates/            # Packer/import scripts for tpl-*
@@ -605,13 +612,37 @@ are stale. For the live ledger of what's done / what's next, see:
   checklist, the live `preflight` count, the test count, the per-
   criterion progress. This file is the canonical answer to "where are
   we right now?".
-- **[docs/TEST-UI.md](TEST-UI.md)** — the operator browser tool at
-  `/portal/test/` (7 cards, exposes every control-plane endpoint).
-- **[docs/SETUP-UI.md](SETUP-UI.md)** — the 4-step setup wizard at
-  `/portal/` (no SSH into PVE required, except for one `pveum` grant).
+- **[docs/USER-REQUIREMENTS.md](USER-REQUIREMENTS.md)** — persona-side
+  view (who can do what today, what's missing).
+- **[docs/SETUP-UI.md](SETUP-UI.md)** — the multi-step setup wizard
+  at `/portal/` (no SSH into PVE required, except for one `pveum`
+  grant).
+- **[docs/TEST-UI.md](TEST-UI.md)** — the operator diagnostic tool
+  at `/portal/test/` (7 cards, exposes every control-plane
+  endpoint). Vanilla HTML+JS.
+- **[docs/PORTAL-APP.md](PORTAL-APP.md)** — the user-facing React
+  portal at `/portal/app/`. Trainee + lead entry point; sign-in,
+  scenario pick, run lifecycle, debrief. React 18 + Vite + Tailwind
+  + shadcn/ui.
 - **[docs/LIVE-DRILL-RUNBOOK.md](LIVE-DRILL-RUNBOOK.md)** — step-by-step
   instructions for the PVE-side work; check the runbook for the
   canonical step ordering.
+
+### Day-1 of the F1 (functional product first) plan
+
+17. **User portal** at `/portal/app/` (commit `d0ce912`) — React 18 +
+    Vite + Tailwind + shadcn/ui. Ships `TokenBar` (X-Divide-Token
+    injection into `localStorage` + every `fetch()`) and
+    `ScenariosCard` (lists `/api/v1/scenarios` + click-to-pick).
+    9 regression tests (`tests/test_portal_app_smoke.py`). New
+    FastAPI StaticFiles mount at `/portal/app/` (registered **before**
+    `/portal` so the parent doesn't shadow the subpath). Compose
+    bind-mounts `services/portal/app/build` so a `make portal-build`
+    is reflected without an API image rebuild. **First modern UI
+    stack in the repo** — replaces the "edit HTML, refresh browser"
+    loop with HMR via `make portal-watch`. The F1 plan (§Next plan in
+    TEST-PRODUCT.md) targets Run lifecycle / Assets / Audit / Cancel /
+    Download report cards as next items.
 
 The rest of this section calls out specific places where PLAN.md's
 text is misleading so future readers don't trust stale snippets:

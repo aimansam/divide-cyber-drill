@@ -53,6 +53,11 @@ PVE OK?".
   `token.sub` (commit `359a62d`).
 - [`/portal/`](../services/portal/index.html) setup wizard for the
   one-time deploy.
+- [`/portal/app/`](../services/portal/app/index.html) user portal
+  (commit `d0ce912`) — operator-only visibility today (Day-1
+  ships the shell + `ScenariosCard`; the run-lifecycle card lands
+  in next-plan M3.2). Operators can sign in with an admin token
+  and run a drill from the browser.
 
 **Needs not yet met:**
 - `require_role("admin")` gate on `/api/v1/admin/*` — today **any
@@ -77,11 +82,16 @@ PVE OK?".
 - `GET /api/v1/drills/{id}` + `/audit` for live run inspection.
 - [`/portal/test/`](../services/portal/test/index.html) cards 1
   (scenario picker), 2 (run lifecycle), 3 (cancel), 5 (audit log).
+- [`/portal/app/`](../services/portal/app/index.html) (commit
+  `d0ce912`) — the lead's primary day-2 surface: `TokenBar` +
+  `ScenariosCard` ship today; `RunLifecycleCard` + cancel modal +
+  download-report button land in next-plan M3.2–M3.7. **This is the
+  page that replaces `/portal/test/` once the remaining cards ship.**
 
 **Needs not yet met:**
 - `require_role("lead", "admin")` on `POST /api/v1/drills`.
 - Scenario authoring UI — today the only authoring path is editing
-  YAML in a text editor and committing to git. L3 work (criterion 3.11).
+  YAML in a text editor and committing to git. L3 work (criterion 3.12).
 - After-action JSON report (`GET /api/v1/drills/{id}/report`,
   next-plan #6) for debrief — most data is in the DB already; one
   Prometheus query away.
@@ -97,6 +107,11 @@ PVE OK?".
 - `GET /api/v1/drills/{id}` for the run they started.
 - `GET /api/v1/drills/{id}/audit` for self-attribution.
 - `/portal/test/` cards 2 (run lifecycle), 4 (assets).
+- [`/portal/app/`](../services/portal/app/index.html) (commit
+  `d0ce912`) — the **trainee-facing surface**. Day-1 ships the
+  shell + scenarios card; the run-lifecycle / assets / console /
+  audit / download-report cards land in next-plan M3.2–M3.7. This is
+  the page the red team will eventually use.
 
 **Needs not yet met:**
 - **Browser console to the cloned VM.** [`PLAN.md`](PLAN.md) §7 calls
@@ -123,6 +138,10 @@ victim VMs.
 - `GET /api/v1/drills/{id}` for the run they joined.
 - `GET /api/v1/drills/{id}/audit` for self-attribution.
 - `/portal/test/` cards 4 (assets), 5 (audit), 6 (metrics).
+- [`/portal/app/`](../services/portal/app/index.html) (commit
+  `d0ce912`) — the blue team's primary surface once the asset +
+  audit + telemetry-overlay cards ship (M3.3, M3.4). Until then,
+  `/portal/test/` remains the working option.
 - Grafana at `localhost:3000` (admin/`divide`) — but **no anonymous
   viewer** (L2 2.6 ⚠️, deferred). The blue team needs to be given the
   admin creds or we ship the `grafana.ini` overlay (~30 min).
@@ -150,6 +169,11 @@ after-the-fact reviewer.
 - Same read access as red/blue: `GET /drills/{id}`, `/audit`,
   `/metrics`, future `/report`.
 - `/portal/test/` cards 5 (audit), 6 (metrics).
+- [`/portal/app/`](../services/portal/app/index.html) (commit
+  `d0ce912`) — long-term the observer's surface (read-only).
+  Today only the scenarios card ships; run-detail / audit /
+  download-report cards land in M3. Once they're in, a "view-only"
+  mode will hide Start / Cancel buttons for this role (M5).
 
 **Needs not yet met:**
 - **No read-only API surface.** Every endpoint either writes
@@ -205,9 +229,19 @@ time we add an endpoint we know which roles it belongs to.
 | `/api/v1/admin/*` | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
 | `GET /metrics` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `GET /portal/` (wizard) | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ |
+| `GET /portal/test/` (operator tool) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `GET /portal/app/` (user portal) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 
 **Legend:** ✅ own = result is filtered to `runs.started_by =
 token.sub`. ✅ any = full list / all rows. ❌ = 403.
+
+The portal URLs are static HTML and don't authenticate; gating is
+purely about what the JS calls (X-Divide-Token). The user portal at
+`/portal/app/` is the canonical entry point for trainees and leads;
+the operator tool at `/portal/test/` is what the operator uses
+during setup, troubleshooting, and ad-hoc poking. Both are
+read-accessible to anyone on the LAN — RBAC is enforced only at the
+API layer.
 
 ---
 
@@ -219,7 +253,7 @@ L2 demo.
 | Gap | Affects | Severity | Plan slot |
 |---|---|---|---|
 | No `require_role(...)` gate on any router | everyone | blocks L2 multi-user | not in current 8-item plan — needs new item |
-| `/portal/test/` UI doesn't accept `X-Divide-Token` | everyone | blocks L2 day-2 | ~30 min (one `<input>` + helper update) |
+| `/portal/test/` UI doesn't accept `X-Divide-Token` | operator | cosmetic — `/portal/app/` does (commit `d0ce912`) | ~30 min to retrofit; the user portal replaces `/portal/test/` once M3 lands |
 | No browser console to the cloned VM (noVNC) | red, blue | **biggest single UX gap** | Phase 2 / L3 |
 | No guest-side telemetry from inside the VM | blue, audit | drill has no observable "moving target" | L3 3.8; gated on next-plan #7 (cloud-init user-data) |
 | No Grafana anonymous viewer (L2 2.6 ⚠️) | blue, observer | can't share a dashboard with a non-admin | ~30 min; deferred per next plan |
@@ -237,8 +271,11 @@ L2 demo.
 
 1. **Multi-user demo this week?** If yes, we need to add a 9th item
    to the next plan: token-aware `/portal/test/` + `require_role` on
-   `/api/v1/admin/*` (~1 h, ships ahead of #2). Otherwise the current
-   plan is correct and L2 ships single-tenant at 17/18.
+   `/api/v1/admin/*` (~1 h, ships ahead of #2). **Update 2026-08-24:**
+   the user portal at `/portal/app/` now handles tokens end-to-end
+   (commit `d0ce912`), so the multi-user demo path is via
+   `/portal/app/`. The remaining work is still the same backend RBAC
+   gating; the UI half is done.
 2. **Compliance / observer read-only needed?** If yes, add items 9 +
    10: observer role + filtered audit read endpoints (~1.5 h, L3 work
    done early).
@@ -266,4 +303,6 @@ L2 demo.
   console access (the L3 answer to Persona 3 / 4's biggest gap).
 - [`TEST-UI.md`](TEST-UI.md) — the operator browser tool at
   `/portal/test/`.
+- [`PORTAL-APP.md`](PORTAL-APP.md) — the React/Vite user portal at
+  `/portal/app/`.
 - [`SETUP-UI.md`](SETUP-UI.md) — the setup wizard at `/portal/`.

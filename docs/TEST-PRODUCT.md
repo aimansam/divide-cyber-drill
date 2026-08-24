@@ -4,7 +4,7 @@ A graded definition of "ready for someone to try it". Each level is a
 strict superset of the previous — you can't ship L2 without L1 green,
 and L3 without L2.
 
-> **Where we are today:** stack is healthy, 276 tests passing.
+> **Where we are today:** stack is healthy, 287 tests passing.
 > `make preflight` is 9/9 after the `/access/permissions` ACL fix
 > **and** the `tpl-debian-cloudinit` template was created (run #11
 > completed with status `succeeded`).
@@ -21,14 +21,24 @@ and L3 without L2.
 > the [Next plan](#next-plan-post-l1-ordered) below — total ~3 h, no
 > PVE required.
 >
-> **Setup wizard:** `/portal/` is live (commit `496efd1`). Operators can
-> stand up a fresh PVE-backed deployment from a browser — no SSH into
-> PVE required except for one `pveum` grant. See `docs/SETUP-UI.md`.
+> **User portal** is the new F1 milestone (commit `d0ce912`): a
+> React + Vite + Tailwind + shadcn/ui app at `/portal/app/` with
+> `TokenBar` (X-Divide-Token injection) and `ScenariosCard` (the
+> first card). Two more portal pages already shipped:
 >
-> **Test UI:** `/portal/test/` is live (commit `cd0ccb5`). Browser tool
-> with 7 cards exposing every control-plane endpoint as a click button
-> (scenarios, drills, cancel, assets, audit, metrics, Proxmox). See
-> `docs/TEST-UI.md`.
+> - **Setup wizard:** `/portal/` is live (commit `496efd1`).
+>   Operators can stand up a fresh PVE-backed deployment from a
+>   browser — no SSH into PVE required except for one `pveum`
+>   grant. See `docs/SETUP-UI.md`.
+> - **Test UI:** `/portal/test/` is live (commit `cd0ccb5`).
+>   Browser tool with 7 cards exposing every control-plane endpoint
+>   as a click button (scenarios, drills, cancel, assets, audit,
+>   metrics, Proxmox). See `docs/TEST-UI.md`.
+> - **User portal:** `/portal/app/` is live (commit `d0ce912`).
+>   Trainee-facing: sign in with a token, pick a scenario, run a
+>   drill. Day-1 ships the shell + scenarios card; run lifecycle,
+>   assets, audit, and report download are queued as next-plan
+>   items M3.2–M3.7. See `docs/PORTAL-APP.md`.
 
 ---
 
@@ -158,11 +168,12 @@ auth, ops-grade observability.
 | 3.8  | Multi-node PVE cluster support (drill assets span nodes for realism) | ❌ single node |
 | 3.9  | SDN zone per drill (isolated L2 for red/blue traffic) | ❌ no SDN |
 | 3.10 | Scheduling: cron-driven drills (e.g. weekly red-team) | ❌ no scheduler |
-| 3.11 | Scenario marketplace (import/export YAML, signed) | ❌ local-only |
-| 3.12 | Multi-tenant org model (org → team → user) | ❌ single-tenant |
-| 3.13 | Public status page + incident comms | ❌ no status page |
-| 3.14 | SOC 2-ish audit trail (who ran what, when, with what output) | ⚠️  audit exists, not exported |
-| 3.15 | L2 criteria all still green | ❌ blocked on L2 |
+| 3.11 | User portal at `/portal/app/` (sign in, pick scenario, run drill, download debrief) | ⚠️ shell + scenarios card live (commit `d0ce912`); run lifecycle, assets, audit, cancel, report cards queued |
+| 3.12 | Scenario marketplace (import/export YAML, signed) | ❌ local-only |
+| 3.13 | Multi-tenant org model (org → team → user) | ❌ single-tenant |
+| 3.14 | Public status page + incident comms | ❌ no status page |
+| 3.15 | SOC 2-ish audit trail (who ran what, when, with what output) | ⚠️  audit exists, not exported |
+| 3.16 | L2 criteria all still green | ❌ blocked on L2 |
 
 ### L3 Time-to-ship estimate
 

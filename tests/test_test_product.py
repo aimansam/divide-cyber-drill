@@ -256,3 +256,65 @@ def test_user_requirements_doc_exists_and_links():
     assert "USER-REQUIREMENTS.md" in readme
 
 
+def test_portal_app_doc_exists_and_links():
+    """PORTAL-APP.md documents the React/Vite user portal at
+    /portal/app/. Catches silent rename/move of the doc and missing
+    cross-links from sibling docs that mention the portal.
+    """
+    doc = REPO / "docs" / "PORTAL-APP.md"
+    assert doc.exists(), "docs/PORTAL-APP.md must exist"
+
+    text = doc.read_text(encoding="utf-8")
+    # Must name the day-1 components.
+    for component in ["TokenBar", "ScenariosCard", "X-Divide-Token"]:
+        assert component in text, f"PORTAL-APP.md should mention '{component}'"
+
+    # Must reference the parent docs.
+    assert "SETUP-UI.md" in text, "PORTAL-APP.md should reference SETUP-UI.md"
+    assert "TEST-UI.md" in text, "PORTAL-APP.md should reference TEST-UI.md"
+
+    # README must list the new doc in the docs/ tree.
+    readme = (REPO / "README.md").read_text(encoding="utf-8")
+    assert "PORTAL-APP.md" in readme, (
+        "README.md should list PORTAL-APP.md in the docs/ tree"
+    )
+
+    # README's portal URL table must mention all three portals.
+    for path in ["/portal/", "/portal/test/", "/portal/app/"]:
+        assert path in readme, (
+            f"README.md should mention {path!r} in the portal URL table"
+        )
+
+
+def test_three_portals_consistently_described():
+    """The three portals (setup wizard, operator tool, user portal)
+    must be consistently named and described across the docs that
+    mention them. Catches drift where one doc says 'two browser
+    tools' and another says 'three'.
+    """
+    docs_to_check = [
+        "README.md",
+        "docs/TEST-PRODUCT.md",
+        "docs/SETUP-UI.md",
+        "docs/TEST-UI.md",
+        "docs/LIVE-DRILL-RUNBOOK.md",
+        "docs/USER-REQUIREMENTS.md",
+    ]
+    portal_slugs = [
+        ("/portal/", "setup wizard"),
+        ("/portal/test/", "operator"),
+        ("/portal/app/", "user portal"),
+    ]
+    for relpath in docs_to_check:
+        text = (REPO / relpath).read_text(encoding="utf-8")
+        # The doc must reference at least one portal URL.
+        referenced = [
+            (slug, hint) for slug, hint in portal_slugs if slug in text
+        ]
+        if not referenced:
+            continue
+        # Whichever ones it references, the URL must appear correctly.
+        for slug, _ in referenced:
+            assert slug in text, f"{relpath} references {slug!r} but the URL is missing"
+
+
