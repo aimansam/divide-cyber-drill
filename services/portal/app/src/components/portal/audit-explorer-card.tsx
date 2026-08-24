@@ -64,8 +64,10 @@ function tone(action: string | undefined): string {
 
 export function AuditExplorerCard({
   pickedRunId,
+  compact = false,
 }: {
   pickedRunId: number | null;
+  compact?: boolean;
 }) {
   const [items, setItems] = useState<AuditRow[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -100,6 +102,7 @@ export function AuditExplorerCard({
 
   return (
     <Card>
+      {!compact && (
       <CardHeader className="flex-row items-center justify-between space-y-0">
         <div>
           <CardTitle>
@@ -128,6 +131,7 @@ export function AuditExplorerCard({
           )}
         </Button>
       </CardHeader>
+      )}
       <CardContent>
         {error && (
           <div className="text-sm text-destructive">{error}</div>

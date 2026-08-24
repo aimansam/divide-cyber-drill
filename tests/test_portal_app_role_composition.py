@@ -49,18 +49,19 @@ def test_app_tsx_uses_hash_route_hook():
 
 def test_app_tsx_imports_all_card_components():
     src = _read("services/portal/app/src/app.tsx")
+    # F4-UI: DrillConsole takes over the Observe view; RunInspector
+    # + Assets + AuditExplorer are imported by DrillConsole, not by
+    # app.tsx directly.
     for card_import in [
         "ScenariosCard",
         "MyRunsCard",
         "RunLifecycleCard",
-        "RunInspectorCard",
-        "AssetsCard",
-        "AuditExplorerCard",
         "PveOpsCard",
         "ScenarioAuthoringCard",
         "SignInCard",
         "DashboardCard",
         "TopNav",
+        "DrillConsole",  # F4-UI commit 2
     ]:
         assert card_import in src, (
             f"app.tsx does not import {card_import} but renders it"

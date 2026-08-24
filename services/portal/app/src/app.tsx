@@ -3,14 +3,12 @@ import { ScenariosCard, type Scenario } from "@/components/portal/scenarios-card
 import { TokenBar } from "@/components/portal/token-bar";
 import { MyRunsCard, type RunRow } from "@/components/portal/my-runs-card";
 import { RunLifecycleCard } from "@/components/portal/run-lifecycle-card";
-import { RunInspectorCard } from "@/components/portal/run-inspector-card";
-import { AssetsCard } from "@/components/portal/assets-card";
-import { AuditExplorerCard } from "@/components/portal/audit-explorer-card";
 import { PveOpsCard } from "@/components/portal/pve-ops-card";
 import { ScenarioAuthoringCard } from "@/components/portal/scenario-authoring-card";
 import { SignInCard } from "@/components/portal/sign-in-card";
 import { TopNav } from "@/components/portal/top-nav";
 import { DashboardCard } from "@/components/portal/dashboard-card";
+import { DrillConsole } from "@/components/portal/drill-console";
 import { useHashRoute } from "@/hooks/use-hash-route";
 import { useMe } from "@/lib/auth";
 
@@ -118,17 +116,10 @@ export default function App() {
                 );
               case "observe":
                 return (
-                  <>
-                    <RunInspectorCard
-                      pickedRunId={pickedRun?.id ?? null}
-                    />
-                    <AssetsCard
-                      pickedRunId={pickedRun?.id ?? null}
-                    />
-                    <AuditExplorerCard
-                      pickedRunId={pickedRun?.id ?? null}
-                    />
-                  </>
+                  <DrillConsole
+                    pickedRunId={pickedRun?.id ?? null}
+                    scenarioName={pickedScenario?.title ?? pickedScenario?.name}
+                  />
                 );
               case "admin":
                 return (

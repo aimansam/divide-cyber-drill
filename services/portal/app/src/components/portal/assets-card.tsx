@@ -38,7 +38,7 @@ interface RunPayload {
   assets?: RunAsset[];
 }
 
-export function AssetsCard({ pickedRunId }: { pickedRunId: number | null }) {
+export function AssetsCard({ pickedRunId, compact = false }: { pickedRunId: number | null; compact?: boolean }) {
   const [assets, setAssets] = useState<RunAsset[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -99,14 +99,16 @@ export function AssetsCard({ pickedRunId }: { pickedRunId: number | null }) {
 
   return (
     <Card>
-      <CardHeader>
-        <CardTitle>Assets</CardTitle>
-        <CardDescription>
-          {pickedRunId === null
-            ? "Click a run in My runs / All runs to see its assets."
-            : `Run #${pickedRunId} — ${assets.length} asset${assets.length === 1 ? "" : "s"}`}
-        </CardDescription>
-      </CardHeader>
+      {!compact && (
+        <CardHeader>
+          <CardTitle>Assets</CardTitle>
+          <CardDescription>
+            {pickedRunId === null
+              ? "Click a run in My runs / All runs to see its assets."
+              : `Run #${pickedRunId} — ${assets.length} asset${assets.length === 1 ? "" : "s"}`}
+          </CardDescription>
+        </CardHeader>
+      )}
       <CardContent>
         {loading && (
           <div className="text-sm italic text-muted-foreground">Loading…</div>

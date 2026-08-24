@@ -163,3 +163,141 @@ def test_new_components_listed_in_f4_changelog():
     for rel in new_files:
         p = REPO / rel
         assert p.is_file(), f"F4-UI file went missing: {rel}"
+
+
+# ---------- TopologyGraph (F4-UI commit 2) -------------------------------
+
+
+def test_topology_graph_file_exists():
+    p = SRC_DIR / "components" / "portal" / "topology-graph.tsx"
+    assert p.is_file(), f"missing: {p}"
+
+
+def test_topology_graph_exports_component():
+    src = _read("services/portal/app/src/components/portal/topology-graph.tsx")
+    assert "export function TopologyGraph" in src
+    assert "export interface TopologyAsset" in src
+
+
+def test_topology_graph_handles_empty():
+    """An empty asset list must render a friendly placeholder, not a
+    broken SVG with no nodes."""
+    src = _read("services/portal/app/src/components/portal/topology-graph.tsx")
+    assert "assets.length === 0" in src
+    # The placeholder mentions 'Pick a scenario'.
+    assert "Pick a scenario" in src
+
+
+def test_topology_graph_classifies_red_roles():
+    src = _read("services/portal/app/src/components/portal/topology-graph.tsx")
+    for keyword in ("attacker", "red", "offensive", "pentester"):
+        assert keyword in src, (
+            f"TopologyGraph should classify role containing {keyword!r} as red zone"
+        )
+
+
+def test_topology_graph_classifies_router_roles():
+    src = _read("services/portal/app/src/components/portal/topology-graph.tsx")
+    for keyword in ("router", "firewall", "gw"):
+        assert keyword in src, (
+            f"TopologyGraph should classify role containing {keyword!r} as router zone"
+        )
+
+
+def test_topology_graph_classifies_blue_roles():
+    src = _read("services/portal/app/src/components/portal/topology-graph.tsx")
+    for keyword in ("victim", "defender", "blue", "target", "log-aggregator"):
+        assert keyword in src, (
+            f"TopologyGraph should classify role containing {keyword!r} as blue zone"
+        )
+
+
+def test_topology_graph_draws_svg_zones():
+    """The graph must render real SVG, not a placeholder image. The
+    `<svg>` element is the proof."""
+    src = _read("services/portal/app/src/components/portal/topology-graph.tsx")
+    assert "<svg" in src
+    assert "<rect" in src
+    assert "<text" in src
+
+
+def test_topology_graph_has_aria_label():
+    src = _read("services/portal/app/src/components/portal/topology-graph.tsx")
+    assert 'aria-label' in src, (
+        "TopologyGraph must carry an aria-label for accessibility"
+    )
+
+
+# ---------- DrillConsole -------------------------------------------------
+
+
+def test_drill_console_file_exists():
+    p = SRC_DIR / "components" / "portal" / "drill-console.tsx"
+    assert p.is_file(), f"missing: {p}"
+
+
+def test_drill_console_exports_component():
+    src = _read("services/portal/app/src/components/portal/drill-console.tsx")
+    assert "export function DrillConsole" in src
+
+
+def test_drill_console_shows_live_badge():
+    """The live badge appears while the run is RUNNING or PENDING.
+    Operators need an obvious visual signal that the drill is in
+    flight — that's the whole point of a dedicated console view."""
+    src = _read("services/portal/app/src/components/portal/drill-console.tsx")
+    assert "drill-live-badge" in src
+    assert "animate-pulse" in src
+
+
+def test_drill_console_polls_during_run():
+    """Polling cadence: 2s while live, 5s while terminal. Verify
+    both intervals appear in the source."""
+    src = _read("services/portal/app/src/components/portal/drill-console.tsx")
+    assert "2000" in src and "5000" in src, (
+        "DrillConsole must poll 2s while live, 5s while terminal"
+    )
+
+
+def test_drill_console_handles_no_run_selected():
+    """If pickedRunId is null, render EmptyState — not a broken
+    console."""
+    src = _read("services/portal/app/src/components/portal/drill-console.tsx")
+    assert "pickedRunId === null" in src
+    assert "EmptyState" in src
+
+
+def test_drill_console_includes_topology():
+    """DrillConsole must show the topology graph as part of the
+    live-drill view (that's the visual identity)."""
+    src = _read("services/portal/app/src/components/portal/drill-console.tsx")
+    assert "TopologyGraph" in src
+    assert "TopologyAsset" in src
+
+
+def test_drill_console_offers_report_download():
+    """Terminal runs (succeeded/failed/timeout/cancelled/completed)
+    must surface the Download report button."""
+    src = _read("services/portal/app/src/components/portal/drill-console.tsx")
+    assert "drill-download-report" in src
+    assert "/api/v1/drills/" in src  # report endpoint
+
+
+def test_drill_console_subscribes_to_app_tsx_observe_view():
+    """The Observe view in app.tsx must render DrillConsole, not the
+    old RunInspector+Assets+Audit stack."""
+    src = _read("services/portal/app/src/app.tsx")
+    assert "<DrillConsole" in src, "Observe view must render DrillConsole"
+
+
+# ---------- Compact props on inner cards --------------------------------
+
+
+def test_assets_card_supports_compact():
+    src = _read("services/portal/app/src/components/portal/assets-card.tsx")
+    assert "compact" in src, "AssetsCard must accept a compact prop"
+
+
+def test_audit_explorer_card_supports_compact():
+    src = _read("services/portal/app/src/components/portal/audit-explorer-card.tsx")
+    assert "compact" in src, "AuditExplorerCard must accept a compact prop"
