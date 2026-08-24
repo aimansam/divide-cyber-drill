@@ -16,6 +16,8 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from fastapi.testclient import TestClient
 
+from sqlalchemy import select
+
 from app.core.auth import sign_token
 from app.db import models
 from app.db.base import Base
@@ -442,3 +444,400 @@ def test_archive_exercise_any_state():
     r = client.post(f"/api/v1/exercises/{ex['id']}/archive")
     assert r.status_code == 200
     assert r.json()["status"] == "archived"
+
+
+
+def _runner_with_mock_tpl_x():
+    """Return a Runner built on a mock with tpl-x pre-seeded.
+
+    F6.2 starts drills that reference ``tpl-x``; the global mock
+    factory (build_runner) doesn't pre-seed templates. Tests
+    that actually start a run patch build_runner to return this
+    so we don't fail with "template not found".
+    """
+    from app.runners.runner import Runner
+    adapter = MockProxmoxAdapter()
+    adapter.seed_template("tpl-x")
+    return Runner(adapter=adapter)
+
+
+
+
+def _runner_with_mock_tpl_x():
+    from app.runners.runner import Runner
+    adapter = MockProxmoxAdapter()
+    adapter.seed_template("tpl-x")
+    return Runner(adapter=adapter)
+
+
+
+# --- F6.2: exercise-bounded runs + team.score -----------------------------
+
+
+def test_post_drill_with_exercise_id_creates_runs_with_team():
+    """POST /drills with exercise_id + team populates run.exercise_id
+    and run.team; the run proceeds as a normal single-team start."""
+    import json
+    import uuid
+    from jsonschema import Draft202012Validator
+    from app.services.scenario_sync import _find_schema
+    from pathlib import Path as _Path
+    schema = json.loads(_find_schema().read_text())
+
+    # Use the demo scenario as the scenarios source; instantiate
+    # it inline.
+    spec = {
+        "apiVersion": "divide/v1",
+        "kind": "Scenario",
+        "metadata": {
+            "name": f"f6-run-{uuid.uuid4().hex[:8]}",
+            "title": "F6 Run Test",
+            "version": 1,
+            "difficulty": "beginner",
+            "duration_min": 30,
+            "tags": [],
+        },
+        "spec": {
+            "objectives": {"red": ["x" * 10], "blue": ["y" * 10]},
+            "networks": [{"name": "n1", "cidr": "10.0.0.0/24"}],
+            "assets": [
+                {
+                    "role": "victim", "kind": "vm",
+                    "template": "tpl-x", "networks": ["n1"],
+                }
+            ],
+            "flags": [],
+            "telemetry": {"sinks": [{"type": "minio"}]},
+            "artifacts": {"sink_to": "minio", "retention_days": 7},
+            "win_conditions": {"red": ["x" * 10], "blue": ["y" * 10]},
+            "scoring": {
+                "red": {"rules": [{"id": "rule1", "weight": 100}], "pass_threshold": 50},
+                "blue": {"rules": [{"id": "rule1", "weight": 100}], "pass_threshold": 50},
+            },
+        },
+    }
+    Draft202012Validator(schema).validate(spec)
+
+    sm = get_sessionmaker()
+    async def _seed():
+        async with sm() as session:
+            scen = models.Scenario(
+                name=spec["metadata"]["name"],
+                title=spec["metadata"]["title"],
+                version=1,
+                difficulty="beginner",
+                duration_min=30,
+                spec=spec,
+            )
+            session.add(scen)
+            await session.commit()
+            return scen.id
+
+    scenario_id = asyncio.run(_seed())
+
+    from app.main import app
+    admin_token = sign_token(sub="root", role="admin", ttl_s=300)
+    admin = TestClient(app, headers={"X-Divide-Token": admin_token})
+
+    # Create an exercise
+    ex = admin.post("/api/v1/exercises", json={
+        "name": f"f6-ex-{uuid.uuid4().hex[:8]}",
+        "title": "F6 Run Exercise",
+        "scenario_id": scenario_id,
+        "teams": [{"name": "red"}, {"name": "blue"}],
+    }).json()
+    print("POST /drills exercise_id:", ex["id"], "team:", "red")
+    admin.post(f"/api/v1/exercises/{ex['id']}/start")
+
+    # Patch build_runner so this test gets a mock with tpl-x pre-seeded.
+    from app.routers import drills as drills_mod
+    drills_mod.build_runner = _runner_with_mock_tpl_x
+
+    # POST /drills with exercise_id + team. Patch build_runner so
+    # the runner actually finds the tpl-x template.
+    from app.routers import drills as drills_mod
+    drills_mod.build_runner = _runner_with_mock_tpl_x
+
+    r = admin.post("/api/v1/drills", json={
+        "scenario_id": scenario_id,
+        "exercise_id": ex["id"],
+        "team": "red",
+    })
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["exercise_id"] == ex["id"]
+    assert body["team"] == "red"
+    run_id = body["run_id"]
+
+    # Verify the DB row has the right fields
+    async def _check():
+        async with sm() as session:
+            r_row = (
+                await session.execute(
+                    select(models.Run).where(models.Run.id == run_id)
+                )
+            ).scalar_one()
+            assert r_row.exercise_id == ex["id"]
+            assert r_row.team == "red"
+
+    asyncio.run(_check())
+
+
+def test_post_drill_with_unknown_team_404():
+    """team='green' but no team by that name in the exercise -> 404."""
+    import uuid
+    sm = get_sessionmaker()
+    async def _seed():
+        async with sm() as session:
+            scen = models.Scenario(
+                name=f"f6-bad-team-{uuid.uuid4().hex[:8]}",
+                title="Bad Team", version=1, difficulty="beginner",
+                duration_min=30,
+                spec={"apiVersion": "divide/v1", "kind": "Scenario",
+                       "spec": {"assets": []}},
+            )
+            session.add(scen)
+            await session.commit()
+            return scen.id
+
+    scenario_id = asyncio.run(_seed())
+
+    from app.main import app
+    admin_token = sign_token(sub="root", role="admin", ttl_s=300)
+    admin = TestClient(app, headers={"X-Divide-Token": admin_token})
+
+    ex = admin.post("/api/v1/exercises", json={
+        "name": f"f6-ex2-{uuid.uuid4().hex[:8]}",
+        "title": "Bad Team", "scenario_id": scenario_id,
+        "teams": [{"name": "red"}, {"name": "blue"}],
+    }).json()
+
+    r = admin.post("/api/v1/drills", json={
+        "scenario_id": scenario_id,
+        "exercise_id": ex["id"],
+        "team": "green",  # doesn't exist
+    })
+    assert r.status_code == 404
+
+
+def test_post_drill_with_unknown_exercise_404():
+    import uuid
+    sm = get_sessionmaker()
+    async def _seed():
+        async with sm() as session:
+            scen = models.Scenario(
+                name=f"f6-bad-ex-{uuid.uuid4().hex[:8]}",
+                title="Bad Exercise", version=1, difficulty="beginner",
+                duration_min=30,
+                spec={"apiVersion": "divide/v1", "kind": "Scenario",
+                       "spec": {"assets": []}},
+            )
+            session.add(scen)
+            await session.commit()
+            return scen.id
+    scenario_id = asyncio.run(_seed())
+
+    from app.main import app
+    admin_token = sign_token(sub="root", role="admin", ttl_s=300)
+    admin = TestClient(app, headers={"X-Divide-Token": admin_token})
+
+    r = admin.post("/api/v1/drills", json={
+        "scenario_id": scenario_id,
+        "exercise_id": 99999,
+        "team": "red",
+    })
+    assert r.status_code == 404
+
+
+def test_post_drill_to_ended_exercise_rejected():
+    """ENDED exercises can't accept new runs."""
+    import uuid
+    sm = get_sessionmaker()
+    async def _seed():
+        async with sm() as session:
+            scen = models.Scenario(
+                name=f"f6-ended-{uuid.uuid4().hex[:8]}",
+                title="Ended", version=1, difficulty="beginner",
+                duration_min=30,
+                spec={"apiVersion": "divide/v1", "kind": "Scenario",
+                       "spec": {"assets": []}},
+            )
+            session.add(scen)
+            await session.commit()
+            return scen.id
+    scenario_id = asyncio.run(_seed())
+    from app.main import app
+    admin_token = sign_token(sub="root", role="admin", ttl_s=300)
+    admin = TestClient(app, headers={"X-Divide-Token": admin_token})
+
+    ex = admin.post("/api/v1/exercises", json={
+        "name": f"f6-ended-{uuid.uuid4().hex[:8]}",
+        "title": "Ended", "scenario_id": scenario_id,
+        "teams": [{"name": "red"}],
+    }).json()
+    # Move to ENDED
+    admin.post(f"/api/v1/exercises/{ex['id']}/start")
+
+    # Patch build_runner so this test gets a mock with tpl-x pre-seeded.
+    from app.routers import drills as drills_mod
+    drills_mod.build_runner = _runner_with_mock_tpl_x
+    admin.post(f"/api/v1/exercises/{ex['id']}/stop")
+
+    r = admin.post("/api/v1/drills", json={
+        "scenario_id": scenario_id,
+        "exercise_id": ex["id"],
+        "team": "red",
+    })
+    assert r.status_code == 409
+
+
+def test_flag_capture_bumps_team_score():
+    """A flag capture against a team inside an exercise bumps
+    Team.score (which the leaderboard reads)."""
+    import uuid
+    sm = get_sessionmaker()
+    async def _seed():
+        async with sm() as session:
+            scen = models.Scenario(
+                name=f"f6-team-score-{uuid.uuid4().hex[:8]}",
+                title="Team Score Test", version=1,
+                difficulty="beginner", duration_min=30,
+                spec={
+                    "apiVersion": "divide/v1", "kind": "Scenario",
+                    "spec": {
+                        "assets": [
+                            {"role": "victim", "kind": "vm",
+                             "template": "tpl-x", "networks": []},
+                        ],
+                        "flags": [
+                            {
+                                "id": "f1", "side": "red",
+                                "value": "FLAG{caught}",
+                                "planted_on_role": "victim",
+                                "decay_window_seconds": 60,
+                                "base_points": 100,
+                            }
+                        ],
+                    },
+                },
+            )
+            session.add(scen)
+            await session.commit()
+            return scen.id
+    scenario_id = asyncio.run(_seed())
+
+    from app.main import app
+    admin_token = sign_token(sub="root", role="admin", ttl_s=300)
+    blue_token = sign_token(sub="alice", role="blue", ttl_s=300)
+    admin = TestClient(app, headers={"X-Divide-Token": admin_token})
+    blue = TestClient(app, headers={"X-Divide-Token": blue_token})
+
+    ex = admin.post("/api/v1/exercises", json={
+        "name": f"f6-team-score-{uuid.uuid4().hex[:8]}",
+        "title": "Team Score", "scenario_id": scenario_id,
+        "teams": [{"name": "red", "color": "#dc2626"},
+                  {"name": "blue", "color": "#2563eb"}],
+    }).json()
+    admin.post(f"/api/v1/exercises/{ex['id']}/start")
+
+    # Patch build_runner so this test gets a mock with tpl-x pre-seeded.
+    from app.routers import drills as drills_mod
+    drills_mod.build_runner = _runner_with_mock_tpl_x
+
+    blue_team_id = next(t["id"] for t in ex["teams"] if t["name"] == "blue")
+
+    # Add alice as blue team member (so she can submit flags).
+    admin.post(f"/api/v1/exercises/{ex['id']}/members", json={
+        "sub": "alice", "team_id": blue_team_id,
+    })
+
+    # Start a run scoped to the blue team.
+    from app.routers import drills as drills_mod
+    drills_mod.build_runner = _runner_with_mock_tpl_x
+
+    run = admin.post("/api/v1/drills", json={
+        "scenario_id": scenario_id,
+        "exercise_id": ex["id"],
+        "team": "blue",
+    }).json()
+
+    assert run["status"] == "succeeded"
+
+    # Capture the flag from blue's perspective (red-side flag is
+    # hunted by blue). Use a Started_at 30s in the past so the
+    # scoring window makes the points nonzero.
+    from datetime import datetime, timedelta, timezone
+    async def _backdate():
+        async with sm() as session:
+            r_row = await session.execute(
+                select(models.Run).where(models.Run.id == run["run_id"])
+            )
+            r_obj = r_row.scalar_one()
+            # Runner ends runs in SUCCEEDED. For the submit-flag
+            # path the test needs the run to look active. We flip
+            # it back to RUNNING + backdate started_at so the
+            # scoring window makes the points nonzero.
+            r_obj.status = models.RunStatus.RUNNING
+            r_obj.ended_at = None
+            r_obj.started_at = datetime.now(timezone.utc) - timedelta(seconds=10)
+            await session.commit()
+    asyncio.run(_backdate())
+
+    sub = blue.post(
+        f"/api/v1/drills/{run['run_id']}/submit-flag",
+        json={"flag_id": "f1", "value": "FLAG{caught}"},
+    )
+    assert sub.status_code == 200, sub.text
+    points = sub.json()["points"]
+
+    # Now check the leaderboard: blue's score went up by `points`.
+    lb = admin.get(f"/api/v1/exercises/{ex['id']}/leaderboard").json()
+    blue_row = next(t for t in lb["teams"] if t["name"] == "blue")
+    assert blue_row["score"] == points, (
+        f"team score should be {points}; got {blue_row['score']}"
+    )
+
+
+def test_models_run_has_exercise_relationship():
+    """Run.exercise relationship returns Exercise (lazy)."""
+    import uuid
+    sm = get_sessionmaker()
+    async def _seed():
+        async with sm() as session:
+            scen = models.Scenario(
+                name=f"f6-relationship-{uuid.uuid4().hex[:8]}",
+                title="Relationship Test", version=1,
+                difficulty="beginner", duration_min=30,
+                spec={"apiVersion": "divide/v1", "kind": "Scenario",
+                       "spec": {"assets": []}},
+            )
+            session.add(scen)
+            await session.flush()
+            ex = models.Exercise(
+                name=f"rel-{uuid.uuid4().hex[:8]}",
+                title="Rel", scenario_id=scen.id,
+                created_by="alice",
+            )
+            session.add(ex)
+            await session.flush()
+            run = models.Run(
+                scenario_id=scen.id, exercise_id=ex.id,
+                team="red", started_by="alice",
+            )
+            session.add(run)
+            await session.commit()
+            return ex.id, run.id
+    ex_id, run_id = asyncio.run(_seed())
+
+    async def _check():
+        async with sm() as session:
+            run_row = (
+                await session.execute(
+                    select(models.Run).where(models.Run.id == run_id)
+                )
+            ).scalar_one()
+            # Don't trigger lazy load — relationship is opaque
+            assert run_row.exercise_id == ex_id
+            assert run_row.team == "red"
+
+    asyncio.run(_check())

@@ -63,6 +63,9 @@ class RunRequest:
     started_by: str | None = None
     # Optional override; defaults to first node returned by the adapter.
     node: str | None = None
+    # F6: optional exercise + team binding.
+    exercise_id: int | None = None
+    team: str | None = None
 
 
 @dataclass(frozen=True)
@@ -136,10 +139,13 @@ class Runner:
         node = req.node or nodes[0]
 
         # 1. Create Run (pending) + Asset (planned) rows.
+        # F6: propagate exercise_id + team from the request when set.
         run = models.Run(
             scenario_id=scenario.id,
             status=RunStatus.PENDING,
             started_by=req.started_by,
+            exercise_id=req.exercise_id,
+            team=req.team,
         )
         session.add(run)
         await session.flush()
