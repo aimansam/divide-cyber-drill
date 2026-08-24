@@ -27,6 +27,8 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
+log = logging.getLogger(__name__)
+
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -40,7 +42,7 @@ from app.observability import (
     record_adapter_call,
     record_cancel,
 )
-from app.runners.adapter import CloneSpec, ProxmoxAdapter
+from app.runners.adapter import CloneSpec, NetworkSpec, ProxmoxAdapter
 from app.services import telemetry as _telemetry
 
 
@@ -102,6 +104,31 @@ class Runner:
         if not assets_spec:
             raise RunnerError("scenario has no assets")
 
+        # F3 multi-VM scenarios: build the bridge plan from spec.networks[].
+        # We create one Linux bridge per network declaration, then attach
+        # each asset to the bridges its ``spec.networks[]`` array names.
+        # Bridges are sequential (vmbr100, vmbr101, …) so they don't
+        # collide with operator-managed vmbr0 / vmbr1.
+        networks_spec = spec.get("networks") or []
+        bridges_by_name: dict[str, str] = {}
+        for idx, net_spec in enumerate(networks_spec):
+            # 100+offset keeps us out of PVE's well-known vmbr0..vmbr99.
+            bridge = f"vmbr{100 + idx}"
+            bridges_by_name[net_spec["name"]] = bridge
+            await self._adapter.create_bridge(
+                NetworkSpec(
+                    bridge=bridge,
+                    cidr=net_spec.get("cidr", ""),
+                    isolation=net_spec.get("isolation", "tight"),
+                    egress=net_spec.get("egress", "blocked"),
+                    dhcp=net_spec.get("dhcp", True),
+                )
+            )
+            log.info(
+                "runner.networks.bridge_created name=%s bridge=%s cidr=%s",
+                net_spec["name"], bridge, net_spec.get("cidr"),
+            )
+
         # Pick node.
         nodes = await self._adapter.list_nodes()
         if not nodes:
@@ -153,6 +180,9 @@ class Runner:
         # 3. Clone + start each asset. On error, mark run FAILED and tear
         #    down whatever was already created.
         cloned_so_far: list[models.Asset] = []
+        # Bridges we created during this run; tracked so teardown
+        # (best-effort) can ask the adapter to remove them.
+        bridges_created: list[str] = list(bridges_by_name.values())
         for asset_spec in assets_spec:
             asset = (
                 await session.execute(
@@ -162,6 +192,11 @@ class Runner:
                 )
             ).scalar_one()
             try:
+                # F3: stash bridges_by_name on the asset so _spawn_asset
+                # can read it (no method-signature change). The asset is
+                # a SQLAlchemy instance; attaching ad-hoc attributes is
+                # safe because we drop it on session.flush boundaries.
+                asset._f3_bridges_by_name = bridges_by_name  # type: ignore[attr-defined]
                 await self._spawn_asset(
                     session=session,
                     asset=asset,
@@ -177,6 +212,17 @@ class Runner:
                 asset.status = AssetStatus.FAILED
                 asset.error = str(exc)
                 await self._best_effort_teardown(cloned_so_far)
+                # Tear down bridges we created so a retry starts clean.
+                # Best-effort: a real-PVE bridge is operator-owned and
+                # remove_bridge is a no-op there; the mock removes them.
+                for br in bridges_created:
+                    try:
+                        await self._adapter.remove_bridge(br)
+                    except Exception as exc:  # noqa: BLE001
+                        log.warning(
+                            "runner.networks.remove_bridge_failed bridge=%s err=%s",
+                            br, exc,
+                        )
                 inc_run_terminal(outcome="failed", adapter=_adapter_label(self._adapter))
                 await self._audit(
                     session,
@@ -192,6 +238,18 @@ class Runner:
         # 4. All assets up — flip run to SUCCEEDED.
         run.status = RunStatus.SUCCEEDED
         run.ended_at = datetime.now(timezone.utc)
+        # F3: tear down bridges we created. The drill is over; the
+        # topology it was building is gone. Best-effort, matching
+        # the failure path above. Real-PVE remove_bridge is no-op;
+        # mock removes them.
+        for br in bridges_created:
+            try:
+                await self._adapter.remove_bridge(br)
+            except Exception as exc:  # noqa: BLE001
+                log.warning(
+                    "runner.networks.remove_bridge_failed bridge=%s err=%s",
+                    br, exc,
+                )
         await session.flush()
         inc_run_terminal(outcome="succeeded", adapter=_adapter_label(self._adapter))
         await self._audit(
@@ -437,7 +495,20 @@ class Runner:
         asset.status = (
             AssetStatus.RUNNING if state.status == "running" else AssetStatus.STOPPED
         )
+        # F3 multi-VM scenarios: attach NICs to each bridge the asset
+        # declares in ``asset_spec.networks[]``. NIC IDs are sequential
+        # starting from 0 (net0, net1, …); we use ``enumerate`` so the
+        # first declared network becomes net0 — which matters for
+        # PVE ``qm config`` output and for scenarios that key off the
+        # primary NIC. ``bridges_by_name`` is computed once at the
+        # start of start_run and passed in via the call site.
         await session.flush()
+        await self._attach_asset_networks(
+            asset=asset,
+            asset_spec=asset_spec,
+            bridges_by_name=asset._f3_bridges_by_name,  # type: ignore[attr-defined]
+            node=node,
+        )
 
         await self._audit(
             session,
@@ -447,6 +518,42 @@ class Runner:
             asset_id=asset.id,
             details={"role": asset.role, "vmid": result.vmid, "ip": state.ip},
         )
+
+    async def _attach_asset_networks(
+        self,
+        *,
+        asset: models.Asset,
+        asset_spec: dict,
+        bridges_by_name: dict[str, str],
+        node: str,
+    ) -> None:
+        """F3: attach NICs to the bridges this asset declares.
+
+        Iterates ``asset_spec.networks[]`` in declaration order,
+        records each as an additional NIC on the freshly cloned VM.
+        Silently skips networks whose name is not in
+        ``bridges_by_name`` (the runner validates the network
+        declarations exist before this is called, so this should be
+        unreachable in practice — but we don't want a typo to
+        brick the runner with a KeyError here).
+        """
+        asset_networks = asset_spec.get("networks") or []
+        for nic_id, net_name in enumerate(asset_networks):
+            bridge = bridges_by_name.get(net_name)
+            if bridge is None:
+                log.warning(
+                    "runner.networks.unknown_network role=%s network=%s "
+                    "(bridge not found)",
+                    asset.role, net_name,
+                )
+                continue
+            await self._adapter.attach_network(
+                asset.pve_vmid, node, bridge, nic_id
+            )
+            log.info(
+                "runner.networks.attached role=%s vmid=%s bridge=%s nic_id=%s",
+                asset.role, asset.pve_vmid, bridge, nic_id,
+            )
 
     async def _best_effort_teardown(self, assets: list[models.Asset]) -> None:
         for a in assets:
@@ -527,7 +634,6 @@ class Runner:
         and move on. The audit + metric paths are fire-and-forget;
         we never raise out of the watchdog.
         """
-        log = logging.getLogger(__name__)
         try:
             await asyncio.sleep(timeout_min * 60)
         except asyncio.CancelledError:

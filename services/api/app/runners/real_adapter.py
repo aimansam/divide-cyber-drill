@@ -43,6 +43,7 @@ from app.core.config import ProxmoxSettings
 from app.runners.adapter import (
     CloneSpec,
     ClonedVM,
+    NetworkSpec,
     ProxmoxAdapter,
     VmState,
 )
@@ -88,6 +89,12 @@ class RealProxmoxAdapter(ProxmoxAdapter):
         self._verify_ssl = verify_ssl
         self._timeout_s = float(timeout_s)
         self._client: ProxmoxAPI | None = None
+        # Default node for F3 multi-VM scenarios. The runner currently
+        # operates on a single node per drill (see runner.py), so we
+        # stash that here for create_bridge to use. Tests pass
+        # ``node`` explicitly per-call elsewhere, but create_bridge
+        # doesn't take a node arg, so we use this for the default.
+        self._node: str | None = None
 
     # --- construction ----------------------------------------------------
 
@@ -320,3 +327,78 @@ class RealProxmoxAdapter(ProxmoxAdapter):
             status=current.get("status", "unknown"),
             ip=ip,
         )
+
+    # --- F3 multi-VM networks -----------------------------------------
+
+    async def create_bridge(self, spec: NetworkSpec) -> None:
+        """Create a Linux bridge on every node in the cluster.
+
+        PVE bridges (vmbrN) are per-node, but for the cyber range we
+        consistently use a single node for the whole drill so we only
+        need to create it on that node. A drill's bridge shows up in
+        ``/etc/network/interfaces`` on each host; we'd typically manage
+        that via Ansible out of band (see docs/F3-RUNBOOK.md).
+
+        For the scope of F3 we treat the bridge as an IP-binding
+        device the VM's NIC attaches to. The actual ``vmbrN`` creation
+        is operator-supplied (PVE doesn't expose a public endpoint to
+        create vmbrN — it's an /etc/network/interfaces edit + ifreload).
+        So this method asserts the bridge already exists on the target
+        node (calls ``/nodes/{node}/network`` and looks for it). If
+        not found, raises ``ProxmoxAPIError`` so the runner fails
+        loudly — operators see the missing-bridge reason in the
+        run report and remediate before retrying.
+
+        An empty / non-existent / unmanaged PVE install gets a clear
+        'bridge vmbrN not configured' error rather than a 500.
+        """
+        def _do() -> None:
+            client = self._get_client()
+            node_name = self._node or "pve"
+            networks = client.nodes(node_name).network.get()
+            existing = {n["iface"] for n in networks}
+            if spec.bridge not in existing:
+                raise ProxmoxAPIError(
+                    f"bridge {spec.bridge!r} not configured on PVE node "
+                    f"{node_name!r} — operator must add it to "
+                    f"/etc/network/interfaces and run `ifreload -a` "
+                    f"(see docs/F3-RUNBOOK.md §2)"
+                )
+
+        await self._call(_do)
+
+    async def remove_bridge(self, bridge: str) -> None:
+        """No-op for the real PVE; bridge lifecycle is operator-owned.
+
+        The PVE bridge is created via /etc/network/interfaces edits
+        and `ifreload`. The runner can't remove it without sudo on
+        the host, so we deliberately do nothing here. Operators
+        clean up with their Ansible runbook.
+        """
+        return None
+
+    async def attach_network(
+        self, vmid: int, node: str, bridge: str, nic_id: int
+    ) -> None:
+        """Add a NIC attached to ``bridge`` to an existing VM.
+
+        Maps to ``POST /nodes/{n}/qemu/{vmid}/config`` with a
+        ``netN`` property of ``model=virtio,bridge=vmbrN,...``. PVE's
+        ``nic_id`` 0 is ``net0``. We don't overwrite an existing
+        ``netN`` entry — the runner allocates NICs starting at 0
+        sequentially so collisions never happen for a freshly cloned
+        VM.
+        """
+        net_name = f"net{nic_id}"
+
+        def _do() -> None:
+            client = self._get_client()
+            cfg = client.nodes(node).qemu(vmid).config.get()
+            if net_name in cfg:
+                # Already attached; skip. Idempotent on retries.
+                return
+            client.nodes(node).qemu(vmid).config.post(
+                **{net_name: f"virtio,bridge={bridge}"}
+            )
+
+        await self._call(_do)

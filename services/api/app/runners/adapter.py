@@ -18,6 +18,34 @@ from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
+class NetworkSpec:
+    """Inputs to `create_bridge`.
+
+    A bridge is a PVE Linux bridge (vmbrN) that hosts assets on a
+    shared subnet. F3 (multi-VM scenarios) creates one bridge per
+    spec.networks[] entry, then attaches each asset to the bridges
+    that match the assets' spec.networks[] arrays.
+
+    Attributes:
+        bridge: Bridge name on PVE (e.g. ``vmbr42``). Must be unique
+                within the cluster; we'll allocate sequentially.
+        cidr:   CIDR block, as declared in the scenario YAML
+                (informational on real PVE; PVE doesn't strictly
+                enforce the CIDR, but we use it for topology planning
+                and router IP calculation).
+        isolation: 'tight' (no cross-VLAN) or 'loose' (controlled egress).
+        egress: 'blocked' / 'allowed' / 'restricted'.
+        dhcp:   Whether to enable Proxmox-side DHCP for in-network clients.
+    """
+
+    bridge: str
+    cidr: str = ""
+    isolation: str = "tight"
+    egress: str = "blocked"
+    dhcp: bool = True
+
+
+@dataclass(frozen=True)
 class CloneSpec:
     """Inputs to `clone_vm`. All fields are required."""
 
@@ -93,3 +121,38 @@ class ProxmoxAdapter(ABC):
     @abstractmethod
     async def get_vm_state(self, vmid: int, node: str) -> VmState:
         """Return current VM state. Raises KeyError if VM is gone."""
+
+    # --- F3 multi-VM networks ---------------------------------------------
+    #
+    # The runner iterates spec.networks[] once, creates one bridge per
+    # network, and attaches each asset to the bridges that the asset
+    # declares in its ``spec.networks[]`` array. The adapter surface is
+    # intentionally narrow: create_bridge / remove_bridge for the network,
+    # attach_network for the asset side. The mock adapter records every
+    # call so tests can assert exact topology.
+
+    @abstractmethod
+    async def create_bridge(self, spec: NetworkSpec) -> None:
+        """Create (or no-op-on-exists) a Linux bridge on PVE.
+
+        Idempotent: if a bridge with that name already exists, treat
+        the call as a no-op. This is important because the runner may
+        be retried (cancelled + restarted) and we don't want to fail
+        just because the previous teardown didn't fully clean up.
+        """
+
+    @abstractmethod
+    async def remove_bridge(self, bridge: str) -> None:
+        """Delete a bridge created by ``create_bridge``. Idempotent."""
+
+    @abstractmethod
+    async def attach_network(self, vmid: int, node: str, bridge: str, nic_id: int) -> None:
+        """Add a NIC attached to ``bridge`` to an existing VM.
+
+        The runner calls this once per (asset, network) pair, in
+        order, starting from ``nic_id=0`` (next free slot). NIC
+        ordering matters: a router that attaches red_vlan first then
+        blue_vlan is observable in PVE \`qm config\` output and
+        scenarios depend on that ordering to know which interface
+        faces which subnet.
+        """

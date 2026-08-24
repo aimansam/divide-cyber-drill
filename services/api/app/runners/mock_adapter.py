@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .adapter import ClonedVM, CloneSpec, ProxmoxAdapter, VmState
+from .adapter import ClonedVM, CloneSpec, NetworkSpec, ProxmoxAdapter, VmState
 
 
 @dataclass
@@ -29,6 +29,14 @@ class _Vm:
     status: str = "stopped"
     ip: str | None = None
     is_template: bool = False
+    # Ordered list of (nic_id, bridge_name) attached to this VM.
+    # F3 (multi-VM scenarios) populates this; the runner asserts
+    # ordering and count to verify the topology.
+    nics: list[tuple[int, str]] = None  # type: ignore[assignment]
+
+    def __post_init__(self) -> None:
+        if self.nics is None:
+            self.nics = []
 
 
 class MockProxmoxAdapter(ProxmoxAdapter):
@@ -46,6 +54,9 @@ class MockProxmoxAdapter(ProxmoxAdapter):
         self._next_vmid: int = next_vmid
         self._ip_template = ip_template
         self._vms: dict[int, _Vm] = {}
+        # Set of bridge names that have been created (F3). Idempotent on
+        # repeated create_bridge calls.
+        self._bridges: set[str] = set()
         # Seed templates as VM entries so get_vm_state works on them.
         for name, vmid in self._templates.items():
             self._vms[vmid] = _Vm(
@@ -57,6 +68,10 @@ class MockProxmoxAdapter(ProxmoxAdapter):
         self.started: list[tuple[int, str]] = []
         self.stopped: list[tuple[int, str, bool]] = []
         self.destroyed: list[tuple[int, str]] = []
+        # F3 multi-VM scenarios history:
+        self.bridges_created: list[NetworkSpec] = []
+        self.bridges_removed: list[str] = []
+        self.nic_attached: list[tuple[int, str, int]] = []
 
     # --- inventory -------------------------------------------------------
 
@@ -104,6 +119,25 @@ class MockProxmoxAdapter(ProxmoxAdapter):
     async def destroy_vm(self, vmid: int, node: str) -> None:
         self.destroyed.append((vmid, node))
         self._vms.pop(vmid, None)
+
+    # --- F3 multi-VM networks -----------------------------------------
+
+    async def create_bridge(self, spec: NetworkSpec) -> None:
+        """Idempotent: re-creating an existing bridge is a no-op."""
+        self.bridges_created.append(spec)
+        self._bridges.add(spec.bridge)
+
+    async def remove_bridge(self, bridge: str) -> None:
+        """Idempotent: removing a non-existent bridge is a no-op."""
+        self.bridges_removed.append(bridge)
+        self._bridges.discard(bridge)
+
+    async def attach_network(
+        self, vmid: int, node: str, bridge: str, nic_id: int
+    ) -> None:
+        vm = self._require_vm(vmid, node)
+        self.nic_attached.append((vmid, bridge, nic_id))
+        vm.nics.append((nic_id, bridge))
 
     async def get_vm_state(self, vmid: int, node: str) -> VmState:
         vm = self._require_vm(vmid, node)
