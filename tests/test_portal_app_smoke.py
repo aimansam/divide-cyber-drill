@@ -308,3 +308,60 @@ def test_portal_bundle_under_budget_after_f6():
     assert total < 280 * 1024, (
         f"F6 portal bundle grew to {total/1024:.1f} KB; expected <280 KB"
     )
+
+
+# ---------- F7 templates portal pins ----------------------------------
+
+
+def test_app_source_has_templates_card():
+    """F7: the TemplatesCard component exists."""
+    card = SRC_DIR / "components" / "portal" / "templates-card.tsx"
+    assert card.is_file(), "F7 plan: templates-card.tsx must exist"
+    src = card.read_text()
+    assert "export function TemplatesCard" in src
+
+
+def test_templates_card_typed_for_api_payload():
+    card = (SRC_DIR / "components" / "portal" / "templates-card.tsx").read_text()
+    for k in ("id", "name", "title", "from_run_id", "scenario_id"):
+        assert k in card, f"TemplatesCard missing key {k!r}"
+    # Snapshot fields surfaced in the UI
+    assert "snapshot" in card
+    assert "assets" in card and "flags" in card
+
+
+def test_templates_card_uses_api_delete_method():
+    """The delete button calls api.delete."""
+    card = (SRC_DIR / "components" / "portal" / "templates-card.tsx").read_text()
+    assert ".delete(" in card
+
+
+def test_templates_card_has_clone_button():
+    """The card surfaces a clone button per template."""
+    card = (SRC_DIR / "components" / "portal" / "templates-card.tsx").read_text()
+    assert "Clone" in card
+    assert "onClone" in card
+
+
+def test_templates_card_handles_empty_state():
+    card = (SRC_DIR / "components" / "portal" / "templates-card.tsx").read_text()
+    assert "No templates yet" in card
+
+
+def test_api_helper_has_delete_method():
+    """F7 needs delete() on api; this guards against accidental
+    removal in the future."""
+    api_lib = SRC_DIR / "lib" / "api.ts"
+    src = api_lib.read_text()
+    assert "delete:" in src, "api.delete() must exist for F7"
+
+
+def test_portal_bundle_under_budget_after_f7():
+    assets = BUILD_DIR / "assets"
+    if not assets.is_dir():
+        pytest.skip("build/ not present")
+    js_files = [a for a in assets.glob("*.js") if ".map" not in a.name]
+    total = sum(p.stat().st_size for p in js_files)
+    assert total < 280 * 1024, (
+        f"F7 portal bundle grew to {total/1024:.1f} KB; expected <280 KB"
+    )
