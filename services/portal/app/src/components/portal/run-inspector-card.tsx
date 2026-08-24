@@ -18,7 +18,7 @@
  */
 
 import { useEffect, useState } from "react";
-import { Loader2, RefreshCw, Search } from "lucide-react";
+import { Download, Loader2, RefreshCw, Search } from "lucide-react";
 import {
   Card,
   CardContent,
@@ -27,7 +27,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { api, ApiError } from "@/lib/api";
+import { api, ApiError, getToken } from "@/lib/api";
 import type { RunDetail } from "@/components/portal/run-lifecycle-card";
 
 export function RunInspectorCard({
@@ -38,6 +38,48 @@ export function RunInspectorCard({
   const [run, setRun] = useState<RunDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [reportPending, setReportPending] = useState(false);
+
+  /**
+   * Download the after-action JSON report. Fetches
+   * GET /api/v1/drills/{id}/report and triggers a browser
+   * download via a synthetic <a> click. Falls back to a
+   * clipboard copy if the browser blocks programmatic downloads
+   * (e.g. some embedded webview contexts).
+   *
+   * Read-only — never mutates server state. Failures surface
+   * inline; we don't refetch the inspector.
+   */
+  async function downloadReport() {
+    if (pickedRunId === null) return;
+    setReportPending(true);
+    try {
+      const tok = getToken();
+      const headers = new Headers();
+      if (tok) headers.set("X-Divide-Token", tok);
+      const r = await fetch(`/api/v1/drills/${pickedRunId}/report`, {
+        headers,
+      });
+      if (!r.ok) {
+        throw new Error(`HTTP ${r.status} ${r.statusText}`);
+      }
+      const blob = await r.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `drill-${pickedRunId}-report.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      // Schedule URL cleanup after the browser has consumed it.
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setError(`report download failed: ${msg}`);
+    } finally {
+      setReportPending(false);
+    }
+  }
 
   async function load() {
     if (pickedRunId === null) {
@@ -152,6 +194,28 @@ export function RunInspectorCard({
                 : ""}
             </dd>
           </dl>
+        )}
+
+        {/* Footer actions (L2 2.12). Terminal runs have an
+            after-action JSON report; let the operator download it
+            from the inspector. */}
+        {!error && run !== null && run.status !== "running" && run.status !== "pending" && (
+          <div className="mt-4 flex justify-end border-t pt-3">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={downloadReport}
+              disabled={reportPending}
+              aria-label="Download report JSON"
+            >
+              {reportPending ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Download className="mr-2 h-4 w-4" />
+              )}
+              Download report (JSON)
+            </Button>
+          </div>
         )}
       </CardContent>
     </Card>

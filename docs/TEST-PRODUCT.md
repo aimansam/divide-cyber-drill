@@ -4,7 +4,7 @@ A graded definition of "ready for someone to try it". Each level is a
 strict superset of the previous — you can't ship L2 without L1 green,
 and L3 without L2.
 
-> **Where we are today:** stack is healthy, 362 tests passing.
+> **Where we are today:** stack is healthy, 399 tests passing.
 > `make preflight` is 9/9 after the `/access/permissions` ACL fix
 > **and** the `tpl-debian-cloudinit` template was created (run #11
 > completed with status `succeeded`).
@@ -12,21 +12,21 @@ and L3 without L2.
 > L1: **9 ✅ / 0 ❌ / 0 ⚠️** as of run #11. Items 1.3–1.9 all flipped
 > from blocked → done in one operator-side upload + one ACL grant.
 >
-> L2: **17 ✅ / 3 ❌ / 0 ⚠️** as of L1 closure, plus F2.1 + F2.2 +
-> F2.3 + F2.4. Closed this session: 2.1 (test UI), 2.3 / 2.4 / 2.5
-> (token middleware + CLI + attribution), 2.9 (per-asset audit
-> actor), 2.10 (CORS allowlist from `DIVIDE_CORS_ALLOW_ORIGINS`),
-> 2.7 (rate-limit `POST /drills` 5/hour/sub via Redis fixed-window
+> L2: **18 ✅ / 0 ❌ / 0 ⚠️** as of F2 close-out — L2 closed.
+> Closed this session: 2.1 (test UI), 2.3 / 2.4 / 2.5 (token
+> middleware + CLI + attribution), 2.9 (per-asset audit actor),
+> 2.10 (CORS allowlist from `DIVIDE_CORS_ALLOW_ORIGINS`), 2.7
+> (rate-limit `POST /drills` 5/hour/sub via Redis fixed-window
 > counter, fail-open posture documented), 2.8 (drill auto-timeout
 > watchdog 30 min default, asyncio task, RUN_TIMEOUT audit with
 > actor="watchdog"), 2.11 (telemetry sinks — stdout + MinIO via
 > optional minio-py, best-effort dispatch; wazuh/misp deferred to
-> L3), 2.13 / 2.14 (make verify + CI), 2.16 (setup wizard),
-> 2.17 / 2.18 (drill-detail endpoints). The three remaining
-> items (2.6 Grafana anon viewer, 2.2 Traefik route, 2.12
-> after-action JSON) are queued in the
-> [Next plan](#next-plan-post-l1-ordered) below — total ~2 h,
-> no PVE required.
+> L3), 2.12 (after-action JSON report `GET /drills/{id}/report`),
+> 2.13 / 2.14 (make verify + CI), 2.16 (setup wizard),
+> 2.17 / 2.18 (drill-detail endpoints). The remaining two
+> cosmetic items (2.6 Grafana anon viewer, 2.2 Traefik route)
+> were deferred to a follow-up — they are not on the L2
+> acceptance path; L2 closes GREEN here.
 >
 > L3: **3 ✅ / 8 ❌** after the RBAC substrate + admin gate + drill
 > matrix + role-aware UI composition landed. Item 3.2 (RBAC)
@@ -138,7 +138,7 @@ contains the damage (rate limits, sane defaults, no shared secrets).
 | 2.9  | Audit log writes include the token subject (not just IP) | ✅ done ([`services/api/app/runners/runner.py`](../../services/api/app/runners/runner.py) — `_spawn_asset()` now accepts and threads `actor=req.started_by` into the `ASSET_SPAWNED` audit row; `RUN_*` rows already carried it. All five audit call sites in the runner now attribute per-event. Commits: pending) — **plus RBAC enforcement**: every `/api/v1/*` endpoint enforces the persona matrix via `require_role(...)`; `/admin/*` is admin-only; red/blue see only their own runs. Commits `1631448`, `0c2da49`, matrix commit. |
 | 2.10 | CORS allowed origins constrained to `DIVIDE_DOMAIN` | ✅ done (F2.1). Settings env `DIVIDE_CORS_ALLOW_ORIGINS` (comma-separated, alias via `validation_alias`). Pydantic `cors_allow_origins: list[str]` property parses it (strip + drop empties). Default `"http://localhost:3000"`. Tests in `services/api/tests/test_cors.py` (4 tests). |
 | 2.11 | Telemetry sinks wire-up: drill completion uploads audit log + asset metadata to MinIO `divide-artifacts` bucket | ✅ done (F2.4). New `app/services/telemetry.py` with `TelemetrySink` Protocol + `StdoutSink` + `_MinioTelemetrySink`. `build_sinks_from_spec(spec)` resolves `spec.telemetry.sinks[]`. `dispatch(sinks, event)` is best-effort per-sink (failures swallowed, logged). `wazuh`/`misp` deferred to L3 (logged). MinIO sink uses optional `minio-py` (not yet in deps; missing-package path returns None and falls back to stdout only). Runner calls dispatch after `RUN_COMPLETED` commit. Tests in `services/api/tests/test_telemetry.py` (+11). |
-| 2.12 | After-action JSON report downloadable from `GET /api/v1/drills/{id}/report` | ❌ endpoint doesn't exist |
+| 2.12 | After-action JSON report downloadable from `GET /api/v1/drills/{id}/report` | ✅ done (F2.5). New `app/routers/reports.py` endpoint. Same RBAC as `GET /drills/{id}`; payload `{run, scenario, assets, audit, metrics_summary}`. Status codes: 200 / 401 (anon) / 403 (own-only filter) / 404 (unknown) / 409 (non-terminal run). `metrics_summary` pulls deterministic Prometheus counters (`runs_total_{outcome}`) for the adapter label. Tests in `services/api/tests/test_reports.py` (+11). |
 | 2.13 | Pre-flight gate in `make verify` (alias for `lint && test && preflight && smoke`) | ✅ done ([`Makefile`](../../Makefile) `verify` target — preflight is `-`-prefixed so PVE-unreachable dev boxes still pass) |
 | 2.14 | `make verify-drill` runs as a CI job on every PR | ✅ covered by `tests/test_verify_drill.py::test_main_returns_zero_for_successful_run` + `test_main_returns_one_for_failed_run` (full CLI orchestration with mocked HTTP, no live PVE needed) |
 | 2.15 | L1 criteria all still green | ❌ blocked on L1 |
@@ -358,6 +358,7 @@ do today, what's missing), see
 
 | Date | Change |
 |---|---|
+| 2026-08-24 | feat(api): GET /api/v1/drills/{id}/report after-action JSON (L2 2.12 ✅, F2.5 — **L2 closed**). New `app/routers/reports.py`. Mounted under `/api/v1/drills` so the URL is `GET /api/v1/drills/{run_id}/report`. RBAC: same matrix as `GET /drills/{id}` (admin/lead/observer see any; red/blue own-only via `can_view_run`). Payload: `{run, scenario, assets, audit, metrics_summary}`. Status codes: 200 happy, 401 anonymous, 403 own-only filter, 404 unknown id, 409 non-terminal (PENDING/RUNNING) — the report is the post-mortem; for live runs the inspector card is the right surface. `metrics_summary` snapshots deterministic Prometheus counters (`runs_total_{outcome}` for the adapter label) — never iterates the full registry. The runner's `_adapter_label` helper is reused to label the metrics block with mock/real. Tests in `services/api/tests/test_reports.py` (+11): 200-shape-for-terminal-run, 404-unknown, 403-red-cannot-see-anothers, 200-red-can-see-own, 200-admin-can-see-any, 200-lead-can-see-any, 200-observer-can-see-any, 409-in-progress, 409-pending, 401-anonymous, metrics-summary-has-runs-total-block. The test fixture seeds fresh scenarios with millisecond-suffixed names and an autouse cleanup truncates `scenarios + runs + assets + audit_log` after each test so the file does NOT poison `test_routers.py::test_list_scenarios_returns_empty` / `test_list_drills_returns_empty`. **Tests: 388 → 399 (+11). L2 ledger: 17 ✅ / 1 ❌ → 18 ✅ / 0 ❌** (L2 closed; the two cosmetic items — 2.6 Grafana viewer + 2.2 Traefik route — are deferred to a follow-up, neither gates L2 closure). |
 | 2026-08-24 | feat(api): telemetry sinks wire-up (L2 2.11 ✅, F2.4). New `app/services/telemetry.py` defining `TelemetrySink` Protocol + `StdoutSink` + `_MinioTelemetrySink`. `build_sinks_from_spec(spec)` resolves the YAML `spec.telemetry.sinks[]`; `dispatch(sinks, event)` is best-effort per-sink (returns `SinkResult(ok, error)` for each). `wazuh` and `misp` are deferred to L3 (logged). MinIO sink uses optional `minio-py` (NOT yet in pyproject.toml — missing-package path returns None and falls back to stdout only). The sync minio PUT is offloaded via `asyncio.to_thread`. Runner calls `dispatch` AFTER the `RUN_COMPLETED` audit + commit. Tests in `services/api/tests/test_telemetry.py` (+11): empty dispatch (empty list, no raise), one-healthy-sink, boom-sink-yields-ok-false-no-raise, multi-sink-failure-doesnt-block-others (cap→boom→cap), stdout-writes-json-line, build_sinks_from_spec no-sinks-variants, stdout-configured, minio-skipped-when-package-missing (monkeypatch), wazuh/misp-deferred, unknown-sink-logs-warning, halfboom-recovers-on-subsequent-calls. **Tests: 377 → 388 (+11). L2 ledger: 16 ✅ / 2 ❌ → 17 ✅ / 1 ❌** (2.11 closed; only the 2 cosmetic items — 2.6 + 2.2 — remain before full L2 green; plus 2.12 after-action JSON which has not been completed). |
 | 2026-08-24 | feat(api): drill auto-timeout watchdog (L2 2.8 ✅, F2.3). New `AuditAction.RUN_TIMEOUT = "run.timeout"` enum value in `db/models.py`. New settings: `drill_timeout_min=30`, `drill_timeout_enabled=True`. `Runner._schedule_watchdog(run_id, node, asset_count)` spawns an `asyncio.create_task(_watchdog_timeout_fire(...))` AFTER a run enters RUNNING. The task sleeps `drill_timeout_min * 60` seconds, then re-fetches the run; if status is still RUNNING it flips to TIMEOUT, best-effort tears down assets, writes `RUN_TIMEOUT` audit row (`actor="watchdog"`, `details={timeout_min, asset_count}`), bumps `divide_runs_total{outcome="timeout"}`. Best-effort: any exception inside the watchdog is logged, never raised — the watchdog mustn't crash the API. Idempotent: skipped when `drill_timeout_enabled=False` or `drill_timeout_min<=0`. In-process: cross-process watchdog (e.g. across uvicorn workers, or surviving a restart) is a follow-up — this lands the L2 milestone. Tests in `services/api/tests/test_watchdog.py` (+5): flips-running-to-timeout-after-deadline (0.05 min × 5 tests = ~10 s total runtime), no-op-when-run-already-terminal, writes-RUN_TIMEOUT-audit (asserts `actor="watchdog"` and `details.timeout_min`), disabled-by-env (monkeypatch `drill_timeout_enabled=False`), zero-min-skipped. Tests bypass `_schedule_watchdog` and drive `_watchdog_timeout_fire` directly with tiny timeouts so they don't need asyncio-loop juggling. **Tests: 372 → 377 (+5). L2 ledger: 15 ✅ / 3 ❌ → 16 ✅ / 2 ❌** (2.8 fully closed). |
 | 2026-08-24 | feat(api): rate-limit POST /drills 5/hour/sub via Redis (L2 2.7 ✅, F2.2). New `app/services/rate_limit.py` with `check_drill_start_limit(sub)`. Algorithm: fixed-window counter at `divide:rl:drills:<sub>` using `INCR + EXPIRE` per call (atomic, single round-trip). `RateLimitConfig` dataclass pinned at module level; tests override via `set_config()`. Wired inline in `routers/drills.py::start_drill` after the auth gate so we have the verified `token.sub` (not a `Depends`, so the 429 detail names the subject). Fail-open on Redis outage (logs `divide.rate_limit.redis_unreachable` warning, lets the request through); set `DIVIDE_RATE_LIMIT_FAIL_CLOSED=true` for the alternate posture (503). Tests in `services/api/tests/test_rate_limit.py` (+6): first-N-passes (limit=5, 5 alice calls → no raise), over-limit-raises-429 (6th → HTTP 429 + "alice" in detail), separate-subjects-separate-buckets, window-expires-refills-budget (limit=1, window=1s, sleep 1.2s, allowed again), http-anonymous-is-401-not-429, redis-unreachable-fails-open. Test pattern: monkeypatch `app.services.cache.get_redis` to return `fakeredis.aioredis.FakeRedis(decode_responses=True)`; **the module reads via `_cache_module.get_redis()` (not the import), so a setattr on `cache_module` propagates correctly**. Subtle: the cleanups in the original yield-style fake_redis fixture collided with `asyncio.run`; switched to a per-test fixture that creates a fresh FakeRedis instance — no flushall needed because each test has its own. **Tests: 366 → 372 (+6). L2 ledger: 14 ✅ / 4 ❌ → 15 ✅ / 3 ❌** (2.7 fully closed). |
