@@ -45,8 +45,20 @@ interface LeaderboardPayload {
 
 export function LeaderboardCard({
   exerciseId,
+  pollIntervalMs = 0,
 }: {
   exerciseId: number | null;
+  /**
+   * Polling interval in milliseconds. ``0`` (the default) means
+   * fetch-once-on-mount, which is the right behavior for the
+   * Admin tab (the operator manually refreshes when they care).
+   *
+   * F9.2: the DrillConsole embed mode passes ``5000`` so the
+   * leaderboard ticks live alongside the SOC stream. The
+   * existing single-fetch path stays untouched; F9.2 only adds
+   * the optional interval.
+   */
+  pollIntervalMs?: number;
 }) {
   const [data, setData] = useState<LeaderboardPayload | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -59,17 +71,18 @@ export function LeaderboardCard({
       return;
     }
     let cancelled = false;
-    setLoading(true);
-    api
-      .get<LeaderboardPayload>(
-        `/api/v1/exercises/${exerciseId}/leaderboard`,
-      )
-      .then((r) => {
+    let timer: ReturnType<typeof setInterval> | null = null;
+
+    async function fetchOnce() {
+      setLoading(true);
+      try {
+        const r = await api.get<LeaderboardPayload>(
+          `/api/v1/exercises/${exerciseId}/leaderboard`,
+        );
         if (cancelled) return;
         setData(r);
         setError(null);
-      })
-      .catch((e: unknown) => {
+      } catch (e: unknown) {
         if (cancelled) return;
         const msg =
           e instanceof ApiError
@@ -77,14 +90,27 @@ export function LeaderboardCard({
             : String(e);
         setError(msg);
         setData(null);
-      })
-      .finally(() => {
+      } finally {
         if (!cancelled) setLoading(false);
-      });
+      }
+    }
+
+    void fetchOnce();
+
+    // F9.2: poll-mode. Off (pollIntervalMs <= 0) preserves the
+    // pre-F9.2 fetch-once-on-mount behavior for callers that
+    // don't pass a positive interval (i.e., the Admin tab).
+    if (pollIntervalMs > 0) {
+      timer = setInterval(() => {
+        void fetchOnce();
+      }, pollIntervalMs);
+    }
+
     return () => {
       cancelled = true;
+      if (timer !== null) clearInterval(timer);
     };
-  }, [exerciseId]);
+  }, [exerciseId, pollIntervalMs]);
 
   if (exerciseId === null) {
     return null;

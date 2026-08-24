@@ -305,7 +305,13 @@ export function DrillConsole({ pickedRunId, scenarioName }: DrillConsoleProps) {
             <h3 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
               Leaderboard
             </h3>
-            <LeaderboardCard exerciseId={run.exercise_id} />
+            {/* F9.2: poll-mode (5s) so the leaderboard ticks live
+                alongside the SOC stream. The Admin tab keeps the
+                fetch-once-on-mount default (pollIntervalMs=0). */}
+            <LeaderboardCard
+              exerciseId={run.exercise_id}
+              pollIntervalMs={5000}
+            />
           </section>
           <section aria-label="Live SOC" data-testid="drill-soc">
             <h3 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">

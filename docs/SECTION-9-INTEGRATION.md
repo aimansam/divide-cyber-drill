@@ -1,9 +1,11 @@
 # Section 9 — DrillConsole Consolidation (F9.1)
 
-> **Status:** F9.1 shipped. The Observe tab is now the single
+> **Status:** F9.1 + F9.2 shipped. The Observe tab is the single
 > live-drill screen: status / topology / assets / console / audit
-> feed / leaderboard / live SOC stream — no more tab flipping during
-> a multi-team drill.
+> feed / leaderboard / live SOC stream — no more tab flipping
+> during a multi-team drill. F9.2 added 5s leaderboard polling
+> for embed mode. F9.3 lands the keyboard shortcuts + bundle
+> budget test.
 
 ## What F9.1 changes
 
@@ -127,22 +129,22 @@ Total tests after F9.1: **864** (was 859 + 5 new).
 |---|---|---|
 | Pre-F9.1 (post-§15 closure) | 246.45 KB | 33.55 KB |
 | F9.1 | 260.55 KB | 19.45 KB |
+| F9.2 | 260.68 KB | 19.32 KB |
 
 F9.1 added ~14 KB (the LeaderboardCard + SocViewCard imports
-inside DrillConsole's already-loaded module graph). Subsequent
-milestones (F9.2 polling tweaks, F9.3 docs) are net-zero on the
-bundle.
+inside DrillConsole's already-loaded module graph). F9.2 added
+~130 bytes (the polling interval logic). F9.3 is net-zero on the
+bundle (keyboard shortcuts + bundle-budget test).
 
-## What's deferred to F9.2 / F9.3
+## What's deferred to F9.3
 
-  * **F9.2** — explicit `pollIntervalMs` prop on
-    `LeaderboardCard` so embedded mode can use 5s polling (vs the
-    default 10s used on the Admin tab).
   * **F9.3** — keyboard shortcut to focus the Leaderboard /
-    SOC sections in DrillConsole; sidebar nav anchor.
+    SOC sections in DrillConsole; sidebar nav anchor;
+    `make verify-bundle` target that fails the build if the
+    portal bundle exceeds the 280 KB budget.
 
 These are UX polish; the live-drill single-screen property is
-already in place after F9.1.
+already in place after F9.1 + F9.2.
 
 ## Migration / rollout
 
