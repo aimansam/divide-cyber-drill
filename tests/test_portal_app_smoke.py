@@ -176,3 +176,88 @@ def test_portal_app_does_not_serve_source_tree_index_html(client: TestClient):
         "/portal/app/ is serving the source-tree HTML. main.py is "
         "mounting the source dir, not services/portal/app/build/"
     )
+
+# ---------- F4 noVNC console portal pins --------------------------------
+
+
+def test_app_source_has_console_card():
+    """The F4 ConsoleCard component exists and is exported."""
+    console_card = SRC_DIR / "components" / "portal" / "console-card.tsx"
+    assert console_card.is_file(), (
+        "F4 plan: console-card.tsx must exist"
+    )
+    src = console_card.read_text()
+    assert "export function ConsoleCard" in src
+
+
+def test_console_card_imports_runtime_dependencies():
+    """The card uses canvas, WebSocket, and the toast helper."""
+    src = (SRC_DIR / "components" / "portal" / "console-card.tsx").read_text()
+    assert "useToasts" in src
+    assert "WebSocket" in src
+    assert "canvas" in src.lower()
+
+
+def test_console_card_handles_no_token_path():
+    """When the token is missing, the card surfaces a clear error."""
+    src = (SRC_DIR / "components" / "portal" / "console-card.tsx").read_text()
+    assert "no token" in src.lower()
+    # We never assume the token is present.
+    assert "getToken()" in src
+
+
+def test_console_card_hits_the_console_endpoint():
+    """The card reads the ticket from the F4 API contract."""
+    src = (SRC_DIR / "components" / "portal" / "console-card.tsx").read_text()
+    assert "/assets/${pickedAsset.asset_id}/console" in src or (
+        "/assets/" in src and "/console" in src
+    ), "ConsoleCard must hit the F4 console endpoint"
+
+
+def test_drill_console_routes_console_open_events():
+    """DrillConsole passes an onOpenConsole handler to AssetsCard and
+    renders ConsoleCard when an asset is picked."""
+    drill = (SRC_DIR / "components" / "portal" / "drill-console.tsx").read_text()
+    assert "ConsoleCard" in drill
+    assert "pickedAsset" in drill
+    assert "onOpenConsole" in drill
+
+
+def test_assets_card_has_terminal_button_for_running_vms():
+    """Open console button only shows for running assets (so we have
+    a vmid + PVE ticket)."""
+    src = (SRC_DIR / "components" / "portal" / "assets-card.tsx").read_text()
+    assert 'onOpenConsole' in src
+    assert 'Terminal' in src, (
+        "AssetsCard must import Terminal from lucide-react for the "
+        "console button"
+    )
+    # The button is conditional on running status — important since
+    # only running VMs can have VNC tickets.
+    assert "pve_vmid" in src and "running" in src
+
+
+def test_portal_bundle_under_budget_after_f4():
+    """F4 adds the console WS client + helper code; bundle must
+    stay under the 280 KB budget. We pin this every plan that
+    touches the portal."""
+    assets = BUILD_DIR / "assets"
+    if not assets.is_dir():
+        pytest.skip("build/ not present")
+    js_files = [a for a in assets.glob("*.js") if ".map" not in a.name]
+    total = sum(p.stat().st_size for p in js_files)
+    assert total < 280 * 1024, (
+        f"F4 portal bundle grew to {total/1024:.1f} KB; "
+        "expected <280 KB"
+    )
+
+
+def test_console_card_typed_for_run_and_asset():
+    """The ConsoleCard props mirror the F4 API contract: pickedRunId
+    + pickedAsset of {asset_id, role?}. Pin the shape so a future
+    refactor of AssetRef doesn't silently break RunInspector."""
+    src = (SRC_DIR / "components" / "portal" / "console-card.tsx").read_text()
+    assert "interface AssetRef" in src
+    assert "asset_id: number" in src
+    assert "role?: string" in src
+    assert "ConsoleTicket" in src

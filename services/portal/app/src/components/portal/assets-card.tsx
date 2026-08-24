@@ -19,7 +19,7 @@
  */
 
 import { useEffect, useState } from "react";
-import { Clipboard, ClipboardCheck, Server } from "lucide-react";
+import { Clipboard, ClipboardCheck, Server, Terminal } from "lucide-react";
 import {
   Card,
   CardContent,
@@ -38,7 +38,20 @@ interface RunPayload {
   assets?: RunAsset[];
 }
 
-export function AssetsCard({ pickedRunId, compact = false }: { pickedRunId: number | null; compact?: boolean }) {
+export function AssetsCard({
+  pickedRunId,
+  compact = false,
+  onOpenConsole,
+}: {
+  pickedRunId: number | null;
+  compact?: boolean;
+  /**
+   * F4 noVNC: called when the user clicks the "Console" button
+   * for an asset. The parent (DrillConsole / RunInspectorCard)
+   * opens the ConsoleCard modal with the asset's run + id.
+   */
+  onOpenConsole?: (asset: RunAsset) => void;
+}) {
   const [assets, setAssets] = useState<RunAsset[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -165,6 +178,22 @@ export function AssetsCard({ pickedRunId, compact = false }: { pickedRunId: numb
                   <span className="font-mono text-xs text-muted-foreground">
                     {a.status ?? "?"}
                   </span>
+                  {/* F4: open noVNC console (only when the asset
+                      has been cloned + is running, so we have
+                      a vmid + node). */}
+                  {onOpenConsole &&
+                  a.pve_vmid !== null &&
+                  a.pve_vmid !== undefined &&
+                  a.status === "running" ? (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      aria-label="open console"
+                      onClick={() => onOpenConsole(a)}
+                    >
+                      <Terminal className="h-4 w-4" />
+                    </Button>
+                  ) : null}
                   <Button
                     variant="ghost"
                     size="icon"
