@@ -321,3 +321,128 @@ def test_issue_token_cli_rejects_garbage_ttl():
         capture_output=True, text=True, env=env, cwd=".", check=False,
     )
     assert r.returncode != 0
+
+
+# ---------- require_role() substrate (L2 2.9) -----------------------------
+
+
+def test_role_enum_has_expected_wire_values():
+    """Guard the wire format. Changing any of these strings is a
+    breaking change for every existing token, the ``tools/issue_token.py``
+    CLI, the user-portal React ``role`` filter, and the audit log
+    rows. Add new roles at the END of the enum; don't reorder.
+    """
+    from app.core.auth import Role
+
+    assert {r.value for r in Role} == {
+        "admin",
+        "lead",
+        "red",
+        "blue",
+        "observer",
+    }
+
+
+def _role_app():
+    """Build a minimal FastAPI app that mounts three endpoints,
+    each gated by a different require_role() allow-list. The tests
+    below use this to assert both the happy and unhappy paths.
+    """
+    from app.core.auth import Role, require_role
+
+    from fastapi import FastAPI
+
+    app = FastAPI()
+
+    @app.get("/admin-only", dependencies=[Depends(require_role(Role.ADMIN))])
+    async def admin_only():
+        return {"ok": True}
+
+    @app.get(
+        "/lead-or-admin",
+        dependencies=[Depends(require_role(Role.LEAD, Role.ADMIN))],
+    )
+    async def lead_or_admin():
+        return {"ok": True}
+
+    return app
+
+
+def test_require_role_allows_listed_role():
+    from app.core.auth import Role, sign_token
+
+    app = _role_app()
+    client = TestClient(app)
+    tok = sign_token("alice", Role.ADMIN.value, 3600)
+    r = client.get("/admin-only", headers={"X-Divide-Token": tok})
+    assert r.status_code == 200
+    assert r.json() == {"ok": True}
+
+
+def test_require_role_rejects_other_role_with_403():
+    from app.core.auth import Role, sign_token
+
+    app = _role_app()
+    client = TestClient(app)
+    tok = sign_token("mallory", Role.RED.value, 3600)
+    r = client.get("/admin-only", headers={"X-Divide-Token": tok})
+    assert r.status_code == 403
+    # Detail should name both the rejected role and the allow-list so
+    # the developer hitting the 403 from curl can see why.
+    body = r.json()
+    assert "'red'" in body["detail"]
+    assert "'admin'" in body["detail"]
+
+
+def test_require_role_returns_401_when_no_token():
+    from app.core.auth import Role
+
+    app = _role_app()
+    client = TestClient(app)
+    r = client.get("/admin-only")
+    assert r.status_code == 401
+    assert "WWW-Authenticate" in r.headers
+
+
+def test_require_role_multi_role_accepts_any_listed():
+    """The same ``require_role(LEAD, ADMIN)`` gate should accept a
+    LEAD token as readily as an ADMIN token. Catches accidental
+    "first wins" logic in the factory.
+    """
+    from app.core.auth import Role, sign_token
+
+    app = _role_app()
+    client = TestClient(app)
+    for role in (Role.LEAD, Role.ADMIN):
+        tok = sign_token("bob", role.value, 3600)
+        r = client.get("/lead-or-admin", headers={"X-Divide-Token": tok})
+        assert r.status_code == 200, f"{role.value} should be allowed"
+
+
+def test_require_role_rejects_unknown_role_string():
+    """A token carrying a role that isn't in :class:`Role` (e.g. an
+    old token issued with ``--role trainee`` before the enum was
+    tightened) must be rejected. Unknown role ≠ any of the listed
+    values, so 403 is the right answer.
+    """
+    from app.core.auth import Role, sign_token
+
+    app = _role_app()
+    client = TestClient(app)
+    tok = sign_token("legacy", "trainee", 3600)  # role no longer exists
+    r = client.get("/admin-only", headers={"X-Divide-Token": tok})
+    assert r.status_code == 403
+
+
+def test_require_role_factory_rejects_empty_allow_list():
+    """``require_role()`` with no args is a footgun: it would match
+    nothing. The factory should refuse to build such a dependency
+    at registration time rather than silently producing a 403-only
+    gate.
+    """
+    import pytest
+
+    from app.core.auth import require_role
+
+    with pytest.raises(ValueError, match="at least one Role"):
+        require_role()

@@ -8,28 +8,47 @@ Payload (JSON, base64url-decoded)::
 
     {
       "sub": "alice",            # subject (user id)
-      "role": "trainee",         # role string (free-form for L1; gate later)
+      "role": "admin",           # role string (one of the Role enum values;
+                                 # see app.core.auth.Role below)
       "iat": 1755000000,         # issued-at (unix seconds)
       "exp": 1755086400          # expires-at (unix seconds)
     }
 
 Why HMAC over a full JWT lib: zero deps, small surface, easy to
 test. A real lib (PyJWT, authlib) would add a dependency for very
-little benefit at this scale -- the audience here is one LAN, two
-roles, no third-party identity provider.
+little benefit at this scale -- the audience here is one LAN, five
+roles (see :class:`Role`), no third-party identity provider.
 
 Header convention: ``X-Divide-Token: <token>`` on every request that
-wants to identify a user. Absence of the header means "anonymous"
-(allowed on L1 for the wizard + admin endpoints; required on /drills
-+ /scenarios in the future).
+wants to identify a user. Absence of the header means "anonymous".
+Whether anonymous is allowed depends on the endpoint:
+
+  * :func:`current_token` — passive; returns ``None`` when the header
+    is missing. Use this in handlers that want to attribute audit /
+    rate-limit rows but don't want to reject anonymous calls.
+  * :func:`require_token` — active; returns ``HTTP 401`` when the
+    header is missing. Use this as a hard gate on routes that
+    require any identified caller.
+  * :func:`require_role` — active; returns ``HTTP 401`` (no token)
+    or ``HTTP 403`` (token role not in the allow-list). Use this on
+    routes that require a *specific persona* (admin / lead / red /
+    blue / observer).
+
+The role taxonomy lives in :class:`Role`. ``tools/issue_token.py``
+restricts ``--role`` to these values. Adding a new role is a
+two-place change: append to :class:`Role` and update
+``USER-REQUIREMENTS.md`` §2's permission matrix.
 
 What auth does NOT do:
-  * Enforce role-based access. L2.3-2.9 are about having the wiring
-    so future L2 work can layer on RBAC. Today any valid token is
-    treated as "identified user".
-  * Track revocation. Tokens are valid until ``exp``. For L2 we'd add
-    a token-bucket rejected list keyed by ``sub``.
+  * Track revocation. Tokens are valid until ``exp``. Future L2 work
+    would add a token-bucket rejected list keyed by ``sub``.
   * Validate against an IdP. Self-signed is fine for LAN.
+  * Gate ``/api/v1/proxmox/*``. Those endpoints remain anonymous on
+    purpose in L2 (the setup wizard's step 1 hits ``/proxmox/health``
+    from the operator's browser before any token is in scope). M5
+    in the post-L1 plan owns the full ``/proxmox/*`` hardening pass;
+    until then the router documents this with a one-line comment
+    on each proxmox endpoint.
 """
 from __future__ import annotations
 
@@ -39,11 +58,40 @@ import hmac
 import json
 import time
 from dataclasses import dataclass
-from typing import Annotated
+from enum import Enum
+from typing import Annotated, Callable
 
 from fastapi import Depends, Header, HTTPException, Request, status
 
 from app.core.config import settings
+
+
+class Role(str, Enum):
+    """The five persona roles on the div:ide control plane.
+
+    The string values are the wire format — they appear in token
+    payloads, in ``X-Divide-Token`` claim, in audit rows, and in
+    ``tools/issue_token.py --role``. Changing a value here is a
+    breaking change for every existing token. Add new values at
+    the end; don't reorder.
+
+    Mapping to the USER-REQUIREMENTS.md persona matrix:
+      * ADMIN     — Platform Admin (operator + full powers)
+      * LEAD      — Drill Lead (instructor, run lifecycle owner)
+      * RED       — Red Team participant (offensive side)
+      * BLUE      — Blue Team participant (defensive side)
+      * OBSERVER  — Read-only (watching but not acting)
+
+    The wizard's PVE-side ACL role (``PVEDatastoreAdmin``) is a
+    different concept — it's a Proxmox-side RBAC string, not a
+    div:ide role. Don't conflate them.
+    """
+
+    ADMIN = "admin"
+    LEAD = "lead"
+    RED = "red"
+    BLUE = "blue"
+    OBSERVER = "observer"
 
 # Per-process fallback secret cache (used when neither divide_token_secret
 # nor proxmox.token_secret is configured). Cached so sign_token and
@@ -273,3 +321,52 @@ async def require_token(
             headers={"WWW-Authenticate": "Bearer"},
         )
     return token
+
+
+def require_role(*allowed: Role) -> Callable:
+    """Build a FastAPI dependency that gates a route on token role.
+
+    Use as ``token=Depends(require_role(Role.ADMIN, Role.LEAD))``.
+    Composes with :func:`require_token` (i.e. a missing header is a
+    401, not a 403). The 401 / 403 split lets the wizard + curl
+    scripts distinguish "I forgot to attach the token" from "I am
+    not authorized for this endpoint", which is the difference
+    between a config bug and an attempted privilege escalation.
+
+    On 403 the response detail names both the caller's role and
+    the allow-list. That's intentional: it's friendlier than a bare
+    "Forbidden" in dev, and it doesn't leak anything the caller
+    couldn't read from the source. In production behind a reverse
+    proxy that scrubs error bodies you'd want to soften this, but
+    we don't ship behind one today.
+
+    Edge cases handled:
+      * No ``allowed`` args → the dependency rejects every
+        authenticated call (defensive default; same effect as
+        not registering the route at all).
+      * Unknown role string in the token (e.g. an old token issued
+        before :class:`Role` was tightened) → 403, because it
+        won't match any string in ``allowed_set``.
+    """
+    if not allowed:
+        # Defensive: callers should always pass at least one role.
+        # Failing closed prevents accidental "matches nothing".
+        raise ValueError("require_role() needs at least one Role")
+
+    allowed_set = frozenset(r.value for r in allowed)
+
+    async def _dep(
+        token: Annotated[TokenData, Depends(require_token)],
+    ) -> TokenData:
+        if token.role not in allowed_set:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=(
+                    f"role={token.role!r} not in "
+                    f"{sorted(allowed_set)}; this endpoint requires one of: "
+                    + ", ".join(sorted(allowed_set))
+                ),
+            )
+        return token
+
+    return _dep
