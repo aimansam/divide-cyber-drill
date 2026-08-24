@@ -479,6 +479,11 @@ async def get_drill(
     return {
         "run_id": run.id,
         "scenario_id": run.scenario_id,
+        # F9.1: expose exercise_id so the portal DrillConsole can
+        # decide whether to render the multi-team panels (leaderboard
+        # + live SOC stream) inline. Legacy single-team Runs have
+        # exercise_id === null.
+        "exercise_id": run.exercise_id,
         "status": run.status.value,
         "started_at": run.started_at.isoformat() if run.started_at else None,
         "ended_at": run.ended_at.isoformat() if run.ended_at else None,

@@ -11,6 +11,10 @@
  *   * Asset table with live IPs (delegates to AssetsCard)
  *   * Audit feed (delegates to AuditExplorerCard)
  *   * Prominent download-report button when terminal
+ *   * F9.1: when the Run belongs to an Exercise (multi-team),
+ *     the leaderboard + live SOC stream render inline below the
+ *     audit feed. Single-team Runs hide these sections; the
+ *     Admin tab still surfaces the leaderboard in that flow.
  *
  * Polling: while RUNNING, every 2s. Otherwise every 5s for
  * post-terminal detail refreshes. The pulse dot stops when the
@@ -20,7 +24,9 @@
  * Observe tab: when a drill is live the operator needs ONE place
  * to look. Scrolling past MyRuns to find RunInspector costs
  * attention; the console puts everything for the active run on
- * one screen.
+ * one screen. F9 extends that one-screen property to multi-team
+ * drills so the operator never has to flip tabs to check the
+ * leaderboard or the SOC stream.
  */
 
 import { useEffect, useState } from "react";
@@ -33,6 +39,8 @@ import { Button } from "@/components/ui/button";
 import { EmptyState } from "./empty-state";
 import { StatusPill } from "./status-pill";
 import { TopologyGraph, type TopologyAsset } from "./topology-graph";
+import { LeaderboardCard } from "./leaderboard-card";
+import { SocViewCard } from "./soc-view-card";
 import type { RunDetail } from "./run-lifecycle-card";
 
 interface DrillConsoleProps {
@@ -281,6 +289,32 @@ export function DrillConsole({ pickedRunId, scenarioName }: DrillConsoleProps) {
         </h3>
         <AuditExplorerCard pickedRunId={pickedRunId} compact />
       </section>
+
+      {/*
+        F9.1: For multi-team Runs (run.exercise_id !== null), the
+        Observe tab becomes the single live-drill screen -- leaderboard
+        + live SOC stream render inline below the audit feed so the
+        operator never has to flip tabs during a drill. For
+        legacy single-team Runs (exercise_id === null) these sections
+        stay hidden; the Admin tab is still the right place for the
+        leaderboard in that flow.
+      */}
+      {run && run.exercise_id != null ? (
+        <>
+          <section aria-label="Leaderboard" data-testid="drill-leaderboard">
+            <h3 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+              Leaderboard
+            </h3>
+            <LeaderboardCard exerciseId={run.exercise_id} />
+          </section>
+          <section aria-label="Live SOC" data-testid="drill-soc">
+            <h3 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+              Live SOC stream
+            </h3>
+            <SocViewCard runId={pickedRunId} authToken={getToken()} />
+          </section>
+        </>
+      ) : null}
     </div>
   );
 }

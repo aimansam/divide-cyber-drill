@@ -71,6 +71,11 @@ export interface RunAsset {
 export interface RunDetail {
   run_id: number;
   scenario_id?: number;
+  // F9.1: exercise_id is null for legacy single-team Runs and
+  // populated for F6 multi-team exercise Runs. The DrillConsole
+  // uses this to decide whether to render the leaderboard +
+  // live SOC stream inline.
+  exercise_id?: number | null;
   status: string;
   started_by?: string | null;
   started_at?: string | null;
