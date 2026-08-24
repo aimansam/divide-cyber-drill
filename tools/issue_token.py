@@ -32,6 +32,11 @@ What this does NOT do:
     request.
   * Revoke tokens. Expiry is the only mechanism today; revocation
     lists are L2 work.
+  * Sign in with a password. For that flow, see ``tools/login.py``
+    (F3-prep). The two tools are complementary: this script mints
+    tokens locally with the HMAC secret; ``tools/login.py`` goes
+    through the API's credential-login endpoint and exercises the
+    argon2id + rate-limit path.
 """
 from __future__ import annotations
 

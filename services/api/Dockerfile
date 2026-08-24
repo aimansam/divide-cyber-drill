@@ -30,6 +30,7 @@ RUN pip install --upgrade pip hatchling && \
     "structlog>=24.4.0" \
     "tenacity>=9.0.0" \
     "prometheus-client>=0.21.0" \
+    "argon2-cffi>=23.1.0" \
     "psycopg2-binary>=2.9.9"
 
 # --- runtime stage ---
@@ -50,6 +51,7 @@ RUN pip install --no-index --find-links=/wheels \
     fastapi uvicorn pydantic pydantic-settings \
     sqlalchemy asyncpg alembic redis httpx proxmoxer requests pyyaml \
     jsonschema python-multipart structlog tenacity prometheus-client psycopg2-binary \
+  argon2-cffi argon2-cffi-bindings \
     && rm -rf /wheels /root/.cache
 
 COPY services/api/app ./app

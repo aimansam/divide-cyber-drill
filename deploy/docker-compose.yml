@@ -27,6 +27,14 @@ services:
       # API can sync them into the DB on startup.
       DIVIDE_SCENARIOS_DIR: ${DIVIDE_SCENARIOS_DIR:-/workdir/examples/scenarios}
       DIVIDE_SYNC_ON_STARTUP: ${DIVIDE_SYNC_ON_STARTUP:-true}
+      # F3-prep credential login. See docs/USERS.md for the operator
+      # guide. Set BOTH to bootstrap the first admin user on API
+      # startup; empty defaults mean no auto-admin. Remove both vars
+      # from the env after the first admin exists.
+      DIVIDE_BOOTSTRAP_ADMIN_SUB: ${DIVIDE_BOOTSTRAP_ADMIN_SUB:-}
+      DIVIDE_BOOTSTRAP_ADMIN_PASSWORD: ${DIVIDE_BOOTSTRAP_ADMIN_PASSWORD:-}
+      # Token TTL for /api/v1/auth/login (default 8h).
+      DIVIDE_LOGIN_TOKEN_TTL_S: ${DIVIDE_LOGIN_TOKEN_TTL_S:-28800}
       PROXMOX_HOST: ${PROXMOX_HOST:-}
       PROXMOX_PORT: ${PROXMOX_PORT:-8006}
       PROXMOX_USER: ${PROXMOX_USER:-divide@pve}
