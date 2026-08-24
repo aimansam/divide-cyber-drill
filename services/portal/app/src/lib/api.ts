@@ -70,3 +70,60 @@ export const api = {
       body: body !== undefined ? JSON.stringify(body) : undefined,
     }),
 };
+
+// ---------- credential login (F3-prep) --------------------------------------
+//
+// POST /api/v1/auth/login with username + password. On success the
+// server returns an HMAC token (same shape as tools/issue_token.py
+// emits) and we stash it in localStorage so subsequent calls work
+// without a manual paste.
+//
+// The fetch goes through a stripped-down request helper (no
+// X-Divide-Token header attached — there is none yet). On 401 the
+// caller gets an ApiError with detail "invalid credentials"; on
+// 429 the detail is "too many failed login attempts …".
+
+export interface LoginResponse {
+  token: string;
+  sub: string;
+  role: string;
+  iat: number;
+  exp: number;
+  ttl_remaining_s: number;
+}
+
+export async function login(sub: string, password: string): Promise<LoginResponse> {
+  const res = await fetch("/api/v1/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sub, password }),
+  });
+  const text = await res.text();
+  let parsed: unknown = text;
+  try {
+    parsed = text ? JSON.parse(text) : null;
+  } catch {
+    /* not JSON */
+  }
+  if (!res.ok) {
+    throw new ApiError(
+      res.status,
+      "/api/v1/auth/login",
+      `HTTP ${res.status} /api/v1/auth/login`,
+      parsed,
+    );
+  }
+  return parsed as LoginResponse;
+}
+
+export async function logout(): Promise<void> {
+  // Best-effort. The token in localStorage is the actual session;
+  // the server logout is stateless today. We still POST so future
+  // revocation lists get a chance to fire (no-op today).
+  try {
+    await fetch("/api/v1/auth/logout", { method: "POST" });
+  } catch {
+    /* swallow — local clear below is the real logout */
+  }
+  setToken("");
+}

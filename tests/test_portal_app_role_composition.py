@@ -81,6 +81,7 @@ def test_compositions_references_only_existing_components():
         "AuditExplorerCard",
         "PveOpsCard",
         "ScenarioAuthoringCard",
+        "SignInCard",  # F3-prep credential login
     ]:
         assert card_import in app_src, (
             f"app.tsx does not import {card_import} but renders it"
@@ -171,7 +172,7 @@ def _composition_for_role(app_src: str, role: str) -> list[str]:
 @pytest.mark.parametrize(
     "role,expected_kinds",
     [
-        ("anonymous", ["scenarios", "sign-in-banner"]),
+        ("anonymous", ["scenarios", "sign-in-card", "sign-in-banner"]),  # F3-prep: SignInCard added
         (
             "admin",
             [

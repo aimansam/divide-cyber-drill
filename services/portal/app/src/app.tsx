@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { ScenariosCard, type Scenario } from "@/components/portal/scenarios-card";
+import { SignInCard } from "@/components/portal/sign-in-card";
 import { TokenBar } from "@/components/portal/token-bar";
 import { MyRunsCard, type RunRow } from "@/components/portal/my-runs-card";
 import { RunLifecycleCard } from "@/components/portal/run-lifecycle-card";
@@ -62,7 +63,8 @@ type CardKind =
   | "audit-explorer"
   | "pve-ops"
   | "scenario-authoring"
-  | "sign-in-banner";
+  | "sign-in-banner"
+  | "sign-in-card";
 
 interface CardSpec {
   kind: CardKind;
@@ -71,6 +73,10 @@ interface CardSpec {
 const COMPOSITIONS: Record<"anonymous" | Role, CardSpec[]> = {
   anonymous: [
     { kind: "scenarios" },
+    // F3-prep: real credential login UI. Replaces the old
+    // sign-in-banner text hint. The banner still exists for the
+    // edge case where someone wants to paste a token via SSH.
+    { kind: "sign-in-card" },
     { kind: "sign-in-banner" },
   ],
   admin: [
@@ -220,13 +226,15 @@ export default function App() {
               return me ? (
                 <ScenarioAuthoringCard key="scenario-authoring" />
               ) : null;
+            case "sign-in-card":
+              return <SignInCard key="sign-in-card" />;
             case "sign-in-banner":
               return (
                 <div
                   key="sign-in-banner"
                   className="rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground"
                 >
-                  Sign in with a token to run drills. Tokens come from{" "}
+                  Or paste a token directly (SSH operators):{" "}
                   <code className="font-mono">divide issue-token</code>{" "}
                   (see <a className="underline" href="/portal/">setup</a>
                   {" "}for the wizard). Roles: {ROLES.join(", ")}.
