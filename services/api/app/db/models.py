@@ -740,3 +740,102 @@ class Template(Base, TimestampMixin):
 
     def __repr__(self) -> str:  # pragma: no cover
         return f"<Template id={self.id} name={self.name!r}>"
+
+
+# --- F8 SOC view: TelemetryEvent ---------------------------------------
+
+
+class TelemetrySeverity(str, enum.Enum):
+    """Severity bucket for a TelemetryEvent.
+
+    Kept intentionally coarse (4 buckets) -- operators filter
+    on these in the SOC view, and a fine-grained 8-level scale
+    would be visual noise. F8.5 can refine if needed.
+    """
+
+    INFO = "info"
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
+
+    @classmethod
+    def can_transition(cls, src: "TelemetrySeverity", dst: "TelemetrySeverity") -> bool:
+        # No FSM here -- severity is a tag, not a state.
+        return True
+
+
+class TelemetryEvent(Base, TimestampMixin):
+    """A persisted event from a Run.
+
+    Sources of events:
+      * Runner emits run.* events (started, completed, failed,
+        cancelled).
+      * Asset lifecycle emits asset.* events (cloned, booting,
+        running, stopped, failed).
+      * Flag-capture emits flag.* events (captured, rejected,
+        expired).
+      * Manual injection via ``POST /runs/{id}/events`` (admin /
+        lead only) lets an operator surface a custom kill-chain
+        signal -- e.g. "blue team noticed port 22 bruteforce".
+
+    Lifecycle:
+      * Rows are append-only. We never UPDATE TelemetryEvent
+        rows; corrections go through a new "amended" event.
+      * Soft-pruning via a future retention job (L2 2.14):
+        a 24-hour TTL by default, configurable per run.
+      * The live SSE endpoint (``/runs/{id}/events/stream``)
+        tails the EventBus (in-process), not the DB. Recent
+        events come from the DB on cold-connect.
+    """
+
+    __tablename__ = "telemetry_events"
+    __table_args__ = (
+        Index("ix_telemetry_run_id_ts", "run_id", "ts"),
+        Index("ix_telemetry_kind", "kind"),
+        Index("ix_telemetry_severity", "severity"),
+        Index("ix_telemetry_source", "source"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    # FK to Run. SET NULL on Run delete so audit trail survives
+    # drill deletion (cheap, helps the SOC view recover).
+    run_id: Mapped[int | None] = mapped_column(
+        ForeignKey("runs.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    # FK to Asset. SET NULL on Asset delete (F8 follows the
+    # asset as a logical "device" -- when the VM is reaped, the
+    # event still describes the historical fact).
+    asset_id: Mapped[int | None] = mapped_column(
+        ForeignKey("assets.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    # Event time. NOT created_at (which is when the row hit the
+    # DB); ``ts`` is when the event happened at the source.
+    # Backfilled in Python from ``time.time()`` if the source
+    # doesn't supply it.
+    ts: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    source: Mapped[str] = mapped_column(String(64), nullable=False)
+    kind: Mapped[str] = mapped_column(String(64), nullable=False)
+    severity: Mapped[TelemetrySeverity] = mapped_column(
+        Enum(
+            TelemetrySeverity,
+            name="telemetry_severity",
+            values_callable=lambda e: [v.value for v in e],
+        ),
+        nullable=False,
+        default=TelemetrySeverity.INFO,
+    )
+    # Free-form payload (event-specific data). JSONB on Postgres,
+    # TEXT on sqlite.
+    payload: Mapped[dict[str, Any]] = mapped_column(
+        JSON, nullable=False, default=dict
+    )
+
+    def __repr__(self) -> str:  # pragma: no cover
+        return (
+            f"<TelemetryEvent id={self.id} run={self.run_id} "
+            f"kind={self.kind!r} severity={self.severity.value}>"
+        )
