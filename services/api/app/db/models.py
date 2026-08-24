@@ -79,6 +79,11 @@ class AuditAction(str, enum.Enum):
     ASSET_SPAWNED = "asset.spawned"
     ASSET_FAILED = "asset.failed"
     ASSET_ORPHANED = "asset.orphaned"
+    # F5: runner logged the planting intent for a flag
+    # declared in spec.flags[]. The actual filesystem write
+    # happens via cloud-init user_data (see docs/F5-SCORING.md);
+    # the audit row is the operator-visible record.
+    FLAG_PLANTED = "flag.planted"
 
 
 # --- Scenario ---------------------------------------------------------------

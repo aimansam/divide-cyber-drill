@@ -274,7 +274,55 @@ class Runner:
                     await session.commit()
                     raise
 
-        # 4. All assets up — flip run to SUCCEEDED.
+        # 4. F5: plant flags declared in spec.flags[]. Each flag
+        # has a planted_on_role; for F5.2 we record the planting
+        # intent (audit row + run-level metadata) so the operator
+        # sees the chain. The actual filesystem write is done via
+        # cloud-init user_data on the target asset; that comes
+        # for free when scenarios author a user_data snippet
+        # referencing spec.flags[].id. See docs/F5-SCORING.md §3
+        # for the user_data recipe.
+        flags_spec = spec.get("flags") or []
+        planted_count = 0
+        for flag_spec in flags_spec:
+            planted_role = flag_spec.get("planted_on_role")
+            if not planted_role:
+                continue
+            # Find the matching asset(s) so the audit row can
+            # link to the asset_id when the planting intent is
+            # associated with a specific cloned VM.
+            asset_link = None
+            for asset in cloned_so_far:
+                if asset.role == planted_role and asset.pve_vmid:
+                    asset_link = asset.id
+                    break
+            await self._audit(
+                session,
+                action=AuditAction.FLAG_PLANTED,
+                actor=req.started_by,
+                run_id=run.id,
+                asset_id=asset_link,
+                details={
+                    "flag_id": flag_spec.get("id"),
+                    "side": flag_spec.get("side"),
+                    "planted_on_role": planted_role,
+                    "base_points": flag_spec.get("base_points"),
+                    "decay_window_seconds": flag_spec.get(
+                        "decay_window_seconds"
+                    ),
+                    # Do NOT log the value; the API surfaces the
+                    # value to authenticated clients only.
+                    "value_present": bool(flag_spec.get("value")),
+                },
+            )
+            planted_count += 1
+        if flags_spec:
+            log.info(
+                "runner.flags.planted run_id=%s planted=%s declared=%s",
+                run.id, planted_count, len(flags_spec),
+            )
+
+        # 5. All assets up — flip run to SUCCEEDED.
         run.status = RunStatus.SUCCEEDED
         run.ended_at = datetime.now(timezone.utc)
         # F3: tear down bridges we created. The drill is over; the

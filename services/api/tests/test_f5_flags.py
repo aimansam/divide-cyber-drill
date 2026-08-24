@@ -5,8 +5,9 @@ Three surfaces:
   * Scoring primitives (pure function) -- 12 tests
   * Flag submission endpoint -- 8 tests
   * Migration + model -- 5 tests
+  * F5.2 runner integration -- 2 tests
 
-Total: 25 tests.
+Total: 27 tests.
 """
 from __future__ import annotations
 
@@ -17,7 +18,11 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.core.auth import sign_token
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+
 from app.db import models
+from app.db.base import Base
 from app.db.session import get_sessionmaker
 from app.services.flags import (
     FlagError,
@@ -414,3 +419,142 @@ def test_alembic_0005_migration_runs():
     assert "create_table" in src
     assert "upgrade" in src
     assert "downgrade" in src
+
+
+# --- F5.2: runner plants flags at start_run ----------------------------
+
+
+@pytest.fixture
+def mock_adapter_with_vm():
+    from app.runners.adapter import CloneSpec
+    from app.runners.mock_adapter import MockProxmoxAdapter
+    a = MockProxmoxAdapter(templates={"tpl-x": 9000})
+    return a
+
+
+@pytest.mark.asyncio
+async def test_runner_writes_flag_planted_audit(
+    mock_adapter_with_vm,
+):
+    """A scenario with spec.flags[] yields FLAG_PLANTED audit rows
+    during start_run, one per flag. The runner doesn't fail on
+    planted_on_role mismatches (the asset may not exist; the
+    operator might have set planted_on_role=router_fw but not
+    declared that role as an asset).
+    """
+    from app.runners.mock_adapter import MockProxmoxAdapter
+    from app.runners.runner import Runner, RunRequest
+
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    async with AsyncSession(engine, expire_on_commit=False) as session:
+        scen = models.Scenario(
+            name="flag-test", title="flag-test", version=1,
+            difficulty="beginner", duration_min=30,
+            spec={
+                "apiVersion": "divide/v1",
+                "kind": "Scenario",
+                "spec": {
+                    "assets": [
+                        {"role": "fileserver", "kind": "vm",
+                         "template": "tpl-x", "networks": []}
+                    ],
+                    "flags": [
+                        {
+                            "id": "f1", "side": "red",
+                            "value": "FLAG{pwned}",
+                            "planted_on_role": "fileserver",
+                            "decay_window_seconds": 600,
+                            "base_points": 100,
+                        },
+                    ],
+                },
+            },
+        )
+        session.add(scen)
+        await session.commit()
+
+    runner = Runner(adapter=mock_adapter_with_vm)
+    async with AsyncSession(engine, expire_on_commit=False) as session:
+        await runner.start_run(RunRequest(scenario_id=1), session=session)
+        # Audit rows
+        rows = (await session.execute(
+            select(models.AuditLog).where(
+                models.AuditLog.action == "flag.planted"
+            ).where(models.AuditLog.run_id == 1)
+        )).scalars().all()
+        assert len(rows) == 1, f"expected 1 flag.planted audit; got {len(rows)}"
+        details = rows[0].details
+        assert details["flag_id"] == "f1"
+        assert details["side"] == "red"
+        assert details["planted_on_role"] == "fileserver"
+        # The planted_on_role matches a real asset row.
+        assert rows[0].asset_id is not None
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_runner_logs_warning_when_planted_on_unknown_role(
+    mock_adapter_with_vm,
+):
+    """A flag pointing at a role the scenario doesn't declare
+    still records the audit row (with asset_id=None). Operators
+    see this in the audit log and the demo scenario explains."""
+    import logging
+    from unittest.mock import patch
+
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    async with AsyncSession(engine, expire_on_commit=False) as session:
+        scen = models.Scenario(
+            name="unknown-role", title="unknown-role", version=1,
+            difficulty="beginner", duration_min=30,
+            spec={
+                "apiVersion": "divide/v1",
+                "kind": "Scenario",
+                "spec": {
+                    "assets": [
+                        {"role": "victim", "kind": "vm",
+                         "template": "tpl-x", "networks": []}
+                    ],
+                    "flags": [
+                        {
+                            "id": "f1", "side": "red",
+                            "value": "v",
+                            "planted_on_role": "ghost",  # doesn't exist
+                            "decay_window_seconds": 60,
+                            "base_points": 10,
+                        },
+                    ],
+                },
+            },
+        )
+        session.add(scen)
+        await session.commit()
+
+    from app.runners.runner import Runner, RunRequest
+    runner = Runner(adapter=mock_adapter_with_vm)
+    async with AsyncSession(engine, expire_on_commit=False) as session:
+        with patch("app.runners.runner.log") as mock_log:
+            await runner.start_run(
+                RunRequest(scenario_id=1), session=session
+            )
+            # INFO-level planted log; the audit row still happens.
+            audit_count = sum(
+                1 for call in mock_log.info.call_args_list
+                if "runner.flags.planted" in str(call)
+            )
+            assert audit_count == 1, (
+                "expected one runner.flags.planted log line"
+            )
+
+        rows = (await session.execute(
+            select(models.AuditLog).where(
+                models.AuditLog.action == "flag.planted"
+            ).where(models.AuditLog.run_id == 1)
+        )).scalars().all()
+        assert len(rows) == 1
+        assert rows[0].asset_id is None
+    await engine.dispose()
