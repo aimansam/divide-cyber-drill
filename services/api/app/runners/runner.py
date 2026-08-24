@@ -44,6 +44,8 @@ from app.observability import (
 )
 from app.runners.adapter import CloneSpec, NetworkSpec, ProxmoxAdapter
 from app.services import telemetry as _telemetry
+from app.services.event_recorder import record_event as _record_event
+from app.db.models import TelemetrySeverity as _TS
 
 
 def _adapter_label(adapter: ProxmoxAdapter) -> str:
@@ -155,6 +157,22 @@ class Runner:
         )
         session.add(run)
         await session.flush()
+        # F8: emit run.started event.
+        await _record_event(
+            session,
+            run_id=run.id,
+            kind="run.started",
+            source="runner",
+            severity=_TS.INFO,
+            payload={
+                "scenario_id": scenario.id,
+                "scenario_name": scenario.name,
+                "started_by": req.started_by,
+                "exercise_id": req.exercise_id,
+                "team": req.team,
+                "template_id": req.template_id,
+            },
+        )
 
         # F3 follow-up: honor ``spec.assets[].count`` so a single
         # declared asset can spawn multiple clones (e.g.
@@ -241,12 +259,30 @@ class Runner:
                     # a SQLAlchemy instance; attaching ad-hoc attributes is
                     # safe because we drop it on session.flush boundaries.
                     asset._f3_bridges_by_name = bridges_by_name  # type: ignore[attr-defined]
+                    # F6: stash exercise + team attrs for the spawner log.
+                    asset._f6_exercise_id = req.exercise_id  # type: ignore[attr-defined]
+                    asset._f6_team = req.team  # type: ignore[attr-defined]
                     await self._spawn_asset(
                         session=session,
                         asset=asset,
                         asset_spec=asset_spec,
                         node=node,
                         actor=req.started_by,
+                    )
+                    # F8: emit asset.running (after spawn + boot).
+                    await _record_event(
+                        session,
+                        run_id=run.id,
+                        asset_id=asset.id,
+                        kind="asset.running",
+                        source="runner",
+                        severity=_TS.INFO,
+                        payload={
+                            "role": asset.role,
+                            "kind": asset.kind,
+                            "template": asset.template,
+                            "pve_vmid": asset.pve_vmid,
+                        },
                     )
                     cloned_so_far.append(asset)
                 except Exception as spawn_exc:
@@ -359,6 +395,21 @@ class Runner:
             scenario_id=scenario.id,
             details={"asset_count": len(assets_spec)},
         )
+        # F8: emit run.completed event (BEFORE the final commit so
+        # the row is part of the same transaction).
+        await _record_event(
+            session,
+            run_id=run.id,
+            kind="run.completed",
+            source="runner",
+            severity=_TS.INFO,
+            payload={
+                "scenario_id": scenario.id,
+                "asset_count": len(assets_spec),
+                "duration_sec": run.duration_sec,
+            },
+        )
+
         await session.commit()
 
         # Telemetry (L2 2.11). Build sinks from the scenario spec and

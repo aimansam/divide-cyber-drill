@@ -862,6 +862,24 @@ async def submit_flag(
             status_code=status.HTTP_409_CONFLICT,
             detail=FlagError.duplicate(team, flag_spec.flag_id).message,
         )
+    # F8: emit flag.captured event.
+    from app.services.event_recorder import record_event
+    from app.db.models import TelemetrySeverity
+    await record_event(
+        session,
+        run_id=run_id,
+        kind="flag.captured",
+        source="submit-flag",
+        severity=TelemetrySeverity.MEDIUM,
+        payload={
+            "flag_id": flag_spec.flag_id,
+            "team": team,
+            "points": points,
+            "elapsed_seconds": elapsed,
+            "submitted_by": getattr(token, "sub", "unknown"),
+            "side": flag_spec.side,
+        },
+    )
 
     # Update run-level score (sum of all submissions per team).
     from sqlalchemy import func as sa_func
