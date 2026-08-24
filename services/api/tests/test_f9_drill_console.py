@@ -42,8 +42,63 @@ def _run_async(coro):
     The seed helpers here are simpler as plain async functions;
     this shim wraps them so the test functions stay sync (matching
     the FastAPI TestClient style in test_reports.py).
+
+    Why not ``asyncio.run(coro)``?
+        pytest-asyncio installs an event loop in the main thread
+        for the test session. Calling ``asyncio.run`` raises
+        "There is no current event loop" because the policy has
+        already been bound. We install a fresh loop locally
+        instead.
     """
-    return asyncio.get_event_loop().run_until_complete(coro)
+    import asyncio
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
+
+
+@pytest.fixture(autouse=True)
+def _clean_db_after():
+    """Truncate DB tables after each F9 test.
+
+    Other test files in this suite (test_routers.py in particular)
+    assume an EMPTY database. Our seed helpers leave rows behind;
+    this autouse teardown is the cheapest way to keep both passing.
+
+    Mirrors the pattern in ``test_reports.py::_clean_db_after``.
+    """
+    from sqlalchemy import delete
+
+    from app.db import models as db_models
+    from app.db.session import get_sessionmaker
+
+    sm = get_sessionmaker()
+    yield  # test runs first
+
+    async def _cleanup():
+        async with sm() as s:
+            # F9 seeds Exercises too; clear before the cascading tables.
+            await s.execute(delete(db_models.TeamMembership))
+            await s.execute(delete(db_models.Team))
+            await s.execute(delete(db_models.Exercise))
+            await s.execute(delete(db_models.AuditLog))
+            await s.execute(delete(db_models.Asset))
+            await s.execute(delete(db_models.Run))
+            await s.execute(delete(db_models.Scenario))
+            await s.commit()
+
+    # Same event-loop isolation as the seed helpers -- pytest-asyncio
+    # owns the main-thread loop, so we run cleanup on a fresh loop.
+    import asyncio as _asyncio
+
+    loop = _asyncio.new_event_loop()
+    try:
+        loop.run_until_complete(_cleanup())
+    except Exception:  # noqa: BLE001 -- best-effort
+        pass
+    finally:
+        loop.close()
 
 
 async def _seed_single_team_run() -> tuple[int, int]:

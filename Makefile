@@ -8,7 +8,7 @@ API_DIR := services/api
 
 .DEFAULT_GOAL := help
 
-.PHONY: help up down logs ps restart build pull lint format test test-live-pg smoke proxmox-ping diag clean validate-scenarios migrate db-upgrade db-downgrade db-revision smoke-run sync-scenarios upload-template live-drill demo demo-open
+.PHONY: help up down logs ps restart build pull lint format test test-live-pg smoke proxmox-ping diag clean validate-scenarios migrate db-upgrade db-downgrade db-revision smoke-run sync-scenarios upload-template live-drill demo demo-open portal-build portal-watch portal-install verify-bundle
 
 help: ## Show this help.
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -68,6 +68,22 @@ portal-watch: ## Run Vite in watch mode for the user portal (HMR).
 portal-install: ## Install npm deps for services/portal/app/.
 	cd services/portal/app && npm ci --no-audit --no-fund
 
+# F9.3: bundle-budget guard. Builds the portal and fails if the
+# resulting JS bundle exceeds the 280 KB ceiling set in F4. The
+# ceiling is enforced here + in CI so a runaway dep can't silently
+# double the bundle.
+verify-bundle: portal-build ## Fail if the portal bundle exceeds the 280 KB budget.
+	@BUNDLE=$$(ls -1 services/portal/app/build/assets/index-*.js 2>/dev/null | head -1); \
+	if [[ -z "$$BUNDLE" ]]; then echo "no bundle found; run \`make portal-build\` first"; exit 2; fi; \
+	KB=$$(python3 -c "import os,sys; print(f'{os.path.getsize(sys.argv[1])/1024:.2f}')" "$$BUNDLE"); \
+	LIMIT_KB=280.00; \
+	echo "bundle: $$KB KB (limit $$LIMIT_KB KB)"; \
+	if python3 -c "import sys; sys.exit(0 if float(sys.argv[1]) <= float(sys.argv[2]) else 1)" "$$KB" "$$LIMIT_KB"; then \
+		echo "OK: bundle within budget"; \
+	else \
+		echo "FAIL: bundle $$KB KB exceeds $$LIMIT_KB KB budget"; exit 1; \
+	fi
+
 test-live-pg: ## Run live_pg tests against a real PostgreSQL (requires DIVIDE_TEST_LIVE_PG + reachable DB).
 	@test -n "$$DIVIDE_TEST_LIVE_PG" || { echo "Set DIVIDE_TEST_LIVE_PG=1 (and optionally DIVIDE_TEST_LIVE_PG_URL)"; exit 2; }
 	$(PYTHON) -m pytest -m live_pg services/api/tests
@@ -80,15 +96,17 @@ smoke: ## Curl /healthz and /readyz on the local API.
 	@echo "== /api/v1/scenarios =="
 	@curl -fsS http://localhost:8000/api/v1/scenarios | $(PYTHON) -m json.tool
 
-verify: ## Aggregate gate: lint + test + preflight + smoke. Use before push / in CI.
-	@echo "=== make verify = 1/4 lint ==="
+verify: ## Aggregate gate: lint + test + preflight + smoke + bundle-budget. Use before push / in CI.
+	@echo "=== make verify = 1/5 lint ==="
 	$(MAKE) lint
-	@echo "=== make verify = 2/4 test ==="
+	@echo "=== make verify = 2/5 test ==="
 	$(MAKE) test
-	@echo "=== make verify = 3/4 preflight (PVE health; non-fatal if PVE unreachable) ==="
+	@echo "=== make verify = 3/5 preflight (PVE health; non-fatal if PVE unreachable) ==="
 	-$(MAKE) preflight || { echo "preflight reported NOT READY (see output above) -- continuing"; }
-	@echo "=== make verify = 4/4 smoke ==="
+	@echo "=== make verify = 4/5 smoke ==="
 	$(MAKE) smoke
+	@echo "=== make verify = 5/5 bundle-budget ==="
+	$(MAKE) verify-bundle
 
 proxmox-ping: ## Run the Proxmox smoke test (requires env vars).
 	cd $(API_DIR) && $(PYTHON) scripts/proxmox-smoke.py
