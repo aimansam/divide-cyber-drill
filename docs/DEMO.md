@@ -69,7 +69,7 @@ demo scenarios worth highlighting:
 
 | Scenario | What it shows | Run-time reality |
 |---|---|---|
-| `red-vs-blue-baseline` | 6-asset red↔router↔blue topology graph | Multi-VM provisioning is F3 work; the run will fail until F3 ships. The **UI flow** works. |
+| `red-vs-blue-baseline` | 6-asset red↔router↔blue topology graph | ✅ **F3 shipped** (`2a97525` + `6e9e5b5`). The runner iterates ``spec.networks[]`` and creates one bridge per declaration. The run actually executes end-to-end against real PVE **once the operator has set up the bridges per [`docs/F3-RUNBOOK.md`](F3-RUNBOOK.md)**. The mock-adapter path runs in CI/dev without PVE. |
 | `first-live-drill` | Single-VM smoke | Works if PVE is configured |
 | `phish-to-ransom` | Story-driven drill (good for narrating the demo) | Works if PVE is configured |
 | `lateral-movement-baseline` | Blue team baseline | Works if PVE is configured |
@@ -150,10 +150,14 @@ provisioning.
 
 ## What this demo does NOT cover
 
-- **Multi-VM scenarios that actually run** — F3 (multi-VM
+- ~~**Multi-VM scenarios that actually run** — F3 (multi-VM
   scenarios + networks[]) is the next plan. The topology graph
   renders correctly today with the demo scenario, but
-  `POST /drills` against it will fail at provisioning.
+  `POST /drills` against it will fail at provisioning.~~ ✅ **F3
+  done** — runner iterates `spec.networks[]`, creates bridges
+  per network, attaches NICs per asset. Real PVE requires the
+  operator to add the bridges per [`docs/F3-RUNBOOK.md`](F3-RUNBOOK.md)
+  (PVE has no public API for `vmbrN` creation).
 - **Scoring + leaderboard** — F5 (flag submission + scoring).
 - **Multi-team exercises** — F6 (Exercise model).
 - **Range templates + reset** — F7.
