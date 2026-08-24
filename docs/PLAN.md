@@ -545,6 +545,8 @@ post-L1 plan in TEST-PRODUCT.md)
 - F3-prep (optional first) — credential login (username + password
   → HMAC token via argon2id; bootstrap admin via env var). ~2 h.
   Ships the sign-in UX that's the front door to the cyber range.
+  ✅ **DONE** (commits `78bc332` + `b603c40`). See
+  [`docs/USERS.md`](USERS.md) for the operator guide.
 
 ---
 
@@ -679,14 +681,16 @@ features below build on top of that foundation.
 | G12 | Coaching / replay mode | ~6 h |
 
 **Total estimated scope for a fully-functional single-team cyber
-range:** ~32 hours of focused engineering (~4 weeks part-time, or
-~1 quarter dedicated). F3 alone is the foundation; F4–F8 each
-ship one coherent feature with its own commits.
+range:** ~30 hours of focused engineering (~4 weeks part-time, or
+~1 quarter dedicated). F3-prep is done (2 h); F3 alone is the
+foundation; F4–F8 each ship one coherent feature with its own
+commits.
 
 ### 15.2 Phased F3–F8 plan
 
 | Plan | Closes gap(s) | Effort | What it ships |
 |---|---|---|---|
+| **F3-prep** | (front door) | ~2 h, 2 commits | Credential login: argon2id password store + `POST /api/v1/auth/login` + portal `SignInCard`. ✅ **DONE** — see [`docs/USERS.md`](USERS.md). |
 | **F3** | G1 + L3 3.7 + L3 3.9 partial | ~5 h, 3 commits | Multi-VM scenarios with `networks[]` block; runner iterates networks + creates PVE bridges + attaches NICs per asset; portal `ScenariosCard` surfaces the network topology; new example scenario `red-vs-blue-baseline.scenario.yaml` |
 | **F4** | G2 | ~4 h, 2 commits | noVNC console via PVE `get_vnc_ticket` proxy + `websockets` dep; `GET /drills/{id}/assets/{asset_id}/console` endpoint; "Open console" button on `AssetsCard`; SSH target format with cloud-init-injected key |
 | **F5** | G3 + G5 + L3 3.15 partial | ~5 h, 3 commits | `Flag` + `FlagSubmission` models; `POST /drills/{id}/submit-flag`; runner plants flags at scenario start; time-decay scoring (`points = base * max(0, 1 - elapsed/window)`); `score_breakdown` in after-action report |
@@ -694,7 +698,9 @@ ship one coherent feature with its own commits.
 | **F7** | G7 | ~4 h, 2 commits | `Range` model with asset state snapshots; `POST /drills/{id}/reset` (admin/lead); "Reset to clean" + "Save as range template" buttons on `RunInspectorCard` |
 | **F8** | G8 | ~6 h, 3 commits | SSE endpoint `GET /drills/{id}/events`; runner publishes events on each lifecycle hook; `SocViewCard` (blue/observer only) with kill-chain timeline; simple network map |
 
-**Total:** ~32 h, 17 commits, ~12 new tests per commit on average.
+**Total (post-F3-prep):** ~30 h, 19 commits, ~12 new tests per
+commit on average. F3-prep (2 commits, 52 tests) shipped in the
+opening batch.
 
 ### 15.3 Why ship in this order
 

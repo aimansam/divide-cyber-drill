@@ -1,5 +1,13 @@
 # Setup wizard (web UI)
 
+> **Note (F3-prep, 2026-08-24):** the user portal now has a
+> **SignInCard** that lets operators log in with username +
+> password instead of pasting a token. See
+> [`docs/USERS.md`](USERS.md) for the operator guide. This
+> wizard still mints tokens via `tools/issue_token.py` for
+> one-shot admin work; the sign-in screen handles day-to-day
+> login.
+
 The **div:ide setup wizard** is a 4-step browser UI that takes an operator
 from a fresh PVE host to a working drill template + first-live-drill,
 without SSH-ing into Proxmox to drive the installer.
