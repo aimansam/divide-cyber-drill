@@ -365,3 +365,63 @@ def test_portal_bundle_under_budget_after_f7():
     assert total < 280 * 1024, (
         f"F7 portal bundle grew to {total/1024:.1f} KB; expected <280 KB"
     )
+
+
+# ---------- F8 SOC view portal pins -----------------------------------
+
+
+def test_app_source_has_soc_view_card():
+    card = SRC_DIR / "components" / "portal" / "soc-view-card.tsx"
+    assert card.is_file(), "F8 plan: soc-view-card.tsx must exist"
+    src = card.read_text()
+    assert "export function SocViewCard" in src
+
+
+def test_soc_view_card_uses_event_source_for_sse():
+    """The SOC view consumes the SSE stream via EventSource."""
+    card = (SRC_DIR / "components" / "portal" / "soc-view-card.tsx").read_text()
+    assert "EventSource" in card
+
+
+def test_soc_view_card_has_severity_filter():
+    card = (SRC_DIR / "components" / "portal" / "soc-view-card.tsx").read_text()
+    for sev in ("info", "low", "medium", "high"):
+        assert sev in card, f"severity {sev!r} missing"
+    # The filter radios are rendered.
+    assert "radiogroup" in card or "radio" in card
+
+
+def test_soc_view_card_has_pause_toggle():
+    """Operators pause the live tail without dropping events."""
+    card = (SRC_DIR / "components" / "portal" / "soc-view-card.tsx").read_text()
+    assert "Pause" in card and "Resume" in card
+    assert "paused" in card
+
+
+def test_soc_view_card_replays_recent_events():
+    """On mount, the card fetches /events/recent first."""
+    card = (SRC_DIR / "components" / "portal" / "soc-view-card.tsx").read_text()
+    assert "/events/recent" in card
+
+
+def test_soc_view_card_handles_empty_stream():
+    card = (SRC_DIR / "components" / "portal" / "soc-view-card.tsx").read_text()
+    assert "No events yet" in card
+
+
+def test_soc_view_card_handles_disconnect():
+    """The card surfaces a WifiOff icon when the SSE disconnects."""
+    card = (SRC_DIR / "components" / "portal" / "soc-view-card.tsx").read_text()
+    assert "WifiOff" in card
+    assert "onerror" in card or "disconnected" in card.lower()
+
+
+def test_portal_bundle_under_budget_after_f8():
+    assets = BUILD_DIR / "assets"
+    if not assets.is_dir():
+        pytest.skip("build/ not present")
+    js_files = [a for a in assets.glob("*.js") if ".map" not in a.name]
+    total = sum(p.stat().st_size for p in js_files)
+    assert total < 280 * 1024, (
+        f"F8 portal bundle grew to {total/1024:.1f} KB; expected <280 KB"
+    )
