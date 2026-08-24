@@ -5,7 +5,12 @@
   "description": "Declarative description of a single cyber drill: assets, networks, telemetry wiring, scoring, and win-conditions. Files validate against this schema; CI fails the build if not.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["apiVersion", "kind", "metadata", "spec"],
+  "required": [
+    "apiVersion",
+    "kind",
+    "metadata",
+    "spec"
+  ],
   "properties": {
     "apiVersion": {
       "description": "Schema version this scenario targets. Bump the minor segment when fields change shape.",
@@ -21,7 +26,13 @@
       "description": "Identifying and human-friendly fields. Every scenario needs a unique slug.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "title", "version", "difficulty", "duration_min"],
+      "required": [
+        "name",
+        "title",
+        "version",
+        "difficulty",
+        "duration_min"
+      ],
       "properties": {
         "name": {
           "description": "Unique slug. Lowercase, hyphenated. Referenced by runs.",
@@ -42,7 +53,13 @@
         "difficulty": {
           "description": "Coarse difficulty label; controls default scoring weights.",
           "type": "string",
-          "enum": ["novice", "beginner", "intermediate", "advanced", "expert"]
+          "enum": [
+            "novice",
+            "beginner",
+            "intermediate",
+            "advanced",
+            "expert"
+          ]
         },
         "duration_min": {
           "description": "Expected run length. Used by the scheduler for timeboxing.",
@@ -53,7 +70,11 @@
         "tags": {
           "description": "Free-form labels for filtering and search.",
           "type": "array",
-          "items": {"type": "string", "minLength": 1, "maxLength": 32},
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 32
+          },
           "uniqueItems": true,
           "maxItems": 16,
           "default": []
@@ -64,11 +85,23 @@
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["handle"],
+            "required": [
+              "handle"
+            ],
             "properties": {
-              "handle": {"type": "string", "minLength": 1, "maxLength": 64},
-              "name": {"type": "string", "maxLength": 120},
-              "email": {"type": "string", "format": "email"}
+              "handle": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 64
+              },
+              "name": {
+                "type": "string",
+                "maxLength": 120
+              },
+              "email": {
+                "type": "string",
+                "format": "email"
+              }
             }
           }
         }
@@ -92,16 +125,27 @@
           "description": "What each participating team must accomplish. Free-form strings.",
           "type": "object",
           "additionalProperties": false,
-          "required": ["red", "blue"],
+          "required": [
+            "red",
+            "blue"
+          ],
           "properties": {
             "red": {
               "type": "array",
-              "items": {"type": "string", "minLength": 5, "maxLength": 500},
+              "items": {
+                "type": "string",
+                "minLength": 5,
+                "maxLength": 500
+              },
               "minItems": 1
             },
             "blue": {
               "type": "array",
-              "items": {"type": "string", "minLength": 5, "maxLength": 500},
+              "items": {
+                "type": "string",
+                "minLength": 5,
+                "maxLength": 500
+              },
               "minItems": 1
             }
           }
@@ -114,7 +158,12 @@
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["role", "kind", "template", "networks"],
+            "required": [
+              "role",
+              "kind",
+              "template",
+              "networks"
+            ],
             "properties": {
               "role": {
                 "description": "Logical role in the drill (e.g. red_attacker, dc_server, victim_workstation). Referenced by telemetry and scoring rules.",
@@ -124,7 +173,11 @@
               "kind": {
                 "description": "Asset type. Only 'vm' is implemented in Phase 1.",
                 "type": "string",
-                "enum": ["vm", "container", "kubernetes"]
+                "enum": [
+                  "vm",
+                  "container",
+                  "kubernetes"
+                ]
               },
               "template": {
                 "description": "Name or VMID of the source template on Proxmox. Validated against inventory at run-time.",
@@ -143,7 +196,10 @@
                 "description": "Names of networks (from spec.networks) this asset attaches to. Order = NIC order on the VM.",
                 "type": "array",
                 "minItems": 1,
-                "items": {"type": "string", "pattern": "^[a-z][a-z0-9_]{1,62}$"},
+                "items": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9_]{1,62}$"
+                },
                 "uniqueItems": true
               },
               "resources": {
@@ -151,10 +207,26 @@
                 "type": "object",
                 "additionalProperties": false,
                 "properties": {
-                  "cores": {"type": "integer", "minimum": 1, "maximum": 64},
-                  "sockets": {"type": "integer", "minimum": 1, "maximum": 4},
-                  "ram_mb": {"type": "integer", "minimum": 256, "maximum": 131072},
-                  "disk_gb": {"type": "integer", "minimum": 1, "maximum": 4096}
+                  "cores": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 64
+                  },
+                  "sockets": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 4
+                  },
+                  "ram_mb": {
+                    "type": "integer",
+                    "minimum": 256,
+                    "maximum": 131072
+                  },
+                  "disk_gb": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 4096
+                  }
                 }
               },
               "user_data": {
@@ -176,7 +248,10 @@
           "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["name", "cidr"],
+            "required": [
+              "name",
+              "cidr"
+            ],
             "properties": {
               "name": {
                 "type": "string",
@@ -190,13 +265,20 @@
               "isolation": {
                 "description": "Isolation level. 'tight' = no cross-VLAN routing. 'loose' = controlled egress.",
                 "type": "string",
-                "enum": ["tight", "loose"],
+                "enum": [
+                  "tight",
+                  "loose"
+                ],
                 "default": "tight"
               },
               "egress": {
                 "description": "Outbound internet policy. 'blocked' by default for safety.",
                 "type": "string",
-                "enum": ["blocked", "allowed", "restricted"],
+                "enum": [
+                  "blocked",
+                  "allowed",
+                  "restricted"
+                ],
                 "default": "blocked"
               },
               "dhcp": {
@@ -211,7 +293,9 @@
           "description": "Where events from this run are sent.",
           "type": "object",
           "additionalProperties": false,
-          "required": ["sinks"],
+          "required": [
+            "sinks"
+          ],
           "properties": {
             "sinks": {
               "type": "array",
@@ -219,11 +303,18 @@
               "items": {
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["type"],
+                "required": [
+                  "type"
+                ],
                 "properties": {
                   "type": {
                     "type": "string",
-                    "enum": ["wazuh", "misp", "minio", "stdout"]
+                    "enum": [
+                      "wazuh",
+                      "misp",
+                      "minio",
+                      "stdout"
+                    ]
                   },
                   "endpoint": {
                     "description": "host:port or URL. Required for wazuh/misp, optional for minio/stdout.",
@@ -232,18 +323,22 @@
                   "channels": {
                     "description": "Which event channels to forward.",
                     "type": "array",
-                    "items": {"type": "string", "minLength": 1, "maxLength": 64},
+                    "items": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 64
+                    },
                     "uniqueItems": true
                   },
                   "bucket": {
                     "description": "For minio sinks only.",
                     "type": "string"
                   },
-                "tag": {
+                  "tag": {
                     "description": "Tag every forwarded event with this label (e.g. scenario name + run id).",
                     "type": "string",
                     "maxLength": 128
-                }
+                  }
                 }
               }
             },
@@ -257,18 +352,36 @@
                   "items": {
                     "type": "object",
                     "additionalProperties": false,
-                    "required": ["severity", "to"],
+                    "required": [
+                      "severity",
+                      "to"
+                    ],
                     "properties": {
                       "severity": {
                         "type": "array",
                         "minItems": 1,
-                        "items": {"type": "string", "enum": ["low", "medium", "high", "critical"]},
+                        "items": {
+                          "type": "string",
+                          "enum": [
+                            "low",
+                            "medium",
+                            "high",
+                            "critical"
+                          ]
+                        },
                         "uniqueItems": true
                       },
                       "to": {
                         "type": "array",
                         "minItems": 1,
-                        "items": {"type": "string", "enum": ["slack", "email", "webhook"]},
+                        "items": {
+                          "type": "string",
+                          "enum": [
+                            "slack",
+                            "email",
+                            "webhook"
+                          ]
+                        },
                         "uniqueItems": true
                       }
                     }
@@ -282,12 +395,18 @@
           "description": "How the run is graded. Weight totals are auto-checked at 100 (best-effort).",
           "type": "object",
           "additionalProperties": false,
-          "required": ["blue", "red"],
+          "required": [
+            "blue",
+            "red"
+          ],
           "properties": {
             "blue": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["rules", "pass_threshold"],
+              "required": [
+                "rules",
+                "pass_threshold"
+              ],
               "properties": {
                 "rules": {
                   "type": "array",
@@ -295,21 +414,41 @@
                   "items": {
                     "type": "object",
                     "additionalProperties": false,
-                    "required": ["id", "weight"],
+                    "required": [
+                      "id",
+                      "weight"
+                    ],
                     "properties": {
-                      "id": {"type": "string", "pattern": "^[a-z][a-z0-9_]{1,62}$"},
-                      "weight": {"type": "integer", "minimum": 1, "maximum": 100},
-                      "target_min": {"type": "integer", "minimum": 0}
+                      "id": {
+                        "type": "string",
+                        "pattern": "^[a-z][a-z0-9_]{1,62}$"
+                      },
+                      "weight": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 100
+                      },
+                      "target_min": {
+                        "type": "integer",
+                        "minimum": 0
+                      }
                     }
                   }
                 },
-                "pass_threshold": {"type": "integer", "minimum": 0, "maximum": 100}
+                "pass_threshold": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 100
+                }
               }
             },
             "red": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["rules", "pass_threshold"],
+              "required": [
+                "rules",
+                "pass_threshold"
+              ],
               "properties": {
                 "rules": {
                   "type": "array",
@@ -317,14 +456,28 @@
                   "items": {
                     "type": "object",
                     "additionalProperties": false,
-                    "required": ["id", "weight"],
+                    "required": [
+                      "id",
+                      "weight"
+                    ],
                     "properties": {
-                      "id": {"type": "string", "pattern": "^[a-z][a-z0-9_]{1,62}$"},
-                      "weight": {"type": "integer", "minimum": 1, "maximum": 100}
+                      "id": {
+                        "type": "string",
+                        "pattern": "^[a-z][a-z0-9_]{1,62}$"
+                      },
+                      "weight": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 100
+                      }
                     }
                   }
                 },
-                "pass_threshold": {"type": "integer", "minimum": 0, "maximum": 100}
+                "pass_threshold": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 100
+                }
               }
             }
           }
@@ -333,17 +486,28 @@
           "description": "Boolean expressions (informal; eval'd by the runner).",
           "type": "object",
           "additionalProperties": false,
-          "required": ["red", "blue"],
+          "required": [
+            "red",
+            "blue"
+          ],
           "properties": {
             "red": {
               "type": "array",
               "minItems": 1,
-              "items": {"type": "string", "minLength": 5, "maxLength": 500}
+              "items": {
+                "type": "string",
+                "minLength": 5,
+                "maxLength": 500
+              }
             },
             "blue": {
               "type": "array",
               "minItems": 1,
-              "items": {"type": "string", "minLength": 5, "maxLength": 500}
+              "items": {
+                "type": "string",
+                "minLength": 5,
+                "maxLength": 500
+              }
             }
           }
         },
@@ -351,11 +515,18 @@
           "description": "What gets collected per run and where it's stored.",
           "type": "object",
           "additionalProperties": false,
-          "required": ["sink_to", "retention_days"],
+          "required": [
+            "sink_to",
+            "retention_days"
+          ],
           "properties": {
             "sink_to": {
               "type": "string",
-              "enum": ["minio", "local", "s3"]
+              "enum": [
+                "minio",
+                "local",
+                "s3"
+              ]
             },
             "bucket": {
               "type": "string",
@@ -365,13 +536,71 @@
             "required_pcaps": {
               "description": "Names of networks whose traffic must be captured.",
               "type": "array",
-              "items": {"type": "string", "pattern": "^[a-z][a-z0-9_]{1,62}$"},
+              "items": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_]{1,62}$"
+              },
               "uniqueItems": true
             },
             "retention_days": {
               "type": "integer",
               "minimum": 1,
               "maximum": 3650
+            }
+          }
+        },
+        "flags": {
+          "description": "F5: flags for the run. Each has a value, side, planted_on_role, decay_window_seconds, base_points. Runner writes 'flag.planted' audit rows at start_run; teams capture via POST /drills/{id}/submit-flag.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "id",
+              "side",
+              "value",
+              "planted_on_role",
+              "decay_window_seconds",
+              "base_points"
+            ],
+            "properties": {
+              "id": {
+                "description": "Unique flag id within this scenario. Referenced by Run/Score.",
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_-]{1,62}$"
+              },
+              "side": {
+                "description": "Which team hunts this flag. 'red' = planted by blue, hunted by red. 'blue' = planted by red, hunted by blue. 'self' = proof-of-life on team's own assets (F5 does not score self-side flags).",
+                "type": "string",
+                "enum": [
+                  "red",
+                  "blue",
+                  "self"
+                ]
+              },
+              "value": {
+                "description": "The plaintext flag value operators are expected to retrieve and submit. In a real scenario this is the result of a successful attack (root shell, password dump, etc.).",
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "planted_on_role": {
+                "description": "The role of the asset the flag is planted on (must match an entry in spec.assets[]). The runner audits intent; the actual filesystem write happens via cloud-init user_data on the target asset.",
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9_]{1,62}$"
+              },
+              "decay_window_seconds": {
+                "description": "Linear time-decay window: at t=window the flag is worth 0 points, at t=0 it's worth base_points. Recommended: scenario duration / 2 in seconds.",
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 86400
+              },
+              "base_points": {
+                "description": "Maximum points awarded at t=0. Server floors any decay calculation so the score never exceeds base_points.",
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 10000
+              }
             }
           }
         }

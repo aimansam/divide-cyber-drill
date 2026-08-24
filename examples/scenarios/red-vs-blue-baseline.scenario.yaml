@@ -76,6 +76,30 @@ spec:
       count: 1
       networks: [blue_vlan]
 
+  # F5: 3 flags total. Two planted on blue-zone assets for red
+  # to capture; one planted on the red attacker (proof-of-life).
+  # Window: 30 minutes. Base 100 points -> 0 points at t=30m
+  # (linear decay).
+  flags:
+    - id: red-flag-file-server
+      side: red            # hunted by red
+      value: "FLAG{rooted_file_server}"
+      planted_on_role: file_server
+      decay_window_seconds: 1800
+      base_points: 100
+    - id: red-flag-log-aggregator
+      side: red
+      value: "FLAG{tampered_syslog}"
+      planted_on_role: log_aggregator
+      decay_window_seconds: 1800
+      base_points: 100
+    - id: red-flag-router
+      side: red
+      value: "FLAG{default_creds_router}"
+      planted_on_role: router_fw
+      decay_window_seconds: 1800
+      base_points: 100
+
   telemetry:
     sinks:
       - type: minio
