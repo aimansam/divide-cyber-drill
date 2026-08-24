@@ -110,34 +110,44 @@ def test_app_tsx_imports_sign_in_card():
     assert 'from "@/components/portal/sign-in-card"' in src
 
 
-def test_app_tsx_routes_sign_in_card_kind():
+def test_app_tsx_renders_sign_in_card_in_anonymous_branch():
+    """F4-UI moved the SignInCard out of the COMPOSITIONS table
+    into a dedicated anonymous branch in app.tsx. SignInCard must
+    still render when no token is present."""
+    import re
+
     src = _read(APP_TSX)
-    assert 'case "sign-in-card":' in src, (
-        "sign-in-card must have a switch case in app.tsx"
+    assert "<SignInCard" in src, (
+        "SignInCard must render in app.tsx (anonymous branch)"
     )
-    # The case must actually render SignInCard, not just return null.
-    # Match the next ~3 lines after the case.
-    m = re.search(r'case "sign-in-card":\s*\n(.*?)default:', src, re.DOTALL)
-    assert m, "could not parse sign-in-card case block"
-    block = m.group(1)
-    assert "SignInCard" in block, (
-        "sign-in-card case must render <SignInCard />, not null"
+    # Look for a render path that mentions both `!me` and SignInCard.
+    assert re.search(r"!\s*me[\s\S]{0,800}<SignInCard", src), (
+        "SignInCard must render in the `!me` branch (anonymous viewer)"
     )
 
 
-def test_anonymous_composition_includes_sign_in_card():
+def test_app_tsx_no_longer_uses_compositions_table():
+    """F4-UI replaced COMPOSITIONS with view-tab routing. If a
+    future change reintroduces COMPOSITIONS it must be deliberate."""
     src = _read(APP_TSX)
-    # The COMPOSITIONS table has anonymous: [ … ]; sign-in-card
-    # must be in that array.
-    m = re.search(
-        r"anonymous:\s*\[(.+?)\],",
-        src,
-        re.DOTALL,
+    assert "COMPOSITIONS" not in src, (
+        "app.tsx must not use the COMPOSITIONS table anymore — "
+        "view-tab routing replaces it (F4-UI)"
     )
-    assert m, "anonymous block not found in COMPOSITIONS"
-    block = m.group(1)
-    assert '"sign-in-card"' in block, (
-        "anonymous composition must include sign-in-card (F3-prep)"
+
+
+
+def test_app_tsx_anonymous_branch_documented():
+    """F4-UI: the anonymous branch in app.tsx is the only place
+    SignInCard is rendered. Pin that the branch exists and
+    references SignInCard, even if its exact name changes."""
+    src = _read(APP_TSX)
+    assert "<SignInCard" in src, (
+        "SignInCard must render in app.tsx"
+    )
+    # Anonymous branch in F4-UI is the inverse of the authed one.
+    assert "SignInCard" in src and ("!me" in src or "! me" in src), (
+        "app.tsx must have a non-authed render path that mounts SignInCard"
     )
 
 

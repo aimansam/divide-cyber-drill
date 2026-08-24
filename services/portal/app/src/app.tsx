@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { ScenariosCard, type Scenario } from "@/components/portal/scenarios-card";
-import { SignInCard } from "@/components/portal/sign-in-card";
 import { TokenBar } from "@/components/portal/token-bar";
 import { MyRunsCard, type RunRow } from "@/components/portal/my-runs-card";
 import { RunLifecycleCard } from "@/components/portal/run-lifecycle-card";
@@ -9,266 +8,160 @@ import { AssetsCard } from "@/components/portal/assets-card";
 import { AuditExplorerCard } from "@/components/portal/audit-explorer-card";
 import { PveOpsCard } from "@/components/portal/pve-ops-card";
 import { ScenarioAuthoringCard } from "@/components/portal/scenario-authoring-card";
+import { SignInCard } from "@/components/portal/sign-in-card";
+import { TopNav } from "@/components/portal/top-nav";
+import { DashboardCard } from "@/components/portal/dashboard-card";
+import { useHashRoute } from "@/hooks/use-hash-route";
 import { useMe } from "@/lib/auth";
-import { ROLE_LABELS, ROLES, type Role } from "@/lib/roles";
 
 /**
  * Top-level portal layout.
  *
- * Role-aware composition (M3.2 Half 2 — complete):
+ * F4-UI: cyber-range portal v2. The previous layout was a vertical
+ * stack of all cards for the current role. Real cyber-range
+ * platforms (TryHackMe, HackTheBox, RangeForce, Immersive Labs,
+ * CyLab/picoCTF) organise the UI around view tabs: Dashboard,
+ * Operate (start a drill), Observe (watch a live drill), Admin
+ * (platform ops), History (past runs), Profile (your stats).
  *
- *   * anonymous  → ScenariosCard + SignInBanner
- *   * admin      → ScenariosCard + PveOpsCard + ScenarioAuthoringCard
- *                  + MyRunsCard + RunLifecycleCard + RunInspectorCard
- *                  + AssetsCard + AuditExplorerCard
- *   * lead       → ScenariosCard + ScenarioAuthoringCard + MyRunsCard
- *                  + RunLifecycleCard + RunInspectorCard + AssetsCard
- *                  + AuditExplorerCard
- *   * red        → ScenariosCard + MyRunsCard + RunLifecycleCard
- *                  + RunInspectorCard + AssetsCard + AuditExplorerCard
- *   * blue       → ScenariosCard + MyRunsCard + RunInspectorCard
- *                  + AssetsCard + AuditExplorerCard (read-only)
- *   * observer   → ScenariosCard + MyRunsCard + RunInspectorCard
- *                  + AuditExplorerCard (read-only)
+ * Tab visibility is derived from the role via the same matrix
+ * the card composition used:
  *
- * The composition table is the single source of truth.
+ *   * anonymous → only the SignInCard is shown; no tabs render.
+ *   * admin/lead → all tabs.
+ *   * red/blue/observer → no Admin tab.
  *
- *   * Read-only roles (blue, observer) don't get the cards that
- *     have write buttons (RunLifecycleCard with Start + Cancel,
- *     ScenarioAuthoringCard with Import + Archive + Restore).
- *   * Operator roles (admin, lead) get the authoring + PVE-health
- *     surfaces; lead gets authoring but not PVE; admin gets both.
- *   * Red gets the lifecycle (start, refresh, cancel own-only) +
- *     the run-detail + asset + audit reads.
- *   * Observer skips AssetsCard because it's operator-facing detail
- *     (vmids, IPs); RunInspectorCard already surfaces the asset
- *     summary inline.
+ * Hash routing (no react-router): the URL hash is the active view.
+ * `window.location.hash = "#/operate"` switches view. The hook
+ * subscribes to hashchange so back/forward buttons work.
  *
- * The server-side matrix in `app/routers/drills.py` (commit
- * `4d840f9`) is the second line of defense; if a misbehaving
- * client tried to POST /drills anyway, the role gate would still
- * 403.
- *
- * Identity comes from useMe() which hits GET /api/v1/me. The portal
- * no longer trusts the unverified JWT decode for the identity badge.
+ * The anonymous / SignInCard path is intentionally below the
+ * TopNav so a signed-out user still sees the brand bar — that's
+ * the entry point that tells them what they're logging into.
  */
 
-/** Card kinds the role router knows about. */
-type CardKind =
-  | "scenarios"
-  | "my-runs"
-  | "run-lifecycle"
-  | "run-inspector"
-  | "assets"
-  | "audit-explorer"
-  | "pve-ops"
-  | "scenario-authoring"
-  | "sign-in-banner"
-  | "sign-in-card";
-
-interface CardSpec {
-  kind: CardKind;
-}
-
-const COMPOSITIONS: Record<"anonymous" | Role, CardSpec[]> = {
-  anonymous: [
-    { kind: "scenarios" },
-    // F3-prep: real credential login UI. Replaces the old
-    // sign-in-banner text hint. The banner still exists for the
-    // edge case where someone wants to paste a token via SSH.
-    { kind: "sign-in-card" },
-    { kind: "sign-in-banner" },
-  ],
-  admin: [
-    { kind: "scenarios" },
-    { kind: "pve-ops" }, // admin: read-only PVE health + storage + template
-    { kind: "scenario-authoring" }, // admin: import / archive / restore scenarios
-    { kind: "my-runs" }, // admin sees "All runs" via ALL_RUNS_ROLES
-    { kind: "run-lifecycle" },
-    { kind: "run-inspector" },
-    { kind: "assets" },
-    { kind: "audit-explorer" },
-  ],
-  lead: [
-    { kind: "scenarios" },
-    { kind: "scenario-authoring" }, // lead: import / archive / restore scenarios
-    { kind: "my-runs" }, // lead sees "All runs" via ALL_RUNS_ROLES
-    { kind: "run-lifecycle" },
-    { kind: "run-inspector" },
-    { kind: "assets" },
-    { kind: "audit-explorer" },
-  ],
-  red: [
-    { kind: "scenarios" },
-    { kind: "my-runs" },
-    { kind: "run-lifecycle" },
-    { kind: "run-inspector" },
-    { kind: "assets" },
-    { kind: "audit-explorer" },
-  ],
-  blue: [
-    { kind: "scenarios" },
-    { kind: "my-runs" },
-    // blue is read-only — no RunLifecycleCard, no PveOpsCard,
-    // no ScenarioAuthoringCard.
-    { kind: "run-inspector" },
-    { kind: "assets" },
-    { kind: "audit-explorer" },
-  ],
-  observer: [
-    { kind: "scenarios" },
-    { kind: "my-runs" }, // observer sees "All runs" via ALL_RUNS_ROLES
-    // observer cannot start, cannot modify — no RunLifecycleCard,
-    // no PveOpsCard, no ScenarioAuthoringCard.
-    { kind: "run-inspector" },
-    { kind: "audit-explorer" },
-    // observer doesn't get AssetsCard either — assets are
-    // operator-facing detail. (run-inspector surfaces the
-    // asset count and vmid/ip summary inline.)
-  ],
-};
-
-/** Returns the composition for the verified role, or anonymous. */
-function compositionFor(role: Role | null): CardSpec[] {
-  if (role === null) return COMPOSITIONS.anonymous;
-  return COMPOSITIONS[role];
-}
+const VALID_VIEWS = [
+  "dashboard",
+  "operate",
+  "observe",
+  "admin",
+  "history",
+  "profile",
+] as const;
 
 export default function App() {
   const [pickedScenario, setPickedScenario] = useState<Scenario | null>(null);
   const [pickedRun, setPickedRun] = useState<RunRow | null>(null);
   const { me, loading } = useMe();
+  const [activeView, setActiveView] = useHashRoute(VALID_VIEWS, "dashboard");
 
-  // While useMe() is in flight the header says "checking…". We
-  // don't render the cards yet either — flashing a composition
-  // and then swapping it would be jarring.
-  const cards = compositionFor(me?.role ?? null);
+  function onPickRunFromDashboard(runId: number) {
+    // The Dashboard's "Recent runs" list jumps the operator
+    // directly into Observe for that run.
+    const fake: RunRow = {
+      id: runId,
+      scenario_id: pickedScenario?.id,
+      status: "unknown",
+    };
+    setPickedRun(fake);
+    setActiveView("observe");
+  }
 
   return (
     <div className="min-h-screen bg-background">
-      <TokenBar />
-      <main className="container mx-auto max-w-3xl space-y-6 py-8">
-        <header className="space-y-1">
-          <h1 className="text-2xl font-bold tracking-tight text-primary">
-            div:ide portal
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            {me ? (
-              <>
-                Showing the composition for{" "}
-                <span className="font-semibold">{ROLE_LABELS[me.role]}</span>.
-              </>
-            ) : (
-              "Run a drill, watch it live, download the debrief. Paste a token above to identify yourself."
-            )}
-          </p>
-        </header>
-
-        {loading && !me && (
-          <div className="text-sm italic text-muted-foreground">
+      <TopNav activeView={activeView} onChangeView={setActiveView} />
+      <main className="container mx-auto max-w-6xl space-y-6 px-4 py-8">
+        {!me && loading && (
+          <p className="text-sm italic text-muted-foreground">
             Identifying…
+          </p>
+        )}
+        {!me && !loading && (
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Sign in to operate drills, observe live exercises, and
+              download after-action reports.
+            </p>
+            <SignInCard />
           </div>
         )}
-
-        {cards.map((spec) => {
-          switch (spec.kind) {
-            case "scenarios":
-              return (
-                <ScenariosCard
-                  key="scenarios"
-                  pickedId={pickedScenario?.id ?? null}
-                  onPick={setPickedScenario}
-                />
-              );
-            case "my-runs":
-              return me ? (
-                <MyRunsCard
-                  key="my-runs"
-                  meRole={me.role}
-                  pickedRunId={pickedRun?.id ?? null}
-                  onPick={setPickedRun}
-                />
-              ) : null;
-            case "run-lifecycle":
-              return me ? (
-                <RunLifecycleCard
-                  key="run-lifecycle"
-                  meSub={me.sub}
-                  meRole={me.role}
-                  scenario={pickedScenario}
-                  pickedRunId={pickedRun?.id ?? null}
-                />
-              ) : null;
-            case "run-inspector":
-              return me ? (
-                <RunInspectorCard
-                  key="run-inspector"
-                  pickedRunId={pickedRun?.id ?? null}
-                />
-              ) : null;
-            case "assets":
-              return me ? (
-                <AssetsCard
-                  key="assets"
-                  pickedRunId={pickedRun?.id ?? null}
-                />
-              ) : null;
-            case "audit-explorer":
-              return me ? (
-                <AuditExplorerCard
-                  key="audit-explorer"
-                  pickedRunId={pickedRun?.id ?? null}
-                />
-              ) : null;
-            case "pve-ops":
-              return me ? <PveOpsCard key="pve-ops" /> : null;
-            case "scenario-authoring":
-              return me ? (
-                <ScenarioAuthoringCard key="scenario-authoring" />
-              ) : null;
-            case "sign-in-card":
-              return <SignInCard key="sign-in-card" />;
-            case "sign-in-banner":
-              return (
-                <div
-                  key="sign-in-banner"
-                  className="rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground"
-                >
-                  Or paste a token directly (SSH operators):{" "}
-                  <code className="font-mono">divide issue-token</code>{" "}
-                  (see <a className="underline" href="/portal/">setup</a>
-                  {" "}for the wizard). Roles: {ROLES.join(", ")}.
-                </div>
-              );
-            default: {
-              const _exhaustive: never = spec.kind;
-              void _exhaustive;
-              return null;
+        {me &&
+          (() => {
+            switch (activeView) {
+              case "dashboard":
+                return (
+                  <DashboardCard
+                    meRole={me.role}
+                    meSub={me.sub}
+                    onPickRun={onPickRunFromDashboard}
+                  />
+                );
+              case "operate":
+                return (
+                  <>
+                    <ScenariosCard
+                      pickedId={pickedScenario?.id ?? null}
+                      onPick={setPickedScenario}
+                    />
+                    <RunLifecycleCard
+                      meSub={me.sub}
+                      meRole={me.role}
+                      scenario={pickedScenario}
+                      pickedRunId={pickedRun?.id ?? null}
+                    />
+                    <MyRunsCard
+                      meRole={me.role}
+                      pickedRunId={pickedRun?.id ?? null}
+                      onPick={setPickedRun}
+                    />
+                  </>
+                );
+              case "observe":
+                return (
+                  <>
+                    <RunInspectorCard
+                      pickedRunId={pickedRun?.id ?? null}
+                    />
+                    <AssetsCard
+                      pickedRunId={pickedRun?.id ?? null}
+                    />
+                    <AuditExplorerCard
+                      pickedRunId={pickedRun?.id ?? null}
+                    />
+                  </>
+                );
+              case "admin":
+                return (
+                  <>
+                    <PveOpsCard />
+                    <ScenarioAuthoringCard />
+                  </>
+                );
+              case "history":
+                return (
+                  <MyRunsCard
+                    meRole={me.role}
+                    pickedRunId={pickedRun?.id ?? null}
+                    onPick={setPickedRun}
+                  />
+                );
+              case "profile":
+                return (
+                  <DashboardCard
+                    meRole={me.role}
+                    meSub={me.sub}
+                    onPickRun={onPickRunFromDashboard}
+                  />
+                );
+              default: {
+                const _exhaustive: never = activeView;
+                void _exhaustive;
+                return null;
+              }
             }
-          }
-        })}
-
-        {(pickedScenario || pickedRun) && (
-          <div className="rounded-md border border-dashed border-border p-4 text-sm text-muted-foreground">
-            {pickedScenario ? (
-              <>
-                Selected scenario:{" "}
-                <span className="font-mono">{pickedScenario.name}</span>{" "}
-                (id={pickedScenario.id}).
-              </>
-            ) : null}
-            {pickedRun ? (
-              <>
-                {pickedScenario ? " · " : ""}Selected run:{" "}
-                <span className="font-mono">#{pickedRun.id}</span>{" "}
-                ({pickedRun.status}
-                {pickedRun.started_by ? ` · ${pickedRun.started_by}` : ""}).
-                See Run inspector + Assets + Audit log below.
-              </>
-            ) : null}
-          </div>
-        )}
+          })()}
       </main>
+      <TokenBar />
     </div>
   );
 }
