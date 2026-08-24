@@ -48,16 +48,20 @@ PVE OK?".
   `PROXMOX_TOKEN_SECRET` (dev) > per-process random fallback.
 - Can call all `/api/v1/admin/*` endpoints: probe, upload-qcow2,
   create-template, set-template, drill-template-status,
-  start-first-drill, storage.
+  start-first-drill, storage. **Gated by `require_role(ADMIN)`**
+  at the router level since commit `0c2da49` — anonymous probes
+  return 401, not the full PVE topology.
 - Drill-start / cancel / per-asset audit rows attributed to
   `token.sub` (commit `359a62d`).
 - [`/portal/`](../services/portal/index.html) setup wizard for the
   one-time deploy.
 - [`/portal/app/`](../services/portal/app/index.html) user portal
-  (commit `d0ce912`) — operator-only visibility today (Day-1
-  ships the shell + `ScenariosCard`; the run-lifecycle card lands
-  in next-plan M3.2). Operators can sign in with an admin token
-  and run a drill from the browser.
+  (commit `d0ce912`) — operators see `ScenariosCard` + `MyRunsCard`
+  ("All runs") + `RunLifecycleCard` (start + refresh + cancel any
+  drill) plus the server-verified `useMe()` identity badge from
+  commit `M3.2-Half1` (this document). Half 2's `PveOpsCard`
+  (`read-only PVE health summary`) and `RunInspectorCard` will
+  round out the admin composition.
 
 **Needs not yet met:**
 - `require_role("admin")` gate on `/api/v1/admin/*` — today **any
@@ -84,14 +88,18 @@ PVE OK?".
   (scenario picker), 2 (run lifecycle), 3 (cancel), 5 (audit log).
 - [`/portal/app/`](../services/portal/app/index.html) (commit
   `d0ce912`) — the lead's primary day-2 surface: `TokenBar` +
-  `ScenariosCard` ship today; `RunLifecycleCard` + cancel modal +
-  download-report button land in next-plan M3.2–M3.7. **This is the
-  page that replaces `/portal/test/` once the remaining cards ship.**
+  `ScenariosCard` + `MyRunsCard` ("All runs") + `RunLifecycleCard`
+  (start + refresh + cancel any drill) ship in commit
+  `M3.2-Half1`. Half 2's `ScenarioAuthoringCard` +
+  `AuditExplorerCard` will round out the lead composition. **This
+  is the page that replaces `/portal/test/` once the remaining
+  cards ship.**
 
 **Needs not yet met:**
-- `require_role("lead", "admin")` on `POST /api/v1/drills`.
-- Scenario authoring UI — today the only authoring path is editing
-  YAML in a text editor and committing to git. L3 work (criterion 3.12).
+- Scenario authoring UI in the portal — today the only authoring
+  path is editing YAML in a text editor and committing to git. L3
+  work (criterion 3.12). Half 2's `ScenarioAuthoringCard` is the
+  import/restore half; full CRUD is a follow-up.
 - After-action JSON report (`GET /api/v1/drills/{id}/report`,
   next-plan #6) for debrief — most data is in the DB already; one
   Prometheus query away.
@@ -108,10 +116,13 @@ PVE OK?".
 - `GET /api/v1/drills/{id}/audit` for self-attribution.
 - `/portal/test/` cards 2 (run lifecycle), 4 (assets).
 - [`/portal/app/`](../services/portal/app/index.html) (commit
-  `d0ce912`) — the **trainee-facing surface**. Day-1 ships the
-  shell + scenarios card; the run-lifecycle / assets / console /
-  audit / download-report cards land in next-plan M3.2–M3.7. This is
-  the page the red team will eventually use.
+  `d0ce912`) — the **trainee-facing surface**. Commit `M3.2-Half1`
+  ships: `ScenariosCard` + `MyRunsCard` (filtered to red's own
+  runs by the server-side `visible_runs_query` from `4d840f9`) +
+  `RunLifecycleCard` (start + refresh + cancel own only — the
+  cancel button disables with a tooltip if you try to cancel
+  someone else's run, mirroring the server 403). Half 2 will add
+  `RunInspectorCard` + `AssetsCard` + `AuditExplorerCard`.
 
 **Needs not yet met:**
 - **Browser console to the cloned VM.** [`PLAN.md`](PLAN.md) §7 calls
@@ -139,9 +150,13 @@ victim VMs.
 - `GET /api/v1/drills/{id}/audit` for self-attribution.
 - `/portal/test/` cards 4 (assets), 5 (audit), 6 (metrics).
 - [`/portal/app/`](../services/portal/app/index.html) (commit
-  `d0ce912`) — the blue team's primary surface once the asset +
-  audit + telemetry-overlay cards ship (M3.3, M3.4). Until then,
-  `/portal/test/` remains the working option.
+  `d0ce912`) — the blue team's primary surface. Commit
+  `M3.2-Half1` ships: `ScenariosCard` + `MyRunsCard` ("My runs"
+  — own-runs filter on the server). Blue does NOT get
+  `RunLifecycleCard` (read-only); Half 2 adds `RunInspectorCard`
+  + `AssetsCard` + `AuditExplorerCard` (read-only — the cards
+  render without Start / Cancel buttons). Until then,
+  `/portal/test/` remains the working option for asset inspection.
 - Grafana at `localhost:3000` (admin/`divide`) — but **no anonymous
   viewer** (L2 2.6 ⚠️, deferred). The blue team needs to be given the
   admin creds or we ship the `grafana.ini` overlay (~30 min).
@@ -170,10 +185,14 @@ after-the-fact reviewer.
   `/metrics`, future `/report`.
 - `/portal/test/` cards 5 (audit), 6 (metrics).
 - [`/portal/app/`](../services/portal/app/index.html) (commit
-  `d0ce912`) — long-term the observer's surface (read-only).
-  Today only the scenarios card ships; run-detail / audit /
-  download-report cards land in M3. Once they're in, a "view-only"
-  mode will hide Start / Cancel buttons for this role (M5).
+  `d0ce912`) — the observer's surface (read-only). Commit
+  `M3.2-Half1` ships: `ScenariosCard` + `MyRunsCard` (rendered
+  as "All runs" — observer sees every run in the system) but
+  observer does NOT get `RunLifecycleCard` (no Start button).
+  Half 2's `RunInspectorCard` + `AuditExplorerCard` will round
+  out the observer composition. Server-side, observer tokens
+  are gated by `require_role(OBSERVER, ...)` on every read
+  endpoint (commit `4d840f9`).
 
 **Needs not yet met:**
 - **No read-only API surface.** Every endpoint either writes
@@ -276,6 +295,7 @@ L2 demo.
 | No drill auto-timeout (L2 2.8 ⚠️) | admin, watchdog | forgotten drills rack up CPU | next-plan #4 (45 min) |
 | No MinIO telemetry sink (L2 2.11 ⚠️) | lead, blue | audit events don't reach `divide-artifacts` | next-plan #5 (1 h) |
 | No after-action JSON report (L2 2.12 ⚠️) | lead, observer | debrief = re-query the DB by hand | next-plan #6 (45 min) |
+| No role-aware UI composition in `/portal/app/` | red, blue, observer, lead, admin | **CLOSED** commit `M3.2-Half1`. `COMPOSITIONS` in `src/app.tsx` renders only the cards each role can use; `tests/test_portal_app_role_composition.py` pins the per-role card set (6 parametrized cases). Identity badge is server-verified via `GET /api/v1/me` + `useMe()` — no more client-side JWT decode. | done |
 
 ---
 

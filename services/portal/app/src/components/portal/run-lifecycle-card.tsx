@@ -1,0 +1,337 @@
+/**
+ * RunLifecycleCard — start a drill, watch it tick, cancel it.
+ *
+ * Three actions, gated by role:
+ *
+ *   * Start:   POST /api/v1/drills  { scenario_id }
+ *              Allowed: admin, lead, red
+ *   * Refresh: GET  /api/v1/drills/{id}     (polls every 2s when live)
+ *   * Cancel:  POST /api/v1/drills/{id}/cancel  { reason }
+ *              Allowed: admin, lead, red
+ *              Red may only cancel runs they started (server enforced
+ *              by commit 4d840f9 — we mirror the rule client-side so
+ *              the button is disabled instead of 403-ing on click).
+ *
+ * Roles (M3.2, Half 1): shown to admin, lead, red. Blue and observer
+ * don't get this card at all (COMPOSITIONS table in app.tsx). The
+ * server-side gate means an anon can't POST /drills either.
+ *
+ * Polling: a single useEffect owns a 2s interval while a run is
+ * active. On unmount or status transition to a terminal state the
+ * interval clears itself.
+ *
+ * Asset preview: we render the vmid + IP for each asset once the
+ * run reaches `provisioning`. The full AssetsCard lands in Half 2.
+ */
+
+import { useEffect, useRef, useState } from "react";
+import {
+  Loader2,
+  Play,
+  RefreshCw,
+  Square,
+  AlertTriangle,
+} from "lucide-react";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { api, ApiError } from "@/lib/api";
+import { hasRole, type Role } from "@/lib/roles";
+import type { Scenario } from "@/components/portal/scenarios-card";
+
+const CAN_START: readonly Role[] = ["admin", "lead", "red"];
+const CAN_CANCEL: readonly Role[] = ["admin", "lead", "red"];
+
+const TERMINAL_STATUSES = new Set([
+  "completed",
+  "cancelled",
+  "canceled",
+  "failed",
+  "timeout",
+]);
+
+export interface RunAsset {
+  asset_id?: number;
+  role?: string;
+  kind?: string;
+  template?: string;
+  status?: string;
+  pve_vmid?: number | null;
+  pve_node?: string | null;
+  pve_ip?: string | null;
+  error?: string | null;
+}
+
+export interface RunDetail {
+  run_id: number;
+  scenario_id?: number;
+  status: string;
+  started_by?: string | null;
+  started_at?: string | null;
+  ended_at?: string | null;
+  duration_sec?: number | null;
+  error?: string | null;
+  assets?: RunAsset[];
+}
+
+interface RunLifecycleCardProps {
+  meSub: string;
+  meRole: Role;
+  scenario: Scenario | null;
+  pickedRunId: number | null;
+}
+export function RunLifecycleCard({
+  meSub,
+  meRole,
+  scenario,
+  pickedRunId,
+}: RunLifecycleCardProps) {
+  const [run, setRun] = useState<RunDetail | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [cancelReason, setCancelReason] = useState("user requested");
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const canStart = hasRole(meRole, CAN_START);
+  const canCancel = hasRole(meRole, CAN_CANCEL);
+  // red can cancel any of *their* runs; admin/lead cancel anything.
+  // This mirrors the server rule from commit 4d840f9.
+  const canCancelThis =
+    canCancel &&
+    run !== null &&
+    (meRole !== "red" || run.started_by === meSub);
+
+  function clearPoll() {
+    if (pollRef.current !== null) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
+  }
+
+  async function fetchRun(id: number): Promise<RunDetail | null> {
+    try {
+      const data = await api.get<RunDetail>(`/api/v1/drills/${id}`);
+      setRun(data);
+      return data;
+    } catch (e: unknown) {
+      const msg = e instanceof ApiError ? `HTTP ${e.status} ${e.url}` : String(e);
+      setError(msg);
+      return null;
+    }
+  }
+
+  function startPoll(id: number) {
+    clearPoll();
+    pollRef.current = setInterval(() => {
+      void fetchRun(id).then((r) => {
+        if (r && TERMINAL_STATUSES.has(r.status)) {
+          clearPoll();
+        }
+      });
+    }, 2000);
+  }
+
+  useEffect(() => {
+    if (pickedRunId === null) {
+      setRun(null);
+      clearPoll();
+      return;
+    }
+    setLoading(true);
+    fetchRun(pickedRunId)
+      .then((r) => {
+        if (r && !TERMINAL_STATUSES.has(r.status)) {
+          startPoll(r.run_id);
+        }
+      })
+      .finally(() => setLoading(false));
+    return clearPoll;
+  }, [pickedRunId]);
+
+  async function onStart() {
+    if (scenario === null) return;
+    setError(null);
+    setLoading(true);
+    try {
+      const created = await api.post<RunDetail>("/api/v1/drills", {
+        scenario_id: scenario.id,
+      });
+      setRun(created);
+      if (!TERMINAL_STATUSES.has(created.status)) {
+        startPoll(created.run_id);
+      }
+    } catch (e: unknown) {
+      const msg = e instanceof ApiError ? `HTTP ${e.status} ${e.url}` : String(e);
+      setError(msg);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function onCancel() {
+    if (run === null || !canCancelThis) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const updated = await api.post<RunDetail>(
+        `/api/v1/drills/${run.run_id}/cancel`,
+        { reason: cancelReason, actor: meSub },
+      );
+      setRun(updated);
+      clearPoll();
+    } catch (e: unknown) {
+      const msg = e instanceof ApiError ? `HTTP ${e.status} ${e.url}` : String(e);
+      setError(msg);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function onRefresh() {
+    if (run === null) return;
+    setLoading(true);
+    try {
+      const r = await fetchRun(run.run_id);
+      if (r && !TERMINAL_STATUSES.has(r.status)) {
+        startPoll(r.run_id);
+      } else {
+        clearPoll();
+      }
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  const hasLiveRun = run !== null && !TERMINAL_STATUSES.has(run.status);
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Drill lifecycle</CardTitle>
+        <CardDescription>
+          {scenario === null
+            ? "Pick a scenario above to start a drill."
+            : `Scenario: ${scenario.name}`}
+          {run !== null && (
+            <span className="ml-2 font-mono">· run #{run.run_id}</span>
+          )}
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {error && (
+          <div className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+            <AlertTriangle className="mt-0.5 h-4 w-4" />
+            <span className="font-mono">{error}</span>
+          </div>
+        )}
+
+        {canStart && scenario !== null && (run === null || !hasLiveRun) && (
+          <Button onClick={onStart} disabled={loading || scenario === null}>
+            {loading ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <Play className="mr-2 h-4 w-4" />
+            )}
+            Start drill
+          </Button>
+        )}
+
+        {run !== null && (
+          <>
+            <div className="flex flex-wrap items-center gap-3 text-sm">
+              <span
+                className={
+                  "inline-block rounded px-2 py-0.5 font-mono text-xs " +
+                  (TERMINAL_STATUSES.has(run.status)
+                    ? "bg-emerald-900/40 text-emerald-200"
+                    : "bg-amber-900/40 text-amber-200")
+                }
+              >
+                {run.status}
+              </span>
+              {run.started_by && (
+                <span className="text-muted-foreground">by {run.started_by}</span>
+              )}
+              {run.started_at && (
+                <span className="text-muted-foreground">
+                  started {new Date(run.started_at).toLocaleString()}
+                </span>
+              )}
+              {run.duration_sec !== null && run.duration_sec !== undefined && (
+                <span className="text-muted-foreground">
+                  duration {Math.round(run.duration_sec)}s
+                </span>
+              )}
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={onRefresh}
+                disabled={loading}
+                aria-label="Refresh"
+              >
+                <RefreshCw className="h-4 w-4" />
+              </Button>
+            </div>
+
+            {run.assets && run.assets.length > 0 && (
+              <div>
+                <h4 className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                  Assets ({run.assets.length})
+                </h4>
+                <ul className="divide-y divide-border rounded-md border border-border">
+                  {run.assets.map((a) => (
+                    <li
+                      key={a.asset_id ?? `${a.role}-${a.pve_vmid}`}
+                      className="flex items-center justify-between gap-3 px-3 py-2 text-sm"
+                    >
+                      <div>
+                        <div className="font-mono">{a.role ?? a.kind ?? "asset"}</div>
+                        <div className="text-xs text-muted-foreground">
+                          {a.template ?? ""}
+                          {a.pve_vmid !== null && a.pve_vmid !== undefined
+                            ? ` · vmid=${a.pve_vmid}`
+                            : ""}
+                          {a.pve_ip ? ` · ${a.pve_ip}` : ""}
+                        </div>
+                      </div>
+                      <span className="font-mono text-xs text-muted-foreground">
+                        {a.status ?? "?"}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {canCancelThis && hasLiveRun && (
+              <div className="flex items-center gap-2">
+                <Input
+                  placeholder="cancel reason"
+                  value={cancelReason}
+                  onChange={(e) => setCancelReason(e.target.value)}
+                  className="max-w-xs"
+                />
+                <Button variant="destructive" onClick={onCancel} disabled={loading}>
+                  <Square className="mr-2 h-4 w-4" /> Cancel
+                </Button>
+              </div>
+            )}
+
+            {canCancel && !canCancelThis && hasLiveRun && (
+              <div className="text-xs italic text-muted-foreground">
+                You can only cancel runs you started (this run was started
+                by {run.started_by ?? "?"}).
+              </div>
+            )}
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+}

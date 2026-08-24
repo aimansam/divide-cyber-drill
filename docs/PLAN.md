@@ -669,6 +669,36 @@ are stale. For the live ledger of what's done / what's next, see:
     to "enforced matrix"; §3 cross-cutting gaps #1 + #8 are
     struck through (CLOSED).
 
+19. **Role-aware UI composition (M3.2 Half 1 closed)** ✅ — three commits:
+    * server: new `GET /api/v1/me` endpoint (gated by
+      `require_token`) returns the verified `sub`/`role`/`iat`/
+      `exp`/`ttl_remaining_s`. Removes the client-side JWT decode
+      footgun in `TokenBar`.
+    * lib: `lib/roles.ts` typed `Role` union + display labels;
+      `lib/auth.ts` `useMe()` hook with same-tab + cross-tab
+      subscription.
+    * cards: `MyRunsCard` (own-runs list, server-filtered) +
+      `RunLifecycleCard` (start + refresh + cancel own-only;
+      polls every 2s while live; cancel button disables with a
+      tooltip when the red user tries to cancel someone else's
+      run — mirrors the server 403).
+    * role router: `COMPOSITIONS` in `src/app.tsx` is the single
+      source of truth. Blue and observer don't get
+      `RunLifecycleCard`; they can't click "Start drill" and get
+      403 because the button isn't there.
+    Tests: 331 → 360 (+29: 11 server-side `/api/v1/me`, 18
+    static + bundle + wiring). `tests/test_portal_app_role_composition.py`
+    is the dedicated guard: 6 parametrized per-role cases + 12
+    shape/bundle/invariant checks. The server-side `Role` enum and
+    the portal `COMPOSITIONS` table are cross-checked: adding a
+    role in one without the other fails the test loudly.
+    Production JS bundle: 190 KB (61 KB gzipped), well under the
+    250 KB lazy-load trigger budget.
+    Half 2 (RunInspectorCard + AssetsCard + AuditExplorerCard +
+    PveOpsCard + ScenarioAuthoringCard) is the next commit; the
+    static-check tests already reserve the kind names so the
+    table comment is the only thing that needs updating.
+
 The rest of this section calls out specific places where PLAN.md's
 text is misleading so future readers don't trust stale snippets:
 

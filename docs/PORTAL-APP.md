@@ -83,9 +83,11 @@ on the host is reflected on the next browser refresh — no API rebuild.
 2. The token is stored in `localStorage["divide_token"]`.
 3. Every `api.get()` / `api.post()` in `src/lib/api.ts` reads it and
    sets `X-Divide-Token: <token>` on the request.
-4. `TokenBar` decodes the unverified payload (base64url) to show
-   `signed in as alice · <role>` (e.g. `red`, `admin`) — **display
-   only**; the server re-validates on every request.
+4. `TokenBar` calls `useMe()` (`src/lib/auth.ts`) which hits
+   `GET /api/v1/me` — the server returns the **verified** identity
+   (`sub`, `role`, `iat`, `exp`, `ttl_remaining_s`) and the badge
+   shows `signed in as alice · <role label> [verified]`. The old
+   client-side JWT decode is gone — too easy to MITM.
 5. Sign out clears `localStorage` and re-renders as anonymous.
 
 See `app/core/auth.py` for the server-side validation.
@@ -99,6 +101,30 @@ filtered to their own runs (`started_by == sub`); admin/lead/observer
 see all runs; the `/admin/*` endpoints are admin-only. Tokens are
 minted via `tools/issue_token.py --user alice --role red --ttl 24h`;
 `--role` choices are restricted to the five enum values.
+
+## Role-aware composition
+
+The portal renders a different set of cards for each role. The
+single source of truth is `COMPOSITIONS` in `src/app.tsx`. The
+server-side matrix from commit `4d840f9` is the second line of
+defense — a misbehaving client can't bypass the gate, but
+rendering the wrong cards for a role would produce "click and get
+403" UX, so we hide them instead.
+
+| Role       | Cards shown                                              |
+|------------|----------------------------------------------------------|
+| anonymous  | ScenariosCard, SignInBanner                              |
+| admin      | ScenariosCard, MyRunsCard (as "All runs"), RunLifecycleCard |
+| lead       | ScenariosCard, MyRunsCard (as "All runs"), RunLifecycleCard |
+| red        | ScenariosCard, MyRunsCard (as "My runs"), RunLifecycleCard  |
+| blue       | ScenariosCard, MyRunsCard (as "My runs") — read-only     |
+| observer   | ScenariosCard, MyRunsCard (as "All runs") — read-only    |
+
+The matrix is pinned by `tests/test_portal_app_role_composition.py`
+(18 tests, +matrix). Adding a new role is a two-place change: append
+to `Role` in `services/api/app/core/auth.py` AND to `COMPOSITIONS`
+in `app.tsx`. The static-check test fails loudly if either side
+drifts.
 
 ## When to use this vs the wizard vs the test UI
 
