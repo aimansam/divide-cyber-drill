@@ -13,7 +13,7 @@ from app import __version__
 from app.core.config import settings
 from app.core.logging import configure_logging
 from app.observability.middleware import PrometheusMiddleware
-from app.routers import admin, auth, drills, health, me, proxmox, reports, scenarios
+from app.routers import admin, exercises, exercises, auth, drills, health, me, proxmox, reports, scenarios
 from app.services.scenario_sync import sync_files
 
 log = structlog.get_logger()
@@ -145,6 +145,7 @@ def create_app() -> FastAPI:
     app.include_router(reports.router, prefix="/api/v1/drills", tags=["reports"])
     app.include_router(proxmox.router, prefix="/api/v1/proxmox", tags=["proxmox"])
     app.include_router(admin.router, prefix="/api/v1/admin", tags=["admin"])
+    app.include_router(exercises.router, prefix="/api/v1/exercises", tags=["exercises"])
 
     # F4 noVNC: register the WS proxy route directly on the app
     # because FastAPI router.include_router doesn't surface

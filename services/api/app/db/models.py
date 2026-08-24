@@ -150,6 +150,19 @@ class Run(Base, TimestampMixin):
     scenario_id: Mapped[int] = mapped_column(
         ForeignKey("scenarios.id", ondelete="RESTRICT"), nullable=False
     )
+    # F6: nullable so single-team runs (legacy) still work. An
+    # Exercise-owned Run has exercise_id populated + a team name
+    # (red / blue / white).
+    exercise_id: Mapped[int | None] = mapped_column(
+        ForeignKey("exercises.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    # F6: nullable for backward compat. Defaults to "red" so
+    # legacy single-team runs continue to attribute flag
+    # submissions to the red team.
+    team: Mapped[str | None] = mapped_column(
+        String(16), nullable=True, default="red"
+    )
     status: Mapped[RunStatus] = mapped_column(
         Enum(
             RunStatus,
@@ -171,6 +184,9 @@ class Run(Base, TimestampMixin):
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     scenario: Mapped[Scenario] = relationship(back_populates="runs")
+    exercise: Mapped["Exercise | None"] = relationship(
+        back_populates="runs"
+    )
     assets: Mapped[list[Asset]] = relationship(
         back_populates="run", cascade="all, delete-orphan"
     )
@@ -436,3 +452,225 @@ __all__ = [
     "TimestampMixin",
     "User",
 ]
+
+
+# --- F6 multi-team: Exercise + Team + TeamMembership --------------------
+
+
+class ExerciseStatus(str, enum.Enum):
+    """Lifecycle for an Exercise (the F6 multi-team coordinator).
+
+    A single-team Run (no Exercise) bypasses this entire state
+    machine -- F5 and earlier work is unchanged.
+
+    An Exercise moves through:
+
+        idle  -- created; teams registered; no runs started
+        live  -- runs are active; flags can be captured
+        ended -- all runs are terminal; leaderboard frozen
+        archived -- admin-only frozen snapshot (post-mortem)
+
+    Transitions are validated in ``Exercise.transition_to`` so
+    the FSM lives in one place and the unit tests can pin every
+    valid transition.
+    """
+
+    IDLE = "idle"
+    LIVE = "live"
+    ENDED = "ended"
+    ARCHIVED = "archived"
+
+    @classmethod
+    def can_transition(cls, src: "ExerciseStatus", dst: "ExerciseStatus") -> bool:
+        """Return True iff ``src -> dst`` is a valid transition.
+
+        Frozen transitions:
+          * Any state -> archived (admin only)
+          * idle -> live (operator starts the exercise)
+          * live -> ended (operator stops the exercise or it
+            auto-ends at scheduled time)
+          * ended -> live is allowed (re-open after a pause)
+        """
+        if dst is cls.ARCHIVED:
+            return True  # any -> archived
+        if src is cls.IDLE and dst is cls.LIVE:
+            return True
+        if src is cls.LIVE and dst is cls.ENDED:
+            return True
+        if src is cls.ENDED and dst is cls.LIVE:
+            return True
+        return False
+
+
+class Exercise(Base, TimestampMixin):
+    """A multi-team exercise (F6).
+
+    An Exercise wraps one or more Runs against a shared
+    scenario. The Runs are parallel -- red and blue (and
+    optionally white) each get their own isolated VM set
+    sharing the same underlying scenario YAML.
+
+    Lifecycle:
+      * created (status=IDLE)
+      * admin/lead sets ``started_at``; auto-transitions to
+        LIVE at that time, or immediately on demand.
+      * admin/lead sets ``ended_at``; auto-transitions to
+        ENDED, or ``stop_exercise`` flips it manually.
+      * status=ARCHIVED for post-mortem snapshots; runs
+        remain queryable as historical record.
+    """
+
+    __tablename__ = "exercises"
+    __table_args__ = (
+        Index("ix_exercises_status", "status"),
+        Index("ix_exercises_starts_at", "starts_at"),
+        Index("ix_exercises_scenario_id", "scenario_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    title: Mapped[str] = mapped_column(String(120), nullable=False)
+    scenario_id: Mapped[int] = mapped_column(
+        ForeignKey("scenarios.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    status: Mapped[ExerciseStatus] = mapped_column(
+        Enum(
+            ExerciseStatus,
+            name="exercise_status",
+            values_callable=lambda e: [v.value for v in e],
+        ),
+        nullable=False,
+        default=ExerciseStatus.IDLE,
+    )
+    # Optional wall-clock bounds. The scheduler flips status
+    # IDLE -> LIVE at starts_at and LIVE -> ENDED at ends_at
+    # (F3-prep-style background asyncio task).
+    starts_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    ends_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_by: Mapped[str] = mapped_column(String(64), nullable=False)
+
+    scenario: Mapped[Scenario] = relationship()
+    runs: Mapped[list[Run]] = relationship(
+        back_populates="exercise", cascade="all, delete-orphan"
+    )
+    teams: Mapped[list["Team"]] = relationship(
+        back_populates="exercise",
+        cascade="all, delete-orphan",
+    )
+
+    def transition_to(self, new_status: ExerciseStatus) -> None:
+        """Move the exercise to a new state; raises on invalid.
+
+        Kept in one place so unit tests can cover every valid
+        transition.
+        """
+        if not ExerciseStatus.can_transition(self.status, new_status):
+            raise ValueError(
+                f"cannot transition exercise {self.id} from "
+                f"{self.status.value} to {new_status.value}"
+            )
+        self.status = new_status
+
+
+class Team(Base, TimestampMixin):
+    """A team within an Exercise.
+
+    Teams are scoped to a single Exercise -- two teams across
+    different exercises are not considered "the same team".
+    Membership (who is on what team) is in TeamMembership.
+    """
+
+    __tablename__ = "teams"
+    __table_args__ = (
+        # A team name is unique within an exercise; same name
+        # in a different exercise is allowed.
+        Index("uq_teams_exercise_name", "exercise_id", "name", unique=True),
+        Index("ix_teams_color", "color"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    exercise_id: Mapped[int] = mapped_column(
+        ForeignKey("exercises.id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(String(32), nullable=False)
+    # A short hex color used for the LeaderboardCard bars.
+    color: Mapped[str] = mapped_column(String(7), nullable=False, default="#888888")
+    # Initial aggregate score for the team across all submitted
+    # flags. Recomputed whenever a flag is captured via the
+    # F5 endpoint (the existing flag-side logic didn't know
+    # about teams; F6 updates it so the leaderboard reflects
+    # per-team totals).
+    score: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
+    exercise: Mapped[Exercise] = relationship(back_populates="teams")
+    memberships: Mapped[list["TeamMembership"]] = relationship(
+        back_populates="team",
+        cascade="all, delete-orphan",
+    )
+
+
+class TeamRole(str, enum.Enum):
+    """The role a user plays on a team within an exercise.
+
+    Caps at two values for F6:
+      * ``operator`` -- the team lead; can cancel runs for their
+        team.
+      * ``member`` -- regular player.
+
+    Admin/lead users can act on any team's exercise regardless
+    of their team membership.
+    """
+
+    OPERATOR = "operator"
+    MEMBER = "member"
+
+
+class TeamMembership(Base, TimestampMixin):
+    """A link between a User and a Team.
+
+    One user can be on multiple teams across exercises (because
+    exercises are independent), but at most one team per
+    exercise. The unique constraint ``uq_team_membership_user_exercise``
+    enforces that.
+    """
+
+    __tablename__ = "team_memberships"
+    __table_args__ = (
+        Index(
+            "uq_team_membership_user_exercise",
+            "sub", "exercise_id",
+            unique=True,
+        ),
+        Index("ix_team_membership_team_id", "team_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    sub: Mapped[str] = mapped_column(String(64), nullable=False)
+    exercise_id: Mapped[int] = mapped_column(
+        ForeignKey("exercises.id", ondelete="CASCADE"), nullable=False
+    )
+    team_id: Mapped[int] = mapped_column(
+        ForeignKey("teams.id", ondelete="CASCADE"), nullable=False
+    )
+    role: Mapped[TeamRole] = mapped_column(
+        Enum(
+            TeamRole,
+            name="team_role",
+            values_callable=lambda e: [v.value for v in e],
+        ),
+        nullable=False,
+        default=TeamRole.MEMBER,
+    )
+
+    team: Mapped[Team] = relationship(back_populates="memberships")
+
+    def __repr__(self) -> str:  # pragma: no cover
+        return (
+            f"<TeamMembership sub={self.sub!r} team={self.team_id} "
+            f"exercise={self.exercise_id} role={self.role.value}>"
+        )
