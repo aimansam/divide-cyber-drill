@@ -41,6 +41,7 @@ from app.observability import (
     record_cancel,
 )
 from app.runners.adapter import CloneSpec, ProxmoxAdapter
+from app.services import telemetry as _telemetry
 
 
 def _adapter_label(adapter: ProxmoxAdapter) -> str:
@@ -202,6 +203,25 @@ class Runner:
             details={"asset_count": len(assets_spec)},
         )
         await session.commit()
+
+        # Telemetry (L2 2.11). Build sinks from the scenario spec and
+        # fire-and-forget dispatch. Telemetry is best-effort — failures
+        # never propagate; ``dispatch`` swallows them.
+        sinks = _telemetry.build_sinks_from_spec(scenario.spec)
+        await _telemetry.dispatch(
+            sinks,
+            {
+                "type": "run.completed",
+                "run_id": run.id,
+                "scenario_id": scenario.id,
+                "started_by": run.started_by,
+                "started_at": run.started_at.isoformat() if run.started_at else None,
+                "ended_at": run.ended_at.isoformat() if run.ended_at else None,
+                "duration_sec": run.duration_sec,
+                "asset_count": len(assets_spec),
+            },
+        )
+
         return RunResult(run_id=run.id, status=run.status)
 
     async def stop_run(
