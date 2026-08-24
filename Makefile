@@ -8,7 +8,7 @@ API_DIR := services/api
 
 .DEFAULT_GOAL := help
 
-.PHONY: help up down logs ps restart build pull lint format test test-live-pg smoke proxmox-ping diag clean validate-scenarios migrate db-upgrade db-downgrade db-revision smoke-run sync-scenarios upload-template live-drill
+.PHONY: help up down logs ps restart build pull lint format test test-live-pg smoke proxmox-ping diag clean validate-scenarios migrate db-upgrade db-downgrade db-revision smoke-run sync-scenarios upload-template live-drill demo demo-open
 
 help: ## Show this help.
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -162,3 +162,9 @@ db-downgrade: ## Roll back the most recent migration.
 
 db-revision: ## Create a new migration (use msg=...). Requires autogenerate setup.
 	$(ALEMBIC) revision --autogenerate -m "$(msg)"
+
+demo: ## Run the F4-UI demo runner (one-command bootstrap).
+	@bash tools/demo.sh
+
+demo-open: ## Demo runner that also tries to open the portal in a browser.
+	@bash tools/demo.sh --open
