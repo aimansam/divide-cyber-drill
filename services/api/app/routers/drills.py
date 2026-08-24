@@ -163,6 +163,39 @@ async def start_drill(
                 )
             team = t.name
 
+    # F7: optional template_id. When set, the run is spawned
+    # against the template's snapshot (scenario is derived from
+    # template.scenario_id so callers don't have to specify both).
+    template_id_raw = body.get("template_id")
+    template_id = None
+    if template_id_raw is not None:
+        if not isinstance(template_id_raw, int):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="template_id must be an int when provided",
+            )
+        from app.db.models import Template
+        template_obj = (
+            await session.execute(
+                select(Template).where(Template.id == template_id_raw)
+            )
+        ).scalar_one_or_none()
+        if template_obj is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"template id={template_id_raw} not found",
+            )
+        template_id = template_obj.id
+        if template_obj.scenario_id != scenario_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"template {template_id} is for scenario "
+                    f"id={template_obj.scenario_id}, but body "
+                    f"requested scenario_id={scenario_id}"
+                ),
+            )
+
     # ``started_by`` attribution: prefer the token subject (proves
     # which user ran the drill in audit logs); fall back to the
     # body's ``started_by`` for legacy callers + smoke scripts.
@@ -205,6 +238,7 @@ async def start_drill(
                 started_by=started_by,
                 exercise_id=exercise_id,
                 team=team,
+                template_id=template_id,
             ),
             session,
         )
@@ -218,6 +252,7 @@ async def start_drill(
         "status": result.status.value,
         "exercise_id": exercise_id,
         "team": team,
+        "template_id": template_id,
     }
 
 
@@ -871,4 +906,248 @@ async def submit_flag(
         "elapsed_seconds": elapsed,
         "breakdown": breakdown,
         "scenario_name": scenario_name,
+    }
+
+
+# --- F7: reset + save-as-template ---------------------------------------
+
+
+@router.post(
+    "/{run_id}/reset",
+    summary="Reset a Run to its template snapshot",
+    dependencies=[Depends(require_role(Role.ADMIN, Role.LEAD))],
+)
+async def reset_run(
+    run_id: int,
+    session: AsyncSession = Depends(get_session),
+    token=Depends(current_token),
+) -> dict:
+    """Reset a Run's assets + flags to the originating template snapshot.
+
+    This is the operator's "undo" button -- they can pull a run
+    back to the snapshot state without re-creating the run.
+    If the run is not bound to a template (template_id is NULL),
+    this is a 409 (use ``save-as-template`` first to bind one).
+    """
+    run = (
+        await session.execute(
+            select(db_models.Run).where(db_models.Run.id == run_id)
+        )
+    ).scalar_one_or_none()
+    if run is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"run id={run_id} not found",
+        )
+    if run.template_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"run id={run_id} has no template; "
+                "use POST /drills/{id}/save-as-template first"
+            ),
+        )
+    # Load the template's snapshot.
+    from app.db.models import Template
+    template = (
+        await session.execute(
+            select(Template).where(Template.id == run.template_id)
+        )
+    ).scalar_one_or_none()
+    if template is None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"run id={run_id} references missing template id={run.template_id}"
+            ),
+        )
+    # Reset the run's lifecycle so the runner treats it as a
+    # fresh start: PENDING + restart started_at.
+    run.status = db_models.RunStatus.PENDING
+    run.score_red = 0
+    run.score_blue = 0
+    run.started_at = None
+    run.ended_at = None
+    # Drop existing assets (cascade deletes their children).
+    existing_assets = (
+        await session.execute(
+            select(db_models.Asset).where(db_models.Asset.run_id == run_id)
+        )
+    ).scalars().all()
+    for a in existing_assets:
+        await session.delete(a)
+    # Re-stage assets from snapshot. We pull role / kind /
+    # template_name; networks is recorded on the original scenario
+    # but doesn't have its own column on Asset (kept in
+    # scenario.spec.networks). Storing it would require a new
+    # column, deferred until F7.5.
+    snapshot = template.snapshot or {}
+    new_asset_ids = []
+    for asset_spec in snapshot.get("assets", []) or []:
+        asset = db_models.Asset(
+            run_id=run.id,
+            role=str(asset_spec.get("role", "victim")),
+            kind=str(asset_spec.get("kind", "vm")),
+            template=str(asset_spec.get("template", "") or "") or None,
+            status=db_models.AssetStatus.PLANNED,
+            pve_vmid=None,
+        )
+        session.add(asset)
+        await session.flush()
+        new_asset_ids.append(asset.id)
+    await session.commit()
+    return {
+        "run_id": run.id,
+        "template_id": template.id,
+        "status": run.status.value,
+        "asset_count": len(new_asset_ids),
+        "reset_by": getattr(token, "sub", "unknown"),
+        "snapshot_id": (
+            template.snapshot.get("scenario_id") if snapshot else None
+        ),
+    }
+
+
+@router.post(
+    "/{run_id}/save-as-template",
+    summary="Save the current Run as a Template",
+    dependencies=[Depends(require_role(Role.ADMIN))],
+)
+async def save_run_as_template(
+    run_id: int,
+    body: dict,
+    session: AsyncSession = Depends(get_session),
+    token=Depends(current_token),
+) -> dict:
+    """Snapshot the current Run's state into a new Template.
+
+    The Run doesn't have to be SUCCEEDED (unlike creating a
+    template from a finished run via /templates). This is the
+    operator's "bookmark" button while the drill is still
+    running -- handy for capturing an interesting intermediate
+    state.
+
+    Body::
+
+        {
+          "name": "mid-drill-snapshot",
+          "title": "Captured at t=15min",
+          "description": "..."
+        }
+    """
+    name = body.get("name")
+    title = body.get("title")
+    description = body.get("description", "")
+    if not isinstance(name, str) or not isinstance(title, str):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="name + title must be strings",
+        )
+    run = (
+        await session.execute(
+            select(db_models.Run).where(db_models.Run.id == run_id)
+        )
+    ).scalar_one_or_none()
+    if run is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"run id={run_id} not found",
+        )
+    # Capture FK values before any potential rollback.
+    scenario_id = run.scenario_id
+    scenario = (
+        await session.execute(
+            select(db_models.Scenario).where(
+                db_models.Scenario.id == scenario_id
+            )
+        )
+    ).scalar_one_or_none()
+    if scenario is None:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=(
+                f"run id={run_id} references missing scenario"
+            ),
+        )
+    snapshot = await _build_template_snapshot_from_live(run, scenario, session)
+
+    template = db_models.Template(
+        name=name,
+        title=title,
+        description=description,
+        from_run_id=run_id,
+        scenario_id=scenario_id,
+        snapshot=snapshot,
+        created_by=getattr(token, "sub", "unknown"),
+    )
+    session.add(template)
+    try:
+        await session.commit()
+    except Exception:
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"a template named {name!r} already exists",
+        )
+    # Bind the run to the new template (so a future /reset works).
+    run.template_id = template.id
+    await session.commit()
+    return _serialize_template_full(template)
+
+
+def _serialize_template_full(t: db_models.Template) -> dict:
+    return {
+        "id": t.id,
+        "name": t.name,
+        "title": t.title,
+        "description": t.description,
+        "from_run_id": t.from_run_id,
+        "scenario_id": t.scenario_id,
+        "snapshot": t.snapshot,
+        "created_by": t.created_by,
+        "created_at": (
+            t.created_at.isoformat() if t.created_at else None
+        ),
+        "updated_at": (
+            t.updated_at.isoformat() if t.updated_at else None
+        ),
+    }
+
+
+async def _build_template_snapshot_from_live(
+    run, scenario, session
+) -> dict:
+    """Build a snapshot from a live run (used by save-as-template).
+
+    Unlike _build_snapshot (which uses the scenario YAML), this
+    version reads the live assets so a run that's drifted from the
+    original scenario still produces a faithful snapshot.
+    """
+    from app.db.models import Asset as _Asset
+    assets_rows = (
+        await session.execute(
+            select(_Asset).where(_Asset.run_id == run.id)
+        )
+    ).scalars().all()
+    assets_snapshot = [
+        {
+            "role": a.role,
+            "kind": a.kind,
+            "networks": list(a.networks or []),
+            "template": (a.template_name or ""),
+        }
+        for a in assets_rows
+    ]
+    spec = scenario.spec or {}
+    inner = spec.get("spec", spec) if isinstance(spec, dict) else {}
+    return {
+        "scenario_id": scenario.id,
+        "scenario_name": scenario.name,
+        "scenario_version": scenario.version,
+        "assets": assets_snapshot,
+        "flags": list(inner.get("flags", []) or []),
+        "networks": list(inner.get("networks", []) or []),
+        "scoring": inner.get("scoring", {}),
+        "win_conditions": inner.get("win_conditions", {}),
+        "run_status_at_snapshot": run.status.value,
     }

@@ -66,6 +66,11 @@ class RunRequest:
     # F6: optional exercise + team binding.
     exercise_id: int | None = None
     team: str | None = None
+    # F7: optional template this run is spawned from. The runner
+    # uses the template's ``snapshot`` to pre-stage assets / flags
+    # rather than re-deriving them from the live scenario row
+    # (handy for replaying a frozen state).
+    template_id: int | None = None
 
 
 @dataclass(frozen=True)
@@ -139,13 +144,14 @@ class Runner:
         node = req.node or nodes[0]
 
         # 1. Create Run (pending) + Asset (planned) rows.
-        # F6: propagate exercise_id + team from the request when set.
+        # F6 + F7: propagate exercise_id + team + template_id.
         run = models.Run(
             scenario_id=scenario.id,
             status=RunStatus.PENDING,
             started_by=req.started_by,
             exercise_id=req.exercise_id,
             team=req.team,
+            template_id=req.template_id,
         )
         session.add(run)
         await session.flush()

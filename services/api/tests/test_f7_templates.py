@@ -15,6 +15,7 @@ import uuid
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 
 from app.core.auth import sign_token
 from app.db import models
@@ -369,3 +370,304 @@ def test_create_template_rejects_duplicate_name():
         "name": name, "title": "second", "from_run_id": run_id2,
     })
     assert r2.status_code == 409
+
+
+# --- F7.2: reset + clone-from-template -------------------------------
+
+
+def test_post_drill_with_template_id_spawns_run_with_template_id():
+    """POST /drills with template_id populates run.template_id."""
+    import uuid
+    sm = get_sessionmaker()
+
+    async def _seed():
+        async with sm() as session:
+            scen = models.Scenario(
+                name=f"f7-clone-{uuid.uuid4().hex[:8]}",
+                title="F7 Clone", version=1,
+                difficulty="beginner", duration_min=30,
+                spec={
+                    "apiVersion": "divide/v1", "kind": "Scenario",
+                    "spec": {
+                        "assets": [
+                            {"role": "victim", "kind": "vm",
+                             "template": "tpl-x", "networks": []}
+                        ],
+                    },
+                },
+            )
+            session.add(scen)
+            await session.flush()
+            run = models.Run(
+                scenario_id=scen.id,
+                status=models.RunStatus.SUCCEEDED,
+                started_by="alice",
+            )
+            session.add(run)
+            await session.flush()
+            template = models.Template(
+                name=f"f7-tpl-{uuid.uuid4().hex[:8]}",
+                title="F7 Test Template",
+                from_run_id=run.id, scenario_id=scen.id,
+                snapshot={"scenario_id": scen.id, "assets": []},
+                created_by="alice",
+            )
+            session.add(template)
+            await session.commit()
+            return scen.id, template.id
+
+    scenario_id, template_id = asyncio.run(_seed())
+    from app.main import app
+    admin = TestClient(
+        app, headers={"X-Divide-Token": sign_token(
+            sub="root", role="admin", ttl_s=300
+        )}
+    )
+    # Patch build_runner so we don't need PVE templates.
+    from app.runners.runner import Runner
+    from app.runners.mock_adapter import MockProxmoxAdapter
+    def _patched():
+        a = MockProxmoxAdapter()
+        a.seed_template("tpl-x")
+        return Runner(adapter=a)
+    from app.routers import drills as drills_mod
+    drills_mod.build_runner = _patched
+
+    r = admin.post("/api/v1/drills", json={
+        "scenario_id": scenario_id,
+        "template_id": template_id,
+    })
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["template_id"] == template_id
+
+
+def test_post_drill_with_template_id_rejects_wrong_scenario():
+    """template_id is for scenario X; body scenario_id=Y -> 400."""
+    import uuid
+    sm = get_sessionmaker()
+
+    async def _seed():
+        async with sm() as session:
+            scen1 = models.Scenario(
+                name=f"f7-mismatch-a-{uuid.uuid4().hex[:8]}",
+                title="A", version=1, difficulty="beginner",
+                duration_min=30,
+                spec={"apiVersion": "divide/v1", "kind": "Scenario",
+                       "spec": {"assets": []}},
+            )
+            scen2 = models.Scenario(
+                name=f"f7-mismatch-b-{uuid.uuid4().hex[:8]}",
+                title="B", version=1, difficulty="beginner",
+                duration_min=30,
+                spec={"apiVersion": "divide/v1", "kind": "Scenario",
+                       "spec": {"assets": []}},
+            )
+            session.add_all([scen1, scen2])
+            await session.flush()
+            template = models.Template(
+                name=f"mismatch-{uuid.uuid4().hex[:8]}",
+                title="Mismatch", scenario_id=scen1.id,
+                snapshot={}, created_by="alice",
+            )
+            session.add(template)
+            await session.commit()
+            return scen2.id, template.id
+
+    scenario_id, template_id = asyncio.run(_seed())
+    from app.main import app
+    admin = TestClient(
+        app, headers={"X-Divide-Token": sign_token(
+            sub="root", role="admin", ttl_s=300
+        )}
+    )
+    r = admin.post("/api/v1/drills", json={
+        "scenario_id": scenario_id,
+        "template_id": template_id,
+    })
+    assert r.status_code == 400
+
+
+def test_post_drill_with_unknown_template_404():
+    import uuid
+    sm = get_sessionmaker()
+
+    async def _seed():
+        async with sm() as session:
+            scen = models.Scenario(
+                name=f"f7-no-tpl-{uuid.uuid4().hex[:8]}",
+                title="No Tpl", version=1,
+                difficulty="beginner", duration_min=30,
+                spec={"apiVersion": "divide/v1", "kind": "Scenario",
+                       "spec": {"assets": []}},
+            )
+            session.add(scen)
+            await session.commit()
+            return scen.id
+
+    scenario_id = asyncio.run(_seed())
+    from app.main import app
+    admin = TestClient(
+        app, headers={"X-Divide-Token": sign_token(
+            sub="root", role="admin", ttl_s=300
+        )}
+    )
+    r = admin.post("/api/v1/drills", json={
+        "scenario_id": scenario_id,
+        "template_id": 99999,
+    })
+    assert r.status_code == 404
+
+
+def test_save_as_template_admin_only():
+    """A non-admin cannot save-as-template."""
+    scenario_id, run_id = _seed_scenario_and_succeeded_run()
+    from app.main import app
+    red = TestClient(
+        app, headers={"X-Divide-Token": sign_token(
+            sub="alice", role="red", ttl_s=300
+        )}
+    )
+    r = red.post(f"/api/v1/drills/{run_id}/save-as-template", json={
+        "name": "red-save", "title": "x",
+    })
+    assert r.status_code in (401, 403)
+
+
+def test_save_as_template_binds_template_to_run():
+    """Saving a run creates a template AND populates run.template_id."""
+    scenario_id, run_id = _seed_scenario_and_succeeded_run()
+    from app.main import app
+    admin = TestClient(
+        app, headers={"X-Divide-Token": sign_token(
+            sub="root", role="admin", ttl_s=300
+        )}
+    )
+    r = admin.post(f"/api/v1/drills/{run_id}/save-as-template", json={
+        "name": f"bookmark-{uuid.uuid4().hex}",
+        "title": "Bookmark at t=15",
+        "description": "captured mid-drill",
+    })
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["from_run_id"] == run_id
+    assert body["scenario_id"] == scenario_id
+    # The run is now bound.
+    sm = get_sessionmaker()
+    async def _check():
+        async with sm() as session:
+            r_row = (
+                await session.execute(
+                    select(models.Run).where(models.Run.id == run_id)
+                )
+            ).scalar_one()
+            assert r_row.template_id == body["id"]
+    asyncio.run(_check())
+
+
+def test_reset_run_requires_existing_template_binding():
+    """A run without template_id can NOT be reset (we don't know
+    what to reset to)."""
+    scenario_id, run_id = _seed_scenario_and_succeeded_run()
+    from app.main import app
+    admin = TestClient(
+        app, headers={"X-Divide-Token": sign_token(
+            sub="root", role="admin", ttl_s=300
+        )}
+    )
+    r = admin.post(f"/api/v1/drills/{run_id}/reset")
+    assert r.status_code == 409
+
+
+def test_reset_run_restages_assets_from_template():
+    """Reset wipes + restages the run's assets from the snapshot."""
+    import uuid
+    sm = get_sessionmaker()
+
+    async def _seed():
+        async with sm() as session:
+            scen = models.Scenario(
+                name=f"f7-reset-{uuid.uuid4().hex[:8]}",
+                title="Reset Test", version=1,
+                difficulty="beginner", duration_min=30,
+                spec={
+                    "apiVersion": "divide/v1", "kind": "Scenario",
+                    "spec": {
+                        "assets": [
+                            {"role": "victim", "kind": "vm",
+                             "template": "tpl-x", "networks": []}
+                        ],
+                    },
+                },
+            )
+            session.add(scen)
+            await session.flush()
+            template = models.Template(
+                name=f"reset-tpl-{uuid.uuid4().hex[:8]}",
+                title="Reset Tpl", scenario_id=scen.id,
+                snapshot={
+                    "scenario_id": scen.id,
+                    "assets": [
+                        {"role": "victim", "kind": "vm",
+                         "template": "tpl-x", "networks": []},
+                    ],
+                },
+                created_by="alice",
+            )
+            session.add(template)
+            await session.flush()
+            run = models.Run(
+                scenario_id=scen.id,
+                status=models.RunStatus.SUCCEEDED,
+                started_by="alice",
+                template_id=template.id,
+            )
+            session.add(run)
+            await session.commit()
+            return scen.id, run.id, template.id
+
+    scen_id, run_id, template_id = asyncio.run(_seed())
+    from app.main import app
+    admin = TestClient(
+        app, headers={"X-Divide-Token": sign_token(
+            sub="root", role="admin", ttl_s=300
+        )}
+    )
+    r = admin.post(f"/api/v1/drills/{run_id}/reset")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["status"] == "pending"
+    assert body["template_id"] == template_id
+    assert body["asset_count"] == 1
+
+    async def _check():
+        async with sm() as session:
+            assets = (
+                await session.execute(
+                    select(models.Asset).where(
+                        models.Asset.run_id == run_id
+                    )
+                )
+            ).scalars().all()
+            assert len(assets) == 1
+            assert assets[0].role == "victim"
+            # Run was reset to PENDING with cleared scores.
+            r_row = (
+                await session.execute(
+                    select(models.Run).where(models.Run.id == run_id)
+                )
+            ).scalar_one()
+            assert r_row.score_red == 0
+            assert r_row.score_blue == 0
+    asyncio.run(_check())
+
+
+def test_reset_404_for_unknown_run():
+    from app.main import app
+    admin = TestClient(
+        app, headers={"X-Divide-Token": sign_token(
+            sub="root", role="admin", ttl_s=300
+        )}
+    )
+    r = admin.post("/api/v1/drills/99999/reset")
+    assert r.status_code == 404
