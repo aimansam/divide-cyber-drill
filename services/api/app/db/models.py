@@ -75,6 +75,7 @@ class AuditAction(str, enum.Enum):
     RUN_COMPLETED = "run.completed"
     RUN_FAILED = "run.failed"
     RUN_CANCELLED = "run.cancelled"
+    RUN_TIMEOUT = "run.timeout"  # auto-cancelled by the watchdog (L2 2.8)
     ASSET_SPAWNED = "asset.spawned"
     ASSET_FAILED = "asset.failed"
     ASSET_ORPHANED = "asset.orphaned"

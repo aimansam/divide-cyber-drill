@@ -101,6 +101,20 @@ class Settings(BaseSettings):
     # the live source tree.
     portal_dir: str = "/app/portal"
 
+    # Drill lifecycle (L2 2.8) — auto-timeout runs that stay RUNNING for
+    # longer than this many minutes. The watchdog asyncio task is
+    # scheduled by ``Runner._maybe_schedule_watchdog`` after a run enters
+    # RUNNING; it sleeps `drill_timeout_min * 60` then flips the row to
+    # TIMEOUT, best-effort tears down assets, and writes RUN_TIMEOUT audit.
+    # Set to a non-positive value to disable (e.g. for soak testing).
+    drill_timeout_min: int = 30
+    # Disable via env when operators want to keep a run alive past the
+    # timeout (e.g., a 4-hour red-team exercise). In dev, set to 0 to
+    # defeat the watchdog entirely. The toggle is a bool; the timeout
+    # only fires if both ``drill_timeout_enabled=True`` AND
+    # ``drill_timeout_min > 0``.
+    drill_timeout_enabled: bool = True
+
 
 @lru_cache
 def get_settings() -> Settings:

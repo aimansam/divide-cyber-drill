@@ -22,11 +22,15 @@ The error is recorded on `Run.error` and in the audit log.
 """
 from __future__ import annotations
 
+import asyncio
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.config import settings
 
 from app.db import models
 from app.db.models import AssetStatus, AuditAction, RunStatus
@@ -138,6 +142,12 @@ class Runner:
         run.started_at = datetime.now(timezone.utc)
         await session.flush()
         inc_run_started(adapter=_adapter_label(self._adapter))
+
+        # 2b. Schedule the watchdog (L2 2.8). The watchdog checks after
+        #     ``drill_timeout_min`` if the run is still RUNNING and, if
+        #     so, transitions it to TIMEOUT. The task is fire-and-forget;
+        #     it owns its own session lifecycle.
+        self._schedule_watchdog(run.id, node, len(assets_spec))
 
         # 3. Clone + start each asset. On error, mark run FAILED and tear
         #    down whatever was already created.
@@ -450,6 +460,138 @@ class Runner:
                 details=details or {},
             )
         )
+
+    # --- watchdog (L2 2.8) --------------------------------------------
+
+    def _schedule_watchdog(
+        self, run_id: int, node: str, asset_count: int
+    ) -> None:
+        """Spawn the timeout watchdog as a background asyncio task.
+
+        Idempotent: if the timeout is disabled (env override) or
+        non-positive, no task is scheduled. Otherwise the task sleeps
+        for ``drill_timeout_min * 60`` seconds and then invokes
+        :meth:`_watchdog_timeout_fire`. The task owns its own session,
+        so it survives the request-response cycle that started the run.
+        """
+        enabled = getattr(settings, "drill_timeout_enabled", True)
+        timeout_min = getattr(settings, "drill_timeout_min", 0) or 0
+        if not enabled or timeout_min <= 0:
+            return
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            # No loop (e.g. synchronous test). Watchdog is a safety net;
+            # skip and rely on manual cancel.
+            logging.getLogger(__name__).info(
+                "runner.watchdog.no_loop run_id=%s (skipping)", run_id
+            )
+            return
+
+        loop.create_task(
+            self._watchdog_timeout_fire(
+                run_id=run_id,
+                node=node,
+                timeout_min=timeout_min,
+                asset_count=asset_count,
+            )
+        )
+
+    async def _watchdog_timeout_fire(
+        self, *, run_id: int, node: str, timeout_min: int, asset_count: int
+    ) -> None:
+        """Sleep then flip the run to TIMEOUT if still RUNNING.
+
+        Best-effort: if anything fails (DB down, adapter crash), log
+        and move on. The audit + metric paths are fire-and-forget;
+        we never raise out of the watchdog.
+        """
+        log = logging.getLogger(__name__)
+        try:
+            await asyncio.sleep(timeout_min * 60)
+        except asyncio.CancelledError:
+            return  # Run terminated on its own; no-op.
+
+        sm = _sessionmaker()
+        try:
+            async with sm() as session:
+                run = (
+                    await session.execute(
+                        select(models.Run).where(models.Run.id == run_id)
+                    )
+                ).scalar_one_or_none()
+                if run is None:
+                    log.info("runner.watchdog.run_gone run_id=%s", run_id)
+                    return
+                if run.status != RunStatus.RUNNING:
+                    log.info(
+                        "runner.watchdog.run_already_terminal run_id=%s status=%s",
+                        run_id,
+                        run.status.value,
+                    )
+                    return
+
+                # Best-effort adapter teardown.
+                assets = (
+                    await session.execute(
+                        select(models.Asset).where(models.Asset.run_id == run_id)
+                    )
+                ).scalars().all()
+                for asset in assets:
+                    if asset.pve_vmid is None or not asset.pve_node:
+                        continue
+                    try:
+                        await self._adapter.stop_vm(
+                            asset.pve_vmid, asset.pve_node, force=True
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        log.warning(
+                            "runner.watchdog.stop_failed vmid=%s err=%s",
+                            asset.pve_vmid,
+                            exc,
+                        )
+                    try:
+                        await self._adapter.destroy_vm(
+                            asset.pve_vmid, asset.pve_node
+                        )
+                    except Exception as exc:  # noqa: BLE001
+                        log.warning(
+                            "runner.watchdog.destroy_failed vmid=%s err=%s",
+                            asset.pve_vmid,
+                            exc,
+                        )
+                    asset.status = AssetStatus.STOPPED
+
+                run.status = RunStatus.TIMEOUT
+                run.ended_at = datetime.now(timezone.utc)
+                run.error = f"auto-timeout after {timeout_min} min"
+                inc_run_terminal(
+                    outcome="timeout", adapter=_adapter_label(self._adapter)
+                )
+                await self._audit(
+                    session,
+                    action=AuditAction.RUN_TIMEOUT,
+                    actor="watchdog",
+                    run_id=run.id,
+                    details={
+                        "timeout_min": timeout_min,
+                        "asset_count": asset_count,
+                    },
+                )
+                await session.commit()
+                log.info(
+                    "runner.watchdog.timeout_fired run_id=%s timeout_min=%s",
+                    run_id,
+                    timeout_min,
+                )
+        except Exception as exc:  # noqa: BLE001
+            log.error(
+                "runner.watchdog.failed run_id=%s err=%s",
+                run_id,
+                exc,
+                exc_info=True,
+            )
 
 
 def _sessionmaker():
