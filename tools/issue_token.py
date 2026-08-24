@@ -3,11 +3,16 @@
 
 Tokens are HMAC-SHA256-signed compact JWS-ish strings. They go in the
 ``X-Divide-Token`` request header on API calls that need a known
-caller identity (rate limiting, audit attribution, future RBAC).
+caller identity (rate limiting, audit attribution, RBAC).
 
 Usage:
-    python tools/issue_token.py --user alice --role trainee --ttl 24h
+    python tools/issue_token.py --user alice --role red --ttl 24h
     python tools/issue_token.py --user bob --role admin --ttl 7d
+    python tools/issue_token.py --user charlie --role lead --ttl 12h
+
+The ``--role`` choices are the five :class:`app.core.auth.Role`
+enum values: ``admin``, ``lead``, ``red``, ``blue``, ``observer``.
+Anything else is rejected at the CLI (L2 2.9).
 
 The token is signed with the same secret the API uses to verify
 tokens (resolved from ``DIVIDE_TOKEN_SECRET`` or derived from
@@ -71,6 +76,8 @@ def _parse_ttl(spec: str) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
+    from app.core.auth import Role
+
     ap = argparse.ArgumentParser(
         description="Issue a div:ide X-Divide-Token for a user.",
     )
@@ -81,8 +88,14 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument(
         "--role",
-        default="trainee",
-        help="Role string the token carries. Free-form today; L2 will gate on this.",
+        default=Role.RED.value,
+        choices=[r.value for r in Role],
+        help=(
+            "Role string the token carries. Must be one of the "
+            "Role enum values (L2 2.9); default red. The legacy "
+            "'trainee' value is rejected -- re-issue with --role red "
+            "or blue instead."
+        ),
     )
     ap.add_argument(
         "--ttl",

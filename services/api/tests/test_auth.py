@@ -225,7 +225,7 @@ def test_issue_token_cli_outputs_a_valid_token(tmp_path, monkeypatch):
             "--user",
             "alice",
             "--role",
-            "trainee",
+            "red",  # L2 2.9: role must be one of {admin,lead,red,blue,observer}
             "--ttl",
             "1h",
         ],
@@ -248,7 +248,7 @@ def test_issue_token_cli_outputs_a_valid_token(tmp_path, monkeypatch):
 
     data = verify_token(tok)
     assert data.sub == "alice"
-    assert data.role == "trainee"
+    assert data.role == "red"
 
 
 def test_issue_token_cli_ttl_formats(monkeypatch):

@@ -8,6 +8,19 @@ keep working without PVE creds.
 
 The DB is persistent. State is read from Postgres, not from in-memory
 process state, so the API can be restarted without losing runs.
+
+RBAC (L2 2.9):
+  * POST   /drills                  → admin, lead, red (start a run)
+  * POST   /drills/{id}/stop        → admin, lead (force-stop any run)
+  * POST   /drills/{id}/cancel      → admin, lead, red (red: own runs only)
+  * GET    /drills                  → any role; red/blue filtered to own
+  * GET    /drills/{id}             → any role; red/blue see only own
+  * GET    /drills/{id}/audit       → any role; red/blue see only own
+
+The visibility filter is implemented in
+:mod:`app.services.authorization` and applied uniformly across
+list / detail / audit / (future) report endpoints. The matrix
+table is the source of truth for ``docs/USER-REQUIREMENTS.md`` §2.
 """
 from __future__ import annotations
 
@@ -16,11 +29,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.core.auth import current_token
+from app.core.auth import Role, current_token, require_role
 from app.db import models as db_models
 from app.db.session import get_session
 from app.observability import record_cancel
 from app.runners.runner import Runner, RunnerError, RunRequest, build_runner
+from app.services.authorization import can_view_run, visible_runs_query
 
 router = APIRouter()
 
@@ -37,7 +51,11 @@ def _get_runner() -> Runner:
     return build_runner()
 
 
-@router.post("", summary="Start a drill (mock adapter, no PVE)")
+@router.post(
+    "",
+    summary="Start a drill (mock adapter, no PVE)",
+    dependencies=[Depends(require_role(Role.ADMIN, Role.LEAD, Role.RED))],
+)
 async def start_drill(
     body: dict,
     session: AsyncSession = Depends(get_session),
@@ -91,7 +109,11 @@ async def start_drill(
     }
 
 
-@router.post("/{run_id}/stop", summary="Stop a drill")
+@router.post(
+    "/{run_id}/stop",
+    summary="Stop a drill",
+    dependencies=[Depends(require_role(Role.ADMIN, Role.LEAD))],
+)
 async def stop_drill(
     run_id: int,
     session: AsyncSession = Depends(get_session),
@@ -117,6 +139,7 @@ async def stop_drill(
 @router.post(
     "/{run_id}/cancel",
     summary="Cancel a running drill (trainee-initiated abort)",
+    dependencies=[Depends(require_role(Role.ADMIN, Role.LEAD, Role.RED))],
 )
 async def cancel_drill(
     run_id: int,
@@ -134,13 +157,45 @@ async def cancel_drill(
 
     Status codes:
       * 200 — run cancelled; assets best-effort torn down.
+      * 401 — no token (require_token under require_role).
+      * 403 — token role is not in {admin, lead, red}, or red is
+        trying to cancel a run they didn't start.
       * 404 — run not found.
       * 409 — run is already in a terminal state (succeeded / failed /
         cancelled / timeout). Caller must check the run state first.
+
+    RBAC: the route-level ``require_role`` gate passes for admin,
+    lead, and red. After that, an additional check rejects red
+    callers attempting to cancel a run that wasn't started by
+    them (``run.started_by != token.sub``). Admins and leads can
+    cancel any run.
     """
     body = body or {}
     reason = body.get("reason") or "user-requested"
     actor = body.get("actor") or (token.sub if token else None)
+
+    # Own-only filter for red. Done before the runner call so we
+    # return a clean 403 rather than a 404 from "not found" -- the
+    # latter would obscure the auth reason and make the UI confusing.
+    if token and token.role == Role.RED.value:
+        run_row = (
+            await session.execute(
+                select(db_models.Run.started_by).where(
+                    db_models.Run.id == run_id
+                )
+            )
+        ).scalar_one_or_none()
+        if run_row is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"run id={run_id} not found",
+            )
+        if run_row != token.sub:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="red team can only cancel runs they started",
+            )
+
     runner = _get_runner()
     try:
         run = await runner.cancel_run(
@@ -175,11 +230,30 @@ async def cancel_drill(
     }
 
 
-@router.get("", summary="List drills (all runs in DB)")
-async def list_drills(session: AsyncSession = Depends(get_session)) -> dict:
-    rows = (
-        await session.execute(select(db_models.Run).order_by(db_models.Run.id.desc()))
-    ).scalars().all()
+@router.get(
+    "",
+    summary="List drills (visibility-filtered by token role)",
+    dependencies=[Depends(require_role(
+        Role.ADMIN, Role.LEAD, Role.OBSERVER, Role.RED, Role.BLUE,
+    ))],
+)
+async def list_drills(
+    session: AsyncSession = Depends(get_session),
+    token=Depends(current_token),
+) -> dict:
+    """List runs, scoped to what the caller's role can see.
+
+    admin / lead / observer → all runs.
+    red / blue              → only runs where ``started_by == token.sub``.
+
+    The visibility filter is applied at the SQL layer (see
+    :func:`app.services.authorization.visible_runs_query`), so the
+    response shape doesn't change role-to-role -- only the rows
+    returned. The UI is the same code path for every persona; it
+    just sees a shorter list when the caller is a participant.
+    """
+    stmt = visible_runs_query(token).order_by(db_models.Run.id.desc())
+    rows = (await session.execute(stmt)).scalars().all()
     return {
         "items": [
             {
@@ -199,15 +273,31 @@ async def list_drills(session: AsyncSession = Depends(get_session)) -> dict:
     }
 
 
-@router.get("/{run_id}", summary="Get one drill by id (with assets)")
+@router.get(
+    "/{run_id}",
+    summary="Get one drill by id (with assets, visibility-filtered)",
+    dependencies=[Depends(require_role(
+        Role.ADMIN, Role.LEAD, Role.OBSERVER, Role.RED, Role.BLUE,
+    ))],
+)
 async def get_drill(
     run_id: int,
     session: AsyncSession = Depends(get_session),
+    token=Depends(current_token),
 ) -> dict:
     """Return a single Run with its Asset rows expanded.
 
     Used by the test UI / drill inspector. Read-only -- does not touch
-    PVE. Returns 404 if the run_id doesn't exist.
+    PVE.
+
+    RBAC: any authenticated role may call this, but red/blue only
+    see their own runs. The 404 vs 403 question:
+
+      * Run exists, caller can see it        → 200.
+      * Run exists, caller cannot see it     → 403 (do not leak
+                                              existence to a
+                                              non-entitled caller).
+      * Run does not exist                   → 404.
 
     Why we have this on top of /api/v1/drills (list):
         The list endpoint returns summary rows only (no assets). The
@@ -232,6 +322,12 @@ async def get_drill(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"run id={run_id} not found",
+        )
+    if not can_view_run(token, run):
+        # 403, not 404: the row exists, just not for you.
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="you do not have access to this run",
         )
     return {
         "run_id": run.id,
@@ -263,28 +359,49 @@ async def get_drill(
 
 @router.get(
     "/{run_id}/audit",
-    summary="Get the audit-log entries for one drill",
+    summary="Get the audit-log entries for one drill (visibility-filtered)",
+    dependencies=[Depends(require_role(
+        Role.ADMIN, Role.LEAD, Role.OBSERVER, Role.RED, Role.BLUE,
+    ))],
 )
 async def get_drill_audit(
     run_id: int,
     session: AsyncSession = Depends(get_session),
+    token=Depends(current_token),
 ) -> dict:
     """Return the append-only audit_log rows linked to this run, oldest first.
 
     Read-only. Useful for the test UI to verify the lifecycle hooks fired
     (run.started, asset.spawned, run.completed / run.cancelled).
-    Returns 404 if the run_id doesn't exist, but ``items=[]`` if the run
-    exists and just hasn't generated any audit entries yet.
+
+    RBAC: same matrix as GET /drills/{id}. A red/blue caller who
+    cannot see the run also cannot see its audit log; they get
+    403, not an empty list. Returning empty for "exists but not
+    yours" would silently confirm the run's existence to a probe.
     """
-    # Verify run exists -- otherwise we can't tell "real run with no
-    # events yet" from "typo'd run_id".
-    exists = (
-        await session.execute(select(db_models.Run.id).where(db_models.Run.id == run_id))
-    ).scalar_one_or_none()
-    if exists is None:
+    # Fetch both the existence flag and the started_by in one round
+    # trip so we can distinguish "doesn't exist" from "exists but
+    # not yours" without leaking the existence either way.
+    row = (
+        await session.execute(
+            select(db_models.Run.id, db_models.Run.started_by).where(
+                db_models.Run.id == run_id
+            )
+        )
+    ).first()
+    if row is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"run id={run_id} not found",
+        )
+    run_id_db, started_by = row
+    # Reuse can_view_run by constructing a transient proxy object.
+    # Cheaper than a second DB round-trip and keeps the rule in
+    # one place.
+    if not can_view_run(token, db_models.Run(id=run_id_db, started_by=started_by)):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="you do not have access to this run",
         )
 
     rows = (

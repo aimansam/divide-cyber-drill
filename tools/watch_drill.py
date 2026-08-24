@@ -13,17 +13,26 @@ Three modes:
   --cancel-after N
       Cancel the run N seconds after it starts. Used to exercise the
       /drills/{id}/cancel endpoint mid-flight so Panel 3 of the
-      Grafana dashboard populates.
+      Grafana dashboard populates. Requires a token with role in
+      {admin, lead, red} -- see ``--token`` below.
 
   --api-poll
       Fall back to /api/v1/drills polling if Prometheus isn't reachable.
 
+Auth (L2 2.9): /api/v1/drills/{id}/cancel is now gated on
+``require_role(ADMIN, LEAD, RED)``. Anonymous calls return 401.
+Pass the token via ``--token`` (highest priority) or
+``DIVIDE_TOKEN`` env var (default). The Prometheus + ``/drills``
+list endpoints remain anonymous, so only the cancel call needs
+the header.
+
 Typical usage:
-  # Watch for the next succeeded run:
+  # Watch for the next succeeded run (no auth needed for read paths):
   python tools/watch_drill.py
 
   # Cancel any drill that starts, after 30s:
-  python tools/watch_drill.py --cancel-after 30
+  DIVIDE_TOKEN=$(python tools/issue_token.py --user watch-bot --role lead)
+  python tools/watch_drill.py --cancel-after 30 --token "$DIVIDE_TOKEN"
 
   # Wait for a specific scenario to succeed:
   python tools/watch_drill.py --scenario first-live-drill
@@ -41,6 +50,8 @@ import httpx
 REPO = Path(__file__).resolve().parents[1]
 DEFAULT_API_BASE = os.environ.get("DIVIDE_API_BASE", "http://localhost:8000")
 DEFAULT_PROM_BASE = os.environ.get("DIVIDE_PROM_BASE", "http://localhost:9090")
+# Default token comes from DIVIDE_TOKEN; --token CLI flag overrides.
+DEFAULT_TOKEN = os.environ.get("DIVIDE_TOKEN")
 
 
 def _get_counter(prom_base, labels, name="divide_runs_total"):
@@ -86,9 +97,24 @@ def _latest_run_id(api_base, scenario=None):
     return runs[0].get("run_id") or runs[0].get("id")
 
 
-def _cancel(api_base, run_id):
+def _cancel(api_base, run_id, token=None):
+    """POST /api/v1/drills/{id}/cancel with an auth header.
+
+    The endpoint is gated on ``require_role(ADMIN, LEAD, RED)`` since
+    L2 2.9. Without a token, the call returns 401 and the cancel
+    does nothing. The caller logs the HTTP code so the operator
+    notices.
+
+    Read paths used by this script (Prometheus + /api/v1/drills
+    list) are still anonymous, so the token is only attached on the
+    single cancel POST.
+    """
+    headers = {"X-Divide-Token": token} if token else {}
     with httpx.Client(timeout=10.0) as c:
-        r = c.post(f"{api_base}/api/v1/drills/{run_id}/cancel")
+        r = c.post(
+            f"{api_base}/api/v1/drills/{run_id}/cancel",
+            headers=headers,
+        )
         try:
             return r.status_code, r.json()
         except Exception:
@@ -97,8 +123,21 @@ def _cancel(api_base, run_id):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n", 1)[0])
-    ap.add_argument("--api-base", default=DEFAULT_API_BASE)
-    ap.add_argument("--prom-base", default=DEFAULT_PROM_BASE)
+    ap.add_argument(
+        "--api-base", default=DEFAULT_API_BASE
+    )
+    ap.add_argument(
+        "--prom-base", default=DEFAULT_PROM_BASE
+    )
+    ap.add_argument(
+        "--token",
+        default=DEFAULT_TOKEN,
+        help=(
+            "X-Divide-Token for the /drills/{id}/cancel call "
+            "(role must be admin/lead/red). Falls back to the "
+            "$DIVIDE_TOKEN env var. Read paths don't need a token."
+        ),
+    )
     ap.add_argument(
         "--outcome",
         default="succeeded",
@@ -160,6 +199,12 @@ def main():
     print(f"-> watching for outcome={args.outcome!r}, timeout={args.timeout:.0f}s")
     if args.cancel_after is not None:
         print(f"-> will cancel at t+{args.cancel_after}s")
+        if not args.token:
+            print(
+                "WARN: --cancel-after requires an admin/lead/red token; "
+                "set --token or $DIVIDE_TOKEN. The cancel call will "
+                "return 401 without it."
+            )
 
     while time.monotonic() < deadline:
         now = time.monotonic()
@@ -177,7 +222,7 @@ def main():
         if cancel_at is not None and not cancel_sent and now >= cancel_at:
             rid = _latest_run_id(args.api_base, args.scenario)
             if rid is not None:
-                code, body = _cancel(args.api_base, rid)
+                code, body = _cancel(args.api_base, rid, token=args.token)
                 print(f"\n[t+{elapsed:.1f}s] cancel -> HTTP {code}: {body}")
                 cancel_sent = True
             else:

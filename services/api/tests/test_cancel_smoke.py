@@ -292,6 +292,171 @@ def test_watch_drill_cancel_after_path_triggers_cancel_endpoint(monkeypatch) -> 
     assert cancel_calls, "watch_drill never POSTed /drills/99/cancel"
 
 
+def test_watch_drill_cancel_sends_divide_token_header(monkeypatch) -> None:
+    """When ``--token`` (or $DIVIDE_TOKEN) is set, watch_drill must
+    forward it on the cancel POST. Read paths stay anonymous.
+
+    Without this, a real run against the gated endpoint would 401
+    even though the operator clearly intended to act.
+    """
+    import httpx
+
+    captured: dict[str, str] = {}
+    state = {"poll_count": 0}
+
+    def cancel(req: httpx.Request) -> httpx.Response:
+        captured["auth_header"] = req.headers.get("X-Divide-Token", "")
+        return httpx.Response(
+            200,
+            json={
+                "run_id": 99,
+                "status": "cancelled",
+                "reason": "watch-drill-cancel-after",
+                "assets": [],
+            },
+        )
+
+    def list_drills(_: httpx.Request) -> httpx.Response:
+        state["poll_count"] += 1
+        # First poll: running. After: cancelled (post-cancel).
+        status = "cancelled" if state["poll_count"] >= 2 else "running"
+        return httpx.Response(
+            200,
+            json={"items": [{"run_id": 99, "scenario_id": 3, "status": status}]},
+        )
+
+    def prom_query(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200, json={"status": "success", "data": {"result": []}}
+        )
+
+    handlers = {
+        "http://localhost:8000/api/v1/drills/99/cancel": cancel,
+        "http://localhost:8000/api/v1/drills": list_drills,
+        "http://localhost:9090/api/v1/query": prom_query,
+    }
+
+    def _route(request: httpx.Request) -> httpx.Response:
+        for prefix, handler in handlers.items():
+            if str(request.url).startswith(prefix):
+                return handler(request)
+        return httpx.Response(404, json={"detail": "no handler"})
+
+    transport = httpx.MockTransport(_route)
+    original_client = httpx.Client
+
+    def patched_client(*args, **kwargs):
+        kwargs["transport"] = transport
+        return original_client(*args, **kwargs)
+
+    monkeypatch.setattr(httpx, "Client", patched_client)
+
+    spec = importlib.util.spec_from_file_location(
+        "watch_drill",
+        Path(__file__).resolve().parents[3] / "tools" / "watch_drill.py",
+    )
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["watch_drill"] = mod
+    spec.loader.exec_module(mod)
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "watch_drill.py",
+            "--cancel-after", "0",
+            "--outcome", "cancelled",
+            "--timeout", "5",
+            "--poll", "0.05",
+            "--api-poll",
+            "--token", "fake-jwt-for-test",
+        ],
+    )
+    rc = mod.main()
+    assert rc == 0
+    assert captured.get("auth_header") == "fake-jwt-for-test", (
+        f"watch_drill did not forward the token; got "
+        f"{captured.get('auth_header')!r}"
+    )
+
+
+def test_watch_drill_warns_when_cancel_after_without_token(monkeypatch, capsys) -> None:
+    """If ``--cancel-after`` is set without a token, watch_drill
+    prints a WARN at startup. The cancel call still happens (so the
+    operator sees the 401), but the warning makes the misconfig
+    obvious in the logs.
+    """
+    import httpx
+
+    def cancel(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={"run_id": 99, "status": "cancelled", "reason": "x", "assets": []},
+        )
+
+    def list_drills(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={"items": [{"run_id": 99, "scenario_id": 3, "status": "cancelled"}]},
+        )
+
+    def prom_query(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200, json={"status": "success", "data": {"result": []}}
+        )
+
+    handlers = {
+        "http://localhost:8000/api/v1/drills/99/cancel": cancel,
+        "http://localhost:8000/api/v1/drills": list_drills,
+        "http://localhost:9090/api/v1/query": prom_query,
+    }
+
+    def _route(request: httpx.Request) -> httpx.Response:
+        for prefix, handler in handlers.items():
+            if str(request.url).startswith(prefix):
+                return handler(request)
+        return httpx.Response(404, json={"detail": "no handler"})
+
+    transport = httpx.MockTransport(_route)
+    original_client = httpx.Client
+
+    def patched_client(*args, **kwargs):
+        kwargs["transport"] = transport
+        return original_client(*args, **kwargs)
+
+    monkeypatch.setattr(httpx, "Client", patched_client)
+
+    spec = importlib.util.spec_from_file_location(
+        "watch_drill",
+        Path(__file__).resolve().parents[3] / "tools" / "watch_drill.py",
+    )
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["watch_drill"] = mod
+    spec.loader.exec_module(mod)
+
+    # No --token, no $DIVIDE_TOKEN. The warn must still fire because
+    # --cancel-after is set.
+    monkeypatch.delenv("DIVIDE_TOKEN", raising=False)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "watch_drill.py",
+            "--cancel-after", "0",
+            "--outcome", "cancelled",
+            "--timeout", "5",
+            "--poll", "0.05",
+            "--api-poll",
+        ],
+    )
+    mod.main()
+    out = capsys.readouterr().out
+    assert "WARN" in out
+    assert "DIVIDE_TOKEN" in out or "--token" in out
+
+
 # ---------- 404 / 409 paths (drive watch_drill's error messages) ----------
 
 

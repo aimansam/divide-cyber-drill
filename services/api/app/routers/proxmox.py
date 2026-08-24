@@ -7,6 +7,29 @@ Status codes:
   - 200: data returned
   - 502: PVE reachable but call failed (auth, parse, etc.)
   - 503: Proxmox not configured (env vars missing)
+
+RBAC note (L2 2.9): these endpoints are INTENTIONALLY NOT gated
+on ``require_role``. The setup wizard's step 1 calls
+``GET /api/v1/proxmox/health`` from the operator's browser BEFORE
+any token has been minted, and the wizard UI in ``services/portal/``
+loads the storage / templates / nodes lists before the operator
+gets to step 4 (which is when they issue their admin token).
+Gating these endpoints would break the wizard's load-on-page-load
+pattern.
+
+M5 in the post-L1 plan owns the full ``/api/v1/proxmox/*``
+hardening pass. The intended gating is:
+
+  * GET /proxmox/health       → public (wizard dep; trivially safe)
+  * GET /proxmox/nodes        → admin, lead, observer
+  * GET /proxmox/storage      → admin, lead, observer
+  * GET /proxmox/templates    → admin, lead, observer
+  * GET /proxmox/acl          → admin, observer (lead is not auditor)
+  * GET /proxmox/permissions  → admin, observer
+
+Until M5 lands, treat this whole module as LAN-public. The
+disclosure is limited to: PVE version, node names, storage pool
+inventory, ACL table. None of that constitutes a credential leak.
 """
 from __future__ import annotations
 

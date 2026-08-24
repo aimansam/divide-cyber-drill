@@ -644,6 +644,31 @@ are stale. For the live ledger of what's done / what's next, see:
     TEST-PRODUCT.md) targets Run lifecycle / Assets / Audit / Cancel /
     Download report cards as next items.
 
+18. **RBAC enforcement (L2 2.9 closed)** ✅ — three commits:
+    * `1631448` substrate: `Role` enum (admin / lead / red / blue /
+      observer) + `require_role(...)` factory in
+      `app/core/auth.py`. Zero behavior change; reviewable in
+      isolation.
+    * `0c2da49` security fix: `dependencies=[Depends(require_role(ADMIN))]`
+      at the router level on `/api/v1/admin/*`. Closes the
+      anonymous-probe disclosure risk.
+    * matrix commit: per-endpoint role gates on `/api/v1/drills/*` +
+      own-runs-only filter for red/blue via the new
+      `app/services/authorization.py` module. The 30-parametrized
+      matrix in `services/api/tests/test_authorization.py`
+      enforces the persona matrix on every future endpoint
+      addition (one-line param entry).
+    * `tools/watch_drill.py` now sends the token on the cancel
+      POST (new `--token` flag + `$DIVIDE_TOKEN` env var).
+    * `tools/issue_token.py` restricts `--role` choices to the
+      enum (legacy `--role trainee` is rejected).
+    * `/api/v1/proxmox/*` stays anonymous in L2 — see the
+      `routers/proxmox.py` module docstring for the M5 plan.
+    Tests: 287 → 331 (+44 across the three commits).
+    `docs/USER-REQUIREMENTS.md` §2 flips from "target matrix"
+    to "enforced matrix"; §3 cross-cutting gaps #1 + #8 are
+    struck through (CLOSED).
+
 The rest of this section calls out specific places where PLAN.md's
 text is misleading so future readers don't trust stale snippets:
 

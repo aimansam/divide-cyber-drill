@@ -10,6 +10,12 @@ We don't render HTML in tests (no headless browser here); we assert:
 Why not Playwright: the rest of the test suite has zero JS-runtime deps
 and we want this to keep working offline. The test-page just wraps
 fetch() calls -- if the endpoints work, the JS will work in a browser.
+
+Auth note (L2 2.9): /api/v1/drills/* endpoints now require a
+token with role in {admin, lead, observer, red, blue}. Tests use
+the ``admin_headers`` fixture below. The HTML page at
+``/portal/test/`` is still served anonymously (it's a static
+file) -- only the API calls it makes need the header.
 """
 from __future__ import annotations
 
@@ -26,35 +32,44 @@ def client():
         yield c
 
 
+@pytest.fixture
+def admin_headers():
+    """Mint a fresh admin token for /api/v1/drills/* calls."""
+    from app.core.auth import Role, sign_token
+
+    tok = sign_token("admin-test", Role.ADMIN.value, 3600)
+    return {"X-Divide-Token": tok}
+
+
 # ----- Endpoint shape --------------------------------------------------
 
 
-def test_get_single_drill_with_assets(client):
+def test_get_single_drill_with_assets(client, admin_headers):
     """GET /api/v1/drills/{run_id} returns the run + assets[]."""
     # Need a run row first. We don't have a router endpoint that creates
     # runs without a runner -- so we insert directly via the DB session
     # the router uses. For a smoke test, we just check the 404 path.
-    r = client.get("/api/v1/drills/999999")
+    r = client.get("/api/v1/drills/999999", headers=admin_headers)
     assert r.status_code == 404
     assert "999999" in r.json()["detail"]
 
 
-def test_get_drill_audit_404_for_missing_run(client):
-    r = client.get("/api/v1/drills/999999/audit")
+def test_get_drill_audit_404_for_missing_run(client, admin_headers):
+    r = client.get("/api/v1/drills/999999/audit", headers=admin_headers)
     assert r.status_code == 404
 
 
-def test_get_drill_audit_for_existing_run_returns_items(client):
+def test_get_drill_audit_for_existing_run_returns_items(client, admin_headers):
     """If a run exists, /audit returns at least the bootstrap records."""
     # Use the list endpoint to find any existing run, then ask for its
     # audit. The dev DB has had runs from previous test work.
-    listing = client.get("/api/v1/drills")
+    listing = client.get("/api/v1/drills", headers=admin_headers)
     assert listing.status_code == 200
     runs = listing.json().get("items") or []
     if not runs:
         pytest.skip("no runs in DB to test with; seed one manually")
     target_id = runs[0]["run_id"]
-    r = client.get(f"/api/v1/drills/{target_id}/audit")
+    r = client.get(f"/api/v1/drills/{target_id}/audit", headers=admin_headers)
     assert r.status_code == 200
     body = r.json()
     assert "items" in body

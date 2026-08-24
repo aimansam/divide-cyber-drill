@@ -84,11 +84,21 @@ on the host is reflected on the next browser refresh — no API rebuild.
 3. Every `api.get()` / `api.post()` in `src/lib/api.ts` reads it and
    sets `X-Divide-Token: <token>` on the request.
 4. `TokenBar` decodes the unverified payload (base64url) to show
-   `signed in as alice · trainee` — **display only**; the server
-   re-validates on every request.
+   `signed in as alice · <role>` (e.g. `red`, `admin`) — **display
+   only**; the server re-validates on every request.
 5. Sign out clears `localStorage` and re-renders as anonymous.
 
 See `app/core/auth.py` for the server-side validation.
+
+**RBAC is enforced server-side.** The portal just forwards the
+token; it does not implement role checks itself. As of L2 2.9,
+every router in `/api/v1/*` enforces the persona matrix in
+[`docs/USER-REQUIREMENTS.md` §2](../USER-REQUIREMENTS.md) via the
+`require_role(...)` dependency. `red` and `blue` tokens are
+filtered to their own runs (`started_by == sub`); admin/lead/observer
+see all runs; the `/admin/*` endpoints are admin-only. Tokens are
+minted via `tools/issue_token.py --user alice --role red --ttl 24h`;
+`--role` choices are restricted to the five enum values.
 
 ## When to use this vs the wizard vs the test UI
 
