@@ -35,6 +35,7 @@ from app.db.session import get_session
 from app.observability import record_cancel
 from app.runners.runner import Runner, RunnerError, RunRequest, build_runner
 from app.services.authorization import can_view_run, visible_runs_query
+from app.services.rate_limit import check_drill_start_limit
 
 router = APIRouter()
 
@@ -54,6 +55,10 @@ def _get_runner() -> Runner:
 @router.post(
     "",
     summary="Start a drill (mock adapter, no PVE)",
+    # The body of this endpoint calls ``check_drill_start_limit(token.sub)``
+    # directly so we have access to the verified subject. Keeping it out
+    # of ``dependencies=`` also means the 429 detail can name the subject,
+    # which the UI surfaces in a toast.
     dependencies=[Depends(require_role(Role.ADMIN, Role.LEAD, Role.RED))],
 )
 async def start_drill(
@@ -72,6 +77,16 @@ async def start_drill(
     # which user ran the drill in audit logs); fall back to the
     # body's ``started_by`` for legacy callers + smoke scripts.
     started_by = token.sub if token else body.get("started_by")
+
+    # Rate-limit AFTER auth so we have a verified subject. The
+    # auth gate has already rejected anything anonymous, so this
+    # either has a real sub or token was not required by the
+    # caller-side helper — we fall back to ``_anonymous_bucket``
+    # in that degenerate case so anonymous calls (which shouldn't
+    # reach here) share one budget.
+    from app.services.rate_limit import check_drill_start_limit as _rl
+
+    await _rl(started_by or "_anonymous_bucket")
 
     # Pre-check: scenario must exist and not be archived. The runner
     # would raise RunnerError too, but doing the check here lets us
