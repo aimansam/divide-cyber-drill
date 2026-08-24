@@ -48,7 +48,38 @@ class Settings(BaseSettings):
     minio_secure: bool = False
 
     # CORS
-    cors_allow_origins: list[str] = Field(default_factory=lambda: ["http://localhost:3000"])
+    # Comma-separated list of allowed origins. The browser sends an Origin
+    # header on every cross-origin request, and the CORS middleware only
+    # echoes it back if it appears verbatim in ``allow_origins``. Wildcards
+    # are deliberately not supported in production (CORSMiddleware treats
+    # ``allow_origins=["*"]`` as not-safe-with-credentials, which is the
+    # default posture we want — set this list explicitly to open up).
+    #
+    # Default: a localhost origin for the setup wizard's dev loop. In any
+    # deployment, override with ``DIVIDE_CORS_ALLOW_ORIGINS="https://
+    # drill.example.com,https://ops.example.com"``.
+    #
+    # Implementation note: the model field is ``cors_allow_origins_raw`` so
+    # pydantic-settings doesn't auto-generate ``DIVIDE_CORS_ALLOW_ORIGINS``
+    # (which would be ambiguous — it would expect a list, not a string). The
+    # ``validation_alias`` below pins the friendly env name to this field.
+    cors_allow_origins_raw: str = Field(
+        default="http://localhost:3000",
+        validation_alias="DIVIDE_CORS_ALLOW_ORIGINS",
+    )
+
+    @property
+    def cors_allow_origins(self) -> list[str]:
+        """Parse the comma-separated env var into a list of origins.
+
+        Whitespace around each entry is stripped; empty entries are
+        dropped. The result is the list FastAPI's ``CORSMiddleware``
+        expects. Returning a fresh list per call (rather than caching on
+        the ``Settings`` instance) keeps the property picklable via the
+        ``lru_cache`` proxy and lets us re-read env in tests.
+        """
+        parts = (s.strip() for s in self.cors_allow_origins_raw.split(","))
+        return [p for p in parts if p]
 
     # Proxmox
     proxmox: ProxmoxSettings = Field(default_factory=ProxmoxSettings)

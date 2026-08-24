@@ -12,14 +12,17 @@ and L3 without L2.
 > L1: **9 ✅ / 0 ❌ / 0 ⚠️** as of run #11. Items 1.3–1.9 all flipped
 > from blocked → done in one operator-side upload + one ACL grant.
 >
-> L2: **13 ✅ / 5 ❌ / 0 ⚠️** as of L1 closure. Closed this session:
-> 2.1 (test UI), 2.3 / 2.4 / 2.5 (token middleware + CLI +
-> attribution), 2.9 (per-asset audit actor), 2.13 / 2.14 (make verify
-> + CI), 2.16 (setup wizard), 2.17 / 2.18 (drill-detail endpoints).
-> The five remaining items (2.7 rate-limit, 2.8 drill timeout, 2.10
-> CORS, 2.11 MinIO telemetry, 2.12 after-action JSON) are queued in
-> the [Next plan](#next-plan-post-l1-ordered) below — total ~3 h, no
-> PVE required.
+> L2: **14 ✅ / 6 ❌ / 0 ⚠️** as of L1 closure, plus F2.1. Closed
+> this session: 2.1 (test UI), 2.3 / 2.4 / 2.5 (token middleware +
+> CLI + attribution), 2.9 (per-asset audit actor), 2.10 (CORS
+> allowlist from `DIVIDE_CORS_ALLOW_ORIGINS` — closes the
+> localhost-only posture), 2.13 / 2.14 (make verify + CI),
+> 2.16 (setup wizard), 2.17 / 2.18 (drill-detail endpoints).
+> The six remaining items (2.6 Grafana anon viewer, 2.7
+> rate-limit, 2.8 drill timeout, 2.2 Traefik route, 2.11 MinIO
+> telemetry, 2.12 after-action JSON) are queued in the
+> [Next plan](#next-plan-post-l1-ordered) below — total ~4 h,
+> no PVE required.
 >
 > L3: **3 ✅ / 8 ❌** after the RBAC substrate + admin gate + drill
 > matrix + role-aware UI composition landed. Item 3.2 (RBAC)
@@ -129,7 +132,7 @@ contains the damage (rate limits, sane defaults, no shared secrets).
 | 2.7  | Rate limit on `POST /api/v1/drills` (max 5 in-flight per token) | ❌ no limit |
 | 2.8  | Drill that runs > 30 min auto-cancels (prevents forgotten VMs racking up CPU bills) | ❌ no timeout |
 | 2.9  | Audit log writes include the token subject (not just IP) | ✅ done ([`services/api/app/runners/runner.py`](../../services/api/app/runners/runner.py) — `_spawn_asset()` now accepts and threads `actor=req.started_by` into the `ASSET_SPAWNED` audit row; `RUN_*` rows already carried it. All five audit call sites in the runner now attribute per-event. Commits: pending) — **plus RBAC enforcement**: every `/api/v1/*` endpoint enforces the persona matrix via `require_role(...)`; `/admin/*` is admin-only; red/blue see only their own runs. Commits `1631448`, `0c2da49`, matrix commit. |
-| 2.10 | CORS allowed origins constrained to `DIVIDE_DOMAIN` | ⚠️  no CORS configured |
+| 2.10 | CORS allowed origins constrained to `DIVIDE_DOMAIN` | ✅ done (F2.1). Settings env `DIVIDE_CORS_ALLOW_ORIGINS` (comma-separated, alias via `validation_alias`). Pydantic `cors_allow_origins: list[str]` property parses it (strip + drop empties). Default `"http://localhost:3000"`. Tests in `services/api/tests/test_cors.py` (4 tests). |
 | 2.11 | Telemetry sinks wire-up: drill completion uploads audit log + asset metadata to MinIO `divide-artifacts` bucket | ❌ spec field is read, ignored |
 | 2.12 | After-action JSON report downloadable from `GET /api/v1/drills/{id}/report` | ❌ endpoint doesn't exist |
 | 2.13 | Pre-flight gate in `make verify` (alias for `lint && test && preflight && smoke`) | ✅ done ([`Makefile`](../../Makefile) `verify` target — preflight is `-`-prefixed so PVE-unreachable dev boxes still pass) |
@@ -351,6 +354,7 @@ do today, what's missing), see
 
 | Date | Change |
 |---|---|
+| 2026-08-24 | feat(api): CORS allowlist via `DIVIDE_CORS_ALLOW_ORIGINS` (L2 2.10 ✅, F2.1 first commit). Settings: new field `cors_allow_origins_raw` (str) wired to env via `validation_alias="DIVIDE_CORS_ALLOW_ORIGINS"` so pydantic-settings doesn't auto-generate a list-typed alias. Property `cors_allow_origins: list[str]` parses (split on `,`, strip, drop empties) at call time. Main.py unchanged (already reads `settings.cors_allow_origins`). Default stays `["http://localhost:3000"]` for the dev loop. Tests in `services/api/tests/test_cors.py` (+4): allowed origin preflight echoes `Access-Control-Allow-Origin`, forbidden origin returns no header, empty list is fail-closed, parser handles the four cases (empty / single / multiple / whitespace). Test pattern: monkeypatch + reload `app.main` per test so `CORSMiddleware` re-captures the new list — the standard FastAPI behaviour is that middleware options are baked at add-time, not re-read. **Tests: 362 → 366 (+4). L2 ledger: 13 ✅ / 5 ❌ → 14 ✅ / 4 ❌** (2.10 fully closed). |
 | 2026-08-24 | feat(portal): role-aware UI composition Half 2 — F1 plan complete (L3 3.11 ✅). Single commit landing five new cards: `RunInspectorCard` (full drill detail — status, started_by, duration, assets, error); `AssetsCard` (copy-to-clipboard SSH target per asset via `navigator.clipboard` with `document.execCommand` fallback); `AuditExplorerCard` (append-only timeline with tone per action — green for RUN_COMPLETED, red for RUN_FAILED, sky for ASSET_SPAWNED, etc.); `PveOpsCard` (admin-only read-only PVE health: three parallel GETs to `/admin/probe`, `/admin/storage`, `/admin/drill-template-status`; the wizard at `/portal/` stays the deploy surface); `ScenarioAuthoringCard` (admin + lead — paste YAML + Import; list active with Archive; list archived with Restore; uses inline `fetch` for DELETE since api.ts only has get+post). `CardKind` union extended from 4 to 9 kinds; `COMPOSITIONS` table extended per the matrix in the commit-message docstring. Read-only roles (blue, observer) don't get any card with a write button. `tests/test_portal_app_role_composition.py` parametrized cases now include the full 8-card lists per role; added `test_all_cards_have_documented_role_set` (every card file must say which roles render it in its docstring) and `test_built_bundle_includes_half2_keywords` (catches tree-shaken cards). Production bundle: 215 KB (66 KB gz). Docs: `PORTAL-APP.md` gains the Card catalog; `USER-REQUIREMENTS.md` §1 rewrites each persona's "Wired today" to list the full composition; §3 cross-cutting row for role-aware UI flips to fully closed; `PLAN.md` §13 item #20 documents the change. **Tests: 360 → 362 (+2). L3 ledger: 3 ✅ / 8 ❌** (3.11 fully closed). F1 portal-cards plan complete; F2 starts next. |
 | 2026-08-24 | feat(rbac): enforce persona matrix on /api/v1/* (L2 2.9 fully closed, L3 3.2 ✅). Three commits: (1) substrate — `Role` enum (admin / lead / red / blue / observer) + `require_role(*allowed)` factory in `app/core/auth.py`; (2) security fix — `dependencies=[Depends(require_role(ADMIN))]` at the router level on `/api/v1/admin/*` closes the anonymous-probe disclosure risk; (3) matrix commit — per-endpoint role gates on `/api/v1/drills/*` + own-runs-only filter for red/blue via the new `app/services/authorization.py` module (`visible_runs_query` + `can_view_run`). `tools/watch_drill.py` gained `--token` / `$DIVIDE_TOKEN`; `tools/issue_token.py --role` now restricted to the five enum values. `/api/v1/proxmox/*` stays public in L2 (M5 owns the full hardening pass). New `services/api/tests/test_authorization.py` has 27 tests: a 22-row parametrized RBAC matrix, 4 helper tests, and a static check that the cancel handler still has the `Role.RED` own-only branch. `docs/USER-REQUIREMENTS.md` §2 flips from "target matrix" to "enforced matrix"; §3 cross-cutting gaps #1 + #8 are struck through (CLOSED). **Tests: 302 → 331 (+29 across the three commits). L3 ledger: 1 ✅ / 10 ❌** (3.2 closed). |
 | 2026-08-24 | feat(portal): React/Vite + Tailwind + shadcn/ui user portal at `/portal/app/` (M1 + M3.1 of the new F1 plan). New tree `services/portal/app/` with `package.json`, Vite 6, React 18 + TypeScript strict, Tailwind 3 with shadcn semantic tokens, lucide-react icons. Two cards ship: `TokenBar` (X-Divide-Token injection into `localStorage` + every `fetch()`) and `ScenariosCard` (lists `/api/v1/scenarios`). Build output ~180 KB JS (58 KB gz) + 12 KB CSS. FastAPI gained a second `StaticFiles` mount at `/portal/app/` (registered BEFORE `/portal` so the parent doesn't shadow it); `deploy/docker-compose.yml` bind-mounts the host's `build/` so `make portal-build` is reflected without an image rebuild. New regression file `tests/test_portal_app_smoke.py` (9 tests: build artifact presence, base-path correctness, mount resolution, never-serve-source-tree-HTML). Vanilla wizard + test UI kept untouched. Tests 278 → 287 (+9). Makefile gained `portal-build`, `portal-watch`, `portal-install`. **L2 ledger unchanged** (this is a UI milestone, not a control-plane one). |
