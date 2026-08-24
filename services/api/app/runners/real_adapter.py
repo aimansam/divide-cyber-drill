@@ -46,6 +46,7 @@ from app.runners.adapter import (
     NetworkSpec,
     ProxmoxAdapter,
     VmState,
+    VncTicket,
 )
 from app.services.proxmox import ProxmoxAPIError, ProxmoxNotConfiguredError
 
@@ -376,6 +377,39 @@ class RealProxmoxAdapter(ProxmoxAdapter):
         clean up with their Ansible runbook.
         """
         return None
+
+    async def get_vnc_ticket(self, vmid: int, node: str) -> VncTicket:
+        """POST /nodes/{n}/qemu/{v}/vncproxy, return ticket + port.
+
+        PVE responds with {"data": {"ticket": "PVE:...", "port":
+        "5900"}}. We pass ``generate-password`` is not used; PVE
+        picks the ticket itself. The port is the VNC display
+        port (typically 5900 + VM display number).
+
+        Lifetime: tickets are valid for ~2 hours. We don't
+        cache; callers re-issue on every console-open. This
+        keeps the surface stateless — multiple API processes
+        can serve the same drill's consoles.
+
+        Errors:
+          * 404 if the VM is gone -> ProxmoxAPIError (the
+            runner treats the call as a transient console-
+            op failure; the asset row is unaffected).
+          * 500 if the node is gone -> ProxmoxAPIError.
+          * 403 if the token doesn't have VM.Audit on the
+            node -> ProxmoxAPIError with the standard ACL hint.
+        """
+        def _do() -> dict[str, Any]:
+            return self._get_client().nodes(node).qemu(vmid).vncproxy.post()
+
+        data = await self._call(_do)
+        # PVE returns data.ticket + data.port (port is a string).
+        return VncTicket(
+            ticket=str(data.get("ticket", "")),
+            port=int(data.get("port", 5900)),
+            node=node,
+            vmid=vmid,
+        )
 
     async def attach_network(
         self, vmid: int, node: str, bridge: str, nic_id: int
