@@ -51,6 +51,7 @@ divide-cyber-drill/
 │   ├── TEST-PRODUCT.md          # **canonical**: L1/L2/L3 ship criteria + ETAs + next plan
 │   ├── USER-REQUIREMENTS.md     # persona view: who needs what, what's wired, what's missing
 │   ├── SETUP-UI.md              # docs for the browser-based setup wizard at /portal/
+│   ├── PORTAL-APP.md            # docs for the React/Vite user portal at /portal/app/
 │   ├── TEST-UI.md               # docs for the operator test tool at /portal/test/
 │   └── images/                  # 6 architecture diagrams (auto-generated)
 ├── deploy/
@@ -117,9 +118,13 @@ After `make up`, browse to:
 |---|---|---|
 | `http://localhost:8000/portal/`       | Setup wizard — stand up a fresh PVE-backed deployment without SSH-ing into Proxmox | [`docs/SETUP-UI.md`](docs/SETUP-UI.md) |
 | `http://localhost:8000/portal/test/`  | Operator test tool — every control-plane endpoint as a click button | [`docs/TEST-UI.md`](docs/TEST-UI.md) |
+| `http://localhost:8000/portal/app/`   | User portal — sign in, pick a scenario, run a drill (React + Vite) | [`docs/PORTAL-APP.md`](docs/PORTAL-APP.md) |
 
-Both are served by the API container via FastAPI `StaticFiles`. No
-new containers, no new build step — just open the URL.
+The first two are vanilla HTML + JS — no build step. The third is a
+Vite-built React app; `make portal-build` produces the bundle that
+the API container serves. All three share FastAPI's `StaticFiles`
+mount under `/portal/`. No new containers, no new runtime —
+just open the URL.
 
 ### Running a live drill (L1)
 

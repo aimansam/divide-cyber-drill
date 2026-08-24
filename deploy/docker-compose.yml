@@ -45,6 +45,16 @@ services:
       # Repo root mounted read-only so the api container can read scenario
       # YAMLs from /workdir/examples/scenarios at startup.
       - ${DIVIDE_REPO_ROOT:-..}:/workdir:ro
+      # User portal (React/Vite) build output. Bind-mounted so `npm run
+      # build` in services/portal/app/ on the host is reflected on the
+      # next browser refresh without rebuilding the API image. The
+      # container's /app/portal/app/ is otherwise image-baked via the
+      # Dockerfile's `COPY services/portal`.
+      # NOTE: the target subdir `build` does not yet exist inside the
+      # image's baked portal (it's .gitignored and excluded by the
+      # build context). Compose creates it on mount. The mount also
+      # shadows the source-tree `index.html` we don't want served.
+      - ${DIVIDE_REPO_ROOT:-..}/services/portal/app/build:/app/portal/app/build:ro
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8000/healthz"]
       interval: 15s

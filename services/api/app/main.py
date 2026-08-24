@@ -89,12 +89,42 @@ def create_app() -> FastAPI:
     app.include_router(proxmox.router, prefix="/api/v1/proxmox", tags=["proxmox"])
     app.include_router(admin.router, prefix="/api/v1/admin", tags=["admin"])
 
-    # Mount the setup wizard portal at /portal/. If the directory doesn't
-    # exist (e.g. a slim image without the portal), skip silently so the
-    # API still starts.
+    # Mount the React-based user portal at /portal/app/ FIRST. Starlette
+    # resolves mounts by first match, so the more-specific subpath has
+    # to be registered before the catch-all /portal mount below.
+    #
+    # The Vite source tree (services/portal/app/) has its own
+    # index.html at the root that references /src/main.tsx — that's
+    # only useful for `npm run dev`, not for production serving. We
+    # serve `build/index.html` (the Vite-built artifact) here. Bind
+    # mount in compose.yml guarantees a host-side rebuild propagates
+    # without an image rebuild.
     portal_path = Path(settings.portal_dir)
     if portal_path.is_dir():
-        app.mount("/portal", StaticFiles(directory=str(portal_path), html=True), name="portal")
+        app_build = portal_path / "app" / "build"
+        if app_build.is_dir():
+            app.mount(
+                "/portal/app",
+                StaticFiles(directory=str(app_build), html=True),
+                name="portal_app",
+            )
+        else:
+            log.warning(
+                "divide_api.portal_app_build_skipped",
+                build_dir=str(app_build),
+                reason=(
+                    "run `npm run build` in services/portal/app; "
+                    "user portal not served"
+                ),
+            )
+
+        # Setup wizard + operator test tool. Mounted last so the
+        # /portal/app/ subpath above is matched first.
+        app.mount(
+            "/portal",
+            StaticFiles(directory=str(portal_path), html=True),
+            name="portal",
+        )
     else:
         log.warning(
             "divide_api.portal_skipped",

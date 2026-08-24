@@ -53,6 +53,21 @@ format: ## Auto-format with ruff.
 test: ## Run pytest suite.
 	$(PYTHON) -m pytest services/api/tests tests
 
+# ----- React/Vite user portal (services/portal/app) ----------------------
+# The portal/app/ tree is a separate Vite project; it has its own
+# package.json and ships pre-built assets into services/portal/app/build/
+# which FastAPI mounts at /portal/app/. Build before `make up` (or
+# `make verify`) so the mount serves real bytes; use `portal-watch`
+# in another terminal for the dev loop.
+portal-build: ## Build the React/Vite user portal bundle into services/portal/app/build/.
+	cd services/portal/app && npm ci --no-audit --no-fund && npm run build
+
+portal-watch: ## Run Vite in watch mode for the user portal (HMR).
+	cd services/portal/app && npm run dev
+
+portal-install: ## Install npm deps for services/portal/app/.
+	cd services/portal/app && npm ci --no-audit --no-fund
+
 test-live-pg: ## Run live_pg tests against a real PostgreSQL (requires DIVIDE_TEST_LIVE_PG + reachable DB).
 	@test -n "$$DIVIDE_TEST_LIVE_PG" || { echo "Set DIVIDE_TEST_LIVE_PG=1 (and optionally DIVIDE_TEST_LIVE_PG_URL)"; exit 2; }
 	$(PYTHON) -m pytest -m live_pg services/api/tests
