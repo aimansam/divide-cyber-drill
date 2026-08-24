@@ -459,34 +459,29 @@ async def test_red_vs_blue_baseline_yaml_topology_runs(
     # Run succeeded.
     assert result.status.value == "succeeded"
 
-    # 6 asset declarations, but the runner currently spawns one
-    # row per declaration (count is silent in the DB layer):
-    #   red_attacker (1) + router_fw (1) + victim_workstation (1)
-    #   + file_server (1) + log_aggregator (1) = 5 clones.
-    #
-    # TODO(F3-followup): honour ``spec.assets[].count`` so a
-    # ``count: 2`` declaration spawns 2 distinct clones per
-    # run. Will require lifting the (run_id, role) uniqueness
-    # to (run_id, role, instance) so two victims can coexist.
-    # Tracked in F3 follow-up notes.
-    assert len(adapter.cloned) == 5, (
-        f"expected 5 clones (count not yet honoured); "
-        f"got {len(adapter.cloned)}: {[c.name for c in adapter.cloned]}"
+    # 5 declared assets, total 6 clones (1+1+2+1+1). This was
+    # 5 in F3.1 (count not honoured); F3-followup lifts that limit
+    # and now both victim_workstation_1 and victim_workstation_2
+    # exist as separate asset rows. The dedicated
+    # test_red_vs_blue_baseline_with_count_gives_six_clones pins
+    # the same scenario's role breakdown in detail; here we only
+    # check the topology (1 router with 2 NICs).
+    assert len(adapter.cloned) == 6, (
+        f"expected 6 clones; got {len(adapter.cloned)}: "
+        f"{[c.name for c in adapter.cloned]}"
     )
 
-    # Each declared asset has exactly one clone. (This assertion
-    # is the regression pin for the count-not-honoured gap.)
-    roles = [c.name for c in adapter.cloned]
-    # Pin the asset-role uniqueness: each declared role shows up
-    # exactly once (because count is currently not honoured).
     by_role: dict[str, int] = {}
     for c in adapter.cloned:
         # name format: divide-<run_id>-<sanitized_role>
         parts = c.name.split("-", 2)
         by_role[parts[2]] = by_role.get(parts[2], 0) + 1
-    assert by_role.get("routerfw") == 1
     assert by_role.get("redattacker") == 1
-    assert by_role.get("victimworkstation") == 1  # not 2; count not honoured
+    assert by_role.get("routerfw") == 1
+    assert (
+        by_role.get("victimworkstation1") == 1
+        and by_role.get("victimworkstation2") == 1
+    )
     assert by_role.get("fileserver") == 1
     assert by_role.get("logaggregator") == 1
 
@@ -533,3 +528,231 @@ async def test_red_vs_blue_baseline_yaml_topology_runs(
         if vmid == router_vmid:
             continue
         assert c == 1, f"non-router VM {vmid} should have 1 NIC; got {c}"
+
+
+# --- F3 follow-up: spec.assets[].count -----------------------------------
+
+
+@pytest.mark.asyncio
+async def test_count_one_does_not_suffix_role(session: AsyncSession) -> None:
+    """Default count of 1 keeps the declared role verbatim — no _1
+    suffix. This keeps the audit log + reports readable for
+    single-instance assets."""
+    adapter = MockProxmoxAdapter(templates={"tpl-x": 9000})
+    runner = Runner(adapter=adapter)
+    await session.merge(
+        _scenario(
+            name="count-one",
+            networks_spec=[],
+            assets_spec=[{"role": "attacker", "kind": "vm",
+                          "template": "tpl-x", "networks": []}],
+        )
+    )
+    await session.commit()
+
+    await runner.start_run(RunRequest(scenario_id=1), session=session)
+
+    roles = sorted(a.role for a in (await session.execute(
+        __import__("sqlalchemy").select(models.Asset)
+    )).scalars().all())
+    assert roles == ["attacker"]
+
+
+@pytest.mark.asyncio
+async def test_count_two_spawns_two_clones_with_suffix(session: AsyncSession) -> None:
+    """count: 2 declares two clones; runner appends _N (1-indexed)
+    to keep roles distinct."""
+    adapter = MockProxmoxAdapter(templates={"tpl-x": 9000})
+    runner = Runner(adapter=adapter)
+    await session.merge(
+        _scenario(
+            name="count-two",
+            networks_spec=[],
+            assets_spec=[
+                {
+                    "role": "victim_workstation",
+                    "kind": "vm",
+                    "template": "tpl-x",
+                    "networks": [],
+                    "count": 2,
+                },
+            ],
+        )
+    )
+    await session.commit()
+
+    await runner.start_run(RunRequest(scenario_id=1), session=session)
+
+    assert len(adapter.cloned) == 2, (
+        f"count=2 must spawn 2 clones; got {len(adapter.cloned)}"
+    )
+    roles = sorted(a.role for a in (await session.execute(
+        __import__("sqlalchemy").select(models.Asset)
+    )).scalars().all())
+    assert roles == ["victim_workstation_1", "victim_workstation_2"], (
+        f"expected suffix _N; got {roles}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_count_attached_to_declared_bridges(
+    session: AsyncSession,
+) -> None:
+    """Each instance of a count>1 asset gets the same NIC layout."""
+    adapter = MockProxmoxAdapter(templates={"tpl-x": 9000})
+    runner = Runner(adapter=adapter)
+    await session.merge(
+        _scenario(
+            name="count-with-nets",
+            networks_spec=[_network("blue_vlan")],
+            assets_spec=[
+                {
+                    "role": "victim",
+                    "kind": "vm",
+                    "template": "tpl-x",
+                    "networks": ["blue_vlan"],
+                    "count": 3,
+                },
+            ],
+        )
+    )
+    await session.commit()
+
+    await runner.start_run(RunRequest(scenario_id=1), session=session)
+
+    # 3 clones, each with one NIC on the same bridge.
+    assert len(adapter.cloned) == 3
+    assert len(adapter.nic_attached) == 3
+    bridges = sorted({br for _, br, _ in adapter.nic_attached})
+    assert bridges == ["vmbr100"]
+    nic_ids = sorted({nid for _, _, nid in adapter.nic_attached})
+    # Each VM is its own namespace; nic_id is local to each VM.
+    # All three use nic_id=0 because they're separate VMs.
+    assert nic_ids == [0]
+
+
+@pytest.mark.asyncio
+async def test_red_vs_blue_baseline_with_count_gives_six_clones(
+    session: AsyncSession,
+) -> None:
+    """Re-pins the cyber-range demo scenario now that count is
+    honoured: 6 asset *declarations* (with count: 2 on
+    victim_workstation) -> 7 clones (1+1+2+1+1+1).
+
+    The TopologyGraph renders all 7 nodes; the audit + reports
+    show both victim_workstation_1 and victim_workstation_2.
+    """
+    import json
+    import yaml
+    from pathlib import Path
+
+    yaml_path = (
+        Path(__file__).resolve().parents[3]
+        / "examples"
+        / "scenarios"
+        / "red-vs-blue-baseline.scenario.yaml"
+    )
+    spec = yaml.safe_load(yaml_path.read_text())
+
+    from jsonschema import Draft202012Validator
+    from app.services.scenario_sync import _find_schema
+    Draft202012Validator(json.loads(_find_schema().read_text())).validate(spec)
+
+    await session.merge(
+        models.Scenario(
+            name=spec["metadata"]["name"],
+            title=spec["metadata"]["title"],
+            version=spec["metadata"]["version"],
+            difficulty=spec["metadata"]["difficulty"],
+            duration_min=spec["metadata"]["duration_min"],
+            tags=spec["metadata"].get("tags", []),
+            spec=spec,
+        )
+    )
+    await session.commit()
+
+    adapter = MockProxmoxAdapter()
+    for tpl in {
+        a["template"] for a in spec["spec"]["assets"]
+    }:
+        adapter.seed_template(tpl)
+
+    runner = Runner(adapter=adapter)
+    result = await runner.start_run(
+        RunRequest(scenario_id=1), session=session
+    )
+
+    assert result.status.value == "succeeded"
+    # The scenario declares 5 assets with counts
+    #   red_attacker (1) + router_fw (1) + victim_workstation (2)
+    #   + file_server (1) + log_aggregator (1) = 6 total clones.
+    assert len(adapter.cloned) == 6, (
+        f"expected 6 clones (count honoured); "
+        f"got {len(adapter.cloned)}: {[c.name for c in adapter.cloned]}"
+    )
+
+    # Roles pinned — and both victim_workstation_1 / _2 must exist.
+    by_role: dict[str, int] = {}
+    for c in adapter.cloned:
+        parts = c.name.split("-", 2)
+        by_role[parts[2]] = by_role.get(parts[2], 0) + 1
+    assert by_role.get("redattacker") == 1
+    assert by_role.get("routerfw") == 1
+    assert by_role.get("victimworkstation1") == 1
+    assert by_role.get("victimworkstation2") == 1, (
+        "second victim must exist; runner must honor count: 2"
+    )
+    assert by_role.get("fileserver") == 1
+    assert by_role.get("logaggregator") == 1
+
+    # Bridge topology unchanged: 3 bridges, the dmz bridge has
+    # zero attachments (router goes red_vlan+blue_vlan, skipping dmz).
+    assert sorted(b.bridge for b in adapter.bridges_created) == [
+        "vmbr100",
+        "vmbr101",
+        "vmbr102",
+    ]
+
+
+# --- migration surface --------------------------------------------------
+
+
+def test_alembic_0004_drops_unique_constraint():
+    """The migration source is reachable, drops
+    uq_assets_run_role, and is wired to chain after 0003_users."""
+    from pathlib import Path
+    import re
+
+    src = (
+        Path(__file__).resolve().parents[1]
+        / "alembic"
+        / "versions"
+        / "0004_asset_instance.py"
+    ).read_text()
+
+    assert "down_revision = \"0003_users\""
+    assert "drop_constraint" in src
+    assert "uq_assets_run_role" in src
+
+    # Both upgrade and downgrade paths exist so an operator can
+    # roll back if needed.
+    assert "def upgrade" in src
+    assert "def downgrade" in src
+
+
+def test_models_asset_table_has_no_unique_constraint():
+    """After the schema migration, models.Asset should *not*
+    declare uq_assets_run_role at the table-args level (it's no
+    longer enforced by the DB). The unique constraint was the
+    thing capping count at 1."""
+    from app.db import models
+
+    table_args = models.Asset.__table_args__
+    # SQLAlchemy serialises Index entries; a UniqueConstraint
+    # would show up here. We assert no UQ on (run_id, role).
+    for entry in table_args:
+        if hasattr(entry, "name") and entry.name == "uq_assets_run_role":
+            pytest.fail(
+                f"Asset.__table_args__ still has uq_assets_run_role; "
+                "drop it (0004 migration drops the DB one too)"
+            )

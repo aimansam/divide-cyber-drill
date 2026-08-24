@@ -205,7 +205,12 @@ async def test_run_duration_sec_after_end(session: AsyncSession) -> None:
 
 @pytest.mark.asyncio
 async def test_unique_asset_role_per_run(session: AsyncSession) -> None:
-    """Two assets in the same run with the same role should violate the unique index."""
+    """F3 follow-up lifts the (run_id, role) unique constraint so
+    ``count: N`` assets can spawn N clones with suffixed role names.
+    Two rows with the same exact (run_id, role) are now allowed.
+
+    See migration 0004_asset_instance.py.
+    """
     scenario = _scenario()
     session.add(scenario)
     await session.flush()
@@ -214,11 +219,8 @@ async def test_unique_asset_role_per_run(session: AsyncSession) -> None:
     await session.flush()
 
     session.add(Asset(run_id=run.id, role="red_attacker", template="t1"))
-    await session.commit()
-
     session.add(Asset(run_id=run.id, role="red_attacker", template="t2"))
-    with pytest.raises(Exception):  # IntegrityError on SQLite
-        await session.commit()
+    await session.commit()  # both succeed; (run_id, role) no longer unique
 
 
 @pytest.mark.asyncio

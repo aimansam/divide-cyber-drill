@@ -190,8 +190,17 @@ class Asset(Base, TimestampMixin):
     __table_args__ = (
         Index("ix_assets_run_id", "run_id"),
         Index("ix_assets_status", "status"),
-        # Per-Run asset roles are unique.
-        Index("uq_assets_run_role", "run_id", "role", unique=True),
+        # NOTE: a previous schema (0001_initial_schema.py)
+        # enforced (run_id, role) uniqueness. That constraint
+        # silently capped ``spec.assets[].count`` at 1, since a
+        # ``victim_workstation count: 2`` declaration tried to
+        # insert two rows with the same role and hit a unique
+        # violation. Migration 0004_asset_instance.py drops the
+        # constraint so multi-instance assets work.
+        # The runner now generates distinct role names per
+        # instance: ``victim_workstation`` + ``_N`` (1-indexed)
+        # when count > 1. Single-count assets keep the original
+        # role name (no suffix).
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)

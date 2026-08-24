@@ -144,16 +144,35 @@ class Runner:
         session.add(run)
         await session.flush()
 
+        # F3 follow-up: honor ``spec.assets[].count`` so a single
+        # declared asset can spawn multiple clones (e.g.
+        # ``victim_workstation count: 2`` -> two VM rows). The
+        # generated ``role`` for instance N is
+        # ``<declared_role>_<N>`` (1-indexed); single-count assets
+        # keep the declared role verbatim (no suffix).
+        asset_count_total = 0
         for asset_spec in assets_spec:
-            session.add(
-                models.Asset(
-                    run_id=run.id,
-                    role=asset_spec["role"],
-                    kind=asset_spec.get("kind", "vm"),
-                    template=asset_spec["template"],
-                    status=AssetStatus.PLANNED,
+            count = int(asset_spec.get("count") or 1)
+            count = max(1, min(count, 64))  # schema already enforces; clamp defensively
+            base_role = asset_spec["role"]
+            for instance in (range(count) if count > 1 else [0]):
+                # Use _N suffix only when count > 1; instance 0 means
+                # "single, use declared role verbatim".
+                role = (
+                    f"{base_role}_{instance + 1}"
+                    if count > 1
+                    else base_role
                 )
-            )
+                session.add(
+                    models.Asset(
+                        run_id=run.id,
+                        role=role,
+                        kind=asset_spec.get("kind", "vm"),
+                        template=asset_spec["template"],
+                        status=AssetStatus.PLANNED,
+                    )
+                )
+                asset_count_total += 1
         await session.flush()
 
         await self._audit(
@@ -183,57 +202,77 @@ class Runner:
         # Bridges we created during this run; tracked so teardown
         # (best-effort) can ask the adapter to remove them.
         bridges_created: list[str] = list(bridges_by_name.values())
+        # Spawn one clone per generated row. The role of each row
+        # is either the declared role (count == 1) or
+        # ``<declared>_<N>`` (count > 1, N is 1-indexed). The
+        # _spawn_asset method receives both the asset row and the
+        # original asset_spec so it knows the declaring YAML.
         for asset_spec in assets_spec:
-            asset = (
-                await session.execute(
-                    select(models.Asset)
-                    .where(models.Asset.run_id == run.id)
-                    .where(models.Asset.role == asset_spec["role"])
+            count = int(asset_spec.get("count") or 1)
+            base_role = asset_spec["role"]
+            for instance_idx in (range(count) if count > 1 else [0]):
+                instance_role = (
+                    f"{base_role}_{instance_idx + 1}"
+                    if count > 1
+                    else base_role
                 )
-            ).scalar_one()
-            try:
-                # F3: stash bridges_by_name on the asset so _spawn_asset
-                # can read it (no method-signature change). The asset is
-                # a SQLAlchemy instance; attaching ad-hoc attributes is
-                # safe because we drop it on session.flush boundaries.
-                asset._f3_bridges_by_name = bridges_by_name  # type: ignore[attr-defined]
-                await self._spawn_asset(
-                    session=session,
-                    asset=asset,
-                    asset_spec=asset_spec,
-                    node=node,
-                    actor=req.started_by,
-                )
-                cloned_so_far.append(asset)
-            except Exception as exc:
-                run.status = RunStatus.FAILED
-                run.ended_at = datetime.now(timezone.utc)
-                run.error = f"{type(exc).__name__}: {exc}"
-                asset.status = AssetStatus.FAILED
-                asset.error = str(exc)
-                await self._best_effort_teardown(cloned_so_far)
-                # Tear down bridges we created so a retry starts clean.
-                # Best-effort: a real-PVE bridge is operator-owned and
-                # remove_bridge is a no-op there; the mock removes them.
-                for br in bridges_created:
-                    try:
-                        await self._adapter.remove_bridge(br)
-                    except Exception as exc:  # noqa: BLE001
-                        log.warning(
-                            "runner.networks.remove_bridge_failed bridge=%s err=%s",
-                            br, exc,
-                        )
-                inc_run_terminal(outcome="failed", adapter=_adapter_label(self._adapter))
-                await self._audit(
-                    session,
-                    action=AuditAction.RUN_FAILED,
-                    actor=req.started_by,
-                    run_id=run.id,
-                    scenario_id=scenario.id,
-                    details={"error": str(exc), "role": asset_spec["role"]},
-                )
-                await session.commit()
-                raise
+                asset = (
+                    await session.execute(
+                        select(models.Asset)
+                        .where(models.Asset.run_id == run.id)
+                        .where(models.Asset.role == instance_role)
+                    )
+                ).scalar_one()
+                try:
+                    # F3: stash bridges_by_name on the asset so _spawn_asset
+                    # can read it (no method-signature change). The asset is
+                    # a SQLAlchemy instance; attaching ad-hoc attributes is
+                    # safe because we drop it on session.flush boundaries.
+                    asset._f3_bridges_by_name = bridges_by_name  # type: ignore[attr-defined]
+                    await self._spawn_asset(
+                        session=session,
+                        asset=asset,
+                        asset_spec=asset_spec,
+                        node=node,
+                        actor=req.started_by,
+                    )
+                    cloned_so_far.append(asset)
+                except Exception as spawn_exc:
+                    run.status = RunStatus.FAILED
+                    run.ended_at = datetime.now(timezone.utc)
+                    run.error = f"{type(spawn_exc).__name__}: {spawn_exc}"
+                    asset.status = AssetStatus.FAILED
+                    asset.error = str(spawn_exc)
+                    await self._best_effort_teardown(cloned_so_far)
+                    # Tear down bridges we created so a retry starts
+                    # clean. Best-effort: a real-PVE bridge is
+                    # operator-owned and remove_bridge is a no-op;
+                    # the mock removes them.
+                    for br in bridges_created:
+                        try:
+                            await self._adapter.remove_bridge(br)
+                        except Exception as bridge_exc:  # noqa: BLE001
+                            log.warning(
+                                "runner.networks.remove_bridge_failed "
+                                "bridge=%s err=%s",
+                                br, bridge_exc,
+                            )
+                    inc_run_terminal(
+                        outcome="failed", adapter=_adapter_label(self._adapter)
+                    )
+                    await self._audit(
+                        session,
+                        action=AuditAction.RUN_FAILED,
+                        actor=req.started_by,
+                        run_id=run.id,
+                        scenario_id=scenario.id,
+                        details={
+                            "error": str(spawn_exc),
+                            "role": asset.role,
+                        },
+                    )
+                    await session.commit()
+                    raise
 
         # 4. All assets up — flip run to SUCCEEDED.
         run.status = RunStatus.SUCCEEDED
