@@ -14,7 +14,7 @@ Design notes
 from __future__ import annotations
 
 import enum
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import (
@@ -169,6 +169,9 @@ class Run(Base, TimestampMixin):
     assets: Mapped[list[Asset]] = relationship(
         back_populates="run", cascade="all, delete-orphan"
     )
+    flag_submissions: Mapped[list["FlagSubmission"]] = relationship(
+        back_populates="run", cascade="all, delete-orphan"
+    )
 
     @property
     def duration_sec(self) -> int | None:
@@ -228,6 +231,81 @@ class Asset(Base, TimestampMixin):
 
     def __repr__(self) -> str:  # pragma: no cover
         return f"<Asset id={self.id} run_id={self.run_id} {self.role!r} {self.status.value}>"
+
+
+# --- Flag (F5) ------------------------------------------------------
+
+
+class FlagSide(str, enum.Enum):
+    """Which side is hunting this flag.
+
+    Red hunts blue-planted flags (typical CTF). Blue hunts
+    red-planted flags (defender challenge). ``self`` flags are
+    deployed on the team's own assets as proof-of-life.
+    """
+
+    RED = "red"
+    BLUE = "blue"
+    SELF = "self"
+
+
+class FlagSubmission(Base, TimestampMixin):
+    """One captured flag.
+
+    A scenario declares ``spec.flags[]``: each entry has an
+    id, a side (who hunts it), the planted value, the role of
+    the asset it's planted on, a decay_window_seconds, and
+    base points. The runner plants the value on the asset
+    during provisioning (typically baked into the asset's
+    filesystem via cloud-init user_data).
+
+    A team captures a flag by submitting its value via
+    ``POST /api/v1/drills/{id}/submit-flag``. The server:
+
+      * validates the (run, flag_id, value) tuple,
+      * records this FlagSubmission row with the team's role +
+        capture time,
+      * computes points via time-decay scoring.
+    """
+
+    __tablename__ = "flag_submissions"
+    __table_args__ = (
+        Index("ix_flag_submissions_run_id", "run_id"),
+        Index("ix_flag_submissions_team", "team"),
+        # One submission per (run, flag, team).
+        Index(
+            "uq_flag_submissions_run_flag_team",
+            "run_id",
+            "flag_id",
+            "team",
+            unique=True,
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    run_id: Mapped[int] = mapped_column(
+        ForeignKey("runs.id", ondelete="CASCADE"), nullable=False
+    )
+    flag_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    team: Mapped[str] = mapped_column(String(16), nullable=False)
+    submitted_by: Mapped[str] = mapped_column(String(64), nullable=False)
+    # Captured-at is the moment the server validated the flag.
+    captured_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+    )
+    # Frozen so re-grading a scoring rule later doesn't rewrite
+    # historical scores.
+    points: Mapped[int] = mapped_column(Integer, nullable=False)
+    elapsed_seconds: Mapped[int] = mapped_column(Integer, nullable=False)
+
+    run: Mapped["Run"] = relationship(back_populates="flag_submissions")
+
+    def __repr__(self) -> str:  # pragma: no cover
+        return (
+            f"<FlagSubmission id={self.id} run={self.run_id} "
+            f"flag={self.flag_id!r} team={self.team!r} +{self.points}>"
+        )
 
 
 # --- User -------------------------------------------------------------------

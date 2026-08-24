@@ -26,6 +26,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -34,6 +35,8 @@ from app.db import models as db_models
 from app.db.session import get_session
 from app.observability import record_cancel
 from app.runners.runner import Runner, RunnerError, RunRequest, build_runner
+from app.services.flags import FlagError, capture_seconds, resolve_flag, verify_flag_value
+from app.services.scoring import score as score_points, score_breakdown
 from app.services.authorization import can_view_run, visible_runs_query
 from app.services.rate_limit import check_drill_start_limit
 
@@ -545,4 +548,192 @@ async def get_asset_console(
             f"/api/v1/drills/{run_id}/assets/{asset_id}/console/ws"
         ),
         "expires_in_seconds": 7200,
+    }
+
+
+# =========================================================================
+# F5: flag submission per run
+# =========================================================================
+
+
+@router.post(
+    "/{run_id}/submit-flag",
+    summary="Submit a captured flag value for scoring",
+    dependencies=[Depends(require_role(
+        Role.ADMIN, Role.LEAD, Role.RED, Role.BLUE,
+    ))],
+)
+async def submit_flag(
+    run_id: int,
+    body: dict,
+    session: AsyncSession = Depends(get_session),
+    token=Depends(current_token),
+) -> dict:
+    """Validate a submitted flag value against a run's scenario.
+
+    Body::
+
+        {
+          "flag_id": "flag-1",
+          "value": "FLAG{pwned_the_router}"
+        }
+
+    Scoring:
+      * ``points = floor(base_points * max(0, 1 - elapsed / window))``.
+      * At t=0 the team gets the full ``base_points``; at
+        t=window they get 0; past window also 0.
+      * Frozen at capture time so re-grading a scoring rule
+        doesn't change history.
+
+    Errors:
+      * 401 / 403 -- auth + RBAC.
+      * 404 -- run not found, or asset not found.
+      * 409 -- run is terminal (drill ended).
+      * 422 -- flag_id not in scenario spec, or value mismatch.
+      * 409 -- same team already captured the same flag (unique
+        constraint on flag_submissions).
+
+    The endpoint doesn't require can_view_run directly: a red
+    operator running their own drill, or a blue watching it,
+    can submit. We DO require the run to be active.
+    """
+    flag_id = body.get("flag_id")
+    value = body.get("value")
+    if not isinstance(flag_id, str) or not isinstance(value, str):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="body must include flag_id (str) and value (str)",
+        )
+
+    row = (
+        await session.execute(
+            select(
+                db_models.Run.id,
+                db_models.Run.status,
+                db_models.Run.started_at,
+                db_models.Run.started_by,
+                db_models.Scenario.spec,
+                db_models.Scenario.name,
+            )
+            .where(db_models.Run.id == run_id)
+            .join(db_models.Scenario, db_models.Run.scenario_id == db_models.Scenario.id)
+        )
+    ).first()
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"run id={run_id} not found",
+        )
+    _run_id, run_status, started_at, started_by, spec, scenario_name = row
+    # can_view_run: a red/blue may submit their own; admin/lead
+    # see any.
+    from app.core.auth import Role as _Role
+    role = token.role if hasattr(token, "role") else None
+    is_admin_or_lead = role in (_Role.ADMIN, _Role.LEAD, _Role.OBSERVER)
+    is_owner = started_by == getattr(token, "sub", None)
+    if not is_admin_or_lead and not is_owner:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="you do not have access to submit flags for this run",
+        )
+    if run_status not in (db_models.RunStatus.RUNNING, db_models.RunStatus.PENDING):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=FlagError.run_not_active(run_status.value).message,
+        )
+
+    try:
+        flag_spec = resolve_flag(spec, flag_id)
+    except FlagError as exc:
+        if exc.kind == "flag_not_found":
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=exc.message,
+            )
+        raise
+
+    if not verify_flag_value(flag_spec, value):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="flag value did not match",
+        )
+
+    # The team hunting this flag is the opposite of the flag
+    # side: a red-side flag is hunted by blue, a blue-side flag
+    # is hunted by red. self-side flags are ignored.
+    if flag_spec.side == "red":
+        team = "blue"
+    elif flag_spec.side == "blue":
+        team = "red"
+    else:
+        # F5 design choice: self-side flags are planted as
+        # proof-of-life and out of scope for F5 scoring.
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                f"flag {flag_id!r} is self-side; F5 only scores red/blue side flags"
+            ),
+        )
+
+    elapsed = capture_seconds(started_at)
+    points = score_points(
+        base_points=flag_spec.base_points,
+        window_seconds=flag_spec.window_seconds,
+        elapsed_seconds=elapsed,
+    )
+    breakdown = score_breakdown(
+        flag_spec.base_points,
+        flag_spec.window_seconds,
+        elapsed,
+    )
+
+    submission = db_models.FlagSubmission(
+        run_id=run_id,
+        flag_id=flag_spec.flag_id,
+        team=team,
+        submitted_by=getattr(token, "sub", "unknown"),
+        points=points,
+        elapsed_seconds=elapsed,
+    )
+    session.add(submission)
+    try:
+        await session.commit()
+    except IntegrityError:  # noqa
+        await session.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=FlagError.duplicate(team, flag_spec.flag_id).message,
+        )
+
+    # Update run-level score (sum of all submissions per team).
+    from sqlalchemy import func as sa_func
+    red_q = await session.execute(
+        select(sa_func.coalesce(sa_func.sum(db_models.FlagSubmission.points), 0))
+        .where(db_models.FlagSubmission.run_id == run_id)
+        .where(db_models.FlagSubmission.team == "red")
+    )
+    blue_q = await session.execute(
+        select(sa_func.coalesce(sa_func.sum(db_models.FlagSubmission.points), 0))
+        .where(db_models.FlagSubmission.run_id == run_id)
+        .where(db_models.FlagSubmission.team == "blue")
+    )
+    red_total = int(red_q.scalar_one() or 0)
+    blue_total = int(blue_q.scalar_one() or 0)
+    run_obj = await session.execute(
+        select(db_models.Run).where(db_models.Run.id == run_id)
+    )
+    run_obj = run_obj.scalar_one()
+    run_obj.score_red = red_total
+    run_obj.score_blue = blue_total
+    await session.commit()
+
+    return {
+        "submission_id": submission.id,
+        "run_id": run_id,
+        "flag_id": flag_spec.flag_id,
+        "team": team,
+        "points": points,
+        "elapsed_seconds": elapsed,
+        "breakdown": breakdown,
+        "scenario_name": scenario_name,
     }
