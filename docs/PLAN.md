@@ -548,6 +548,17 @@ post-L1 plan in TEST-PRODUCT.md)
   ✅ **DONE** (commits `78bc332` + `b603c40`). See
   [`docs/USERS.md`](USERS.md) for the operator guide.
 
+  ✅ **F4-UI cyber-range portal v2** ✅ **DONE** (commits
+  `cd66060` + `146f91b` + `c2ccddf`). The visual layer that turns
+  div:ide from a list of admin cards into a real cyber-range UI:
+  view tabs (Dashboard / Operate / Observe / Admin / History /
+  Profile), role-aware nav, KPI dashboard, live drill console,
+  network topology graph (SVG, no dep), user list, profile view,
+  range operator console (with Stop button), toast system,
+  status-filter on history. See
+  [`docs/PORTAL-UI.md`](PORTAL-UI.md) for the full component
+  inventory.
+
 ---
 
 ## 12. Key Decisions to Confirm

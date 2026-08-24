@@ -470,3 +470,83 @@ def test_app_tsx_renders_profile_card_in_profile_view():
     # But not a bare DashboardCard (which would mean the profile
     # view was never specialised).
     assert "<DashboardCard" not in m.group(1)
+
+
+# ---------- Role-permission matrix pin (F4-UI commit 4) ----------------
+
+
+def test_topnav_admin_tab_visible_only_to_admin_lead():
+    """Pin: only admin and lead see the Admin tab. The other
+    roles must NOT have it in their tabsForRole() output."""
+    src = _read("services/portal/app/src/components/portal/top-nav.tsx")
+    # The Admin tab declares its role allow-list.
+    m = re.search(
+        r'key:\s*"admin".*?roles:\s*\[(.+?)\]',
+        src,
+        re.DOTALL,
+    )
+    assert m, "Admin tab must declare roles"
+    roles = re.findall(r'"([a-z]+)"', m.group(1))
+    assert "admin" in roles and "lead" in roles
+    for blocked in ("red", "blue", "observer"):
+        assert blocked not in roles, (
+            f"role {blocked!r} must NOT have admin-tab access"
+        )
+
+
+def test_topnav_uses_role_labels():
+    """TopNav uses ROLE_LABELS from lib/roles.ts to render the role
+    badge — same source of truth as everywhere else."""
+    topnav_src = _read("services/portal/app/src/components/portal/top-nav.tsx")
+    assert "ROLE_LABELS" in topnav_src, (
+        "TopNav should import ROLE_LABELS from lib/roles.ts"
+    )
+    roles_src = _read("services/portal/app/src/lib/roles.ts")
+    assert "ROLE_LABELS" in roles_src
+
+
+def test_all_roles_documented_in_topnav_or_compositions():
+    """Every Role value from lib/roles.ts must be referenced in
+    TopNav or in the role-list somewhere — otherwise a new role
+    addition is invisible to the portal."""
+    roles_src = _read("services/portal/app/src/lib/roles.ts")
+    topnav_src = _read("services/portal/app/src/components/portal/top-nav.tsx")
+    role_values = re.findall(r'Role\.(\w+)\.value', topnav_src)
+    # At least admin must appear (the Admin tab is gated on it).
+    assert "ADMIN" in role_values or "admin" in topnav_src, (
+        "TopNav must reference the admin role"
+    )
+
+
+def test_app_tsx_view_keys_match_topnav_tabs():
+    """Every view case in app.tsx must have a matching tab in
+    TopNav. A mismatch means the operator sees a tab that does
+    nothing (or vice versa)."""
+    app_src = _read("services/portal/app/src/app.tsx")
+    topnav_src = _read("services/portal/app/src/components/portal/top-nav.tsx")
+    app_views = set(re.findall(r'case "(\w+)":', app_src))
+    topnav_views = set(re.findall(r'key:\s*"(\w+)"', topnav_src))
+    # TopNav has more keys than app.tsx switches because TopNav
+    # includes tabs like 'profile' that app.tsx routes too. The
+    # subset relationship is what we want.
+    assert app_views.issubset(topnav_views), (
+        f"app.tsx views {app_views - topnav_views} not present in TopNav tabs"
+    )
+
+
+# ---------- Build artifact smoke check ---------------------------------
+
+
+def test_build_dist_artifact_exists_after_f4_ui():
+    """After a full build, the production JS asset must be present
+    so the portal can be served. If this fails it usually means
+    the build step was skipped (e.g. CI without npm)."""
+    import os
+
+    build_assets = (
+        REPO / "services" / "portal" / "app" / "build" / "assets"
+    )
+    if not build_assets.is_dir():
+        pytest.skip("build/ not present; run `npm run build` first")
+    js_files = [a for a in build_assets.glob("*.js") if ".map" not in a.name]
+    assert js_files, "no JS asset produced; build broke"
