@@ -64,24 +64,6 @@ PORTAL_HTML_FILES: dict[str, tuple[str, list[str]]] = {
             "pveum acl modify",
         ],
     ),
-    "test_ui": (
-        "services/portal/test/index.html",
-        [
-            # Sub-routes the test UI fetches with template literals.
-            # The JS uses {id} (not {run_id}) as the variable name; both
-            # the <span class="hint"> docs and the JS template literals
-            # reference it this way.
-            "/api/v1/drills/{id}/cancel",
-            "/api/v1/drills/{id}/audit",
-            "/api/v1/drills/{id}",
-            # Top-level API URL prefixes -- these are full URLs the test
-            # UI fetches with both string concat and template literals.
-            "/api/v1/scenarios",
-            "/api/v1/proxmox",
-            # Prometheus exposition.
-            "/metrics",
-        ],
-    ),
     # The React/Vite user portal at /portal/app/ is covered by
     # tests/test_portal_app_smoke.py instead — the bundle-vs-source
     # invariants are different (the on-disk index.html is tiny and
@@ -210,16 +192,3 @@ def test_portal_pages_exist_on_disk():
         assert p.stat().st_size > 1000, f"{relpath} suspiciously small"
 
 
-def test_test_ui_has_run_id_input_id():
-    """The test UI relies on an ``id=\"run-id\"`` input -- ``$(\"run-id\")`` in the JS.
-
-    Rename either side without the other and the page silently breaks.
-    """
-    html = (Path(__file__).resolve().parent.parent / PORTAL_HTML_FILES["test_ui"][0]).read_text()
-    assert 'id="run-id"' in html, (
-        "test UI must keep id=\"run-id\" -- the JS uses $('run-id') to read it"
-    )
-    # Sanity: the JS does indeed use that id.
-    assert "$(\"run-id\")" in html or "$('run-id')" in html, (
-        "test UI JS must querySelector for 'run-id' -- the input id is referenced"
-    )

@@ -233,7 +233,6 @@ platform is ready for actual drills — and the entry point changes:
   a token (mint one with `python3 tools/issue_token.py --user
   alice --role trainee --ttl 1h`), pick a scenario, run a drill.
   See [`PORTAL-APP.md`](PORTAL-APP.md).
-- **Operator (day-to-day):** open [`/portal/test/`](../services/portal/test/index.html)
   — this UI. Poke at state, see what's running, inspect audit
-  logs. See [`TEST-UI.md`](TEST-UI.md).
+logs.
 - **CLI for CI / scripts:** `make live-drill SCENARIO=first-live-drill TIMEOUT=300`.

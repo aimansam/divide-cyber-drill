@@ -4,7 +4,6 @@ The user-facing browser portal — sign in, pick a scenario, watch a
 drill live, download a debrief. Companion to:
 
 - [`SETUP-UI.md`](SETUP-UI.md) — the one-time deploy wizard at `/portal/`
-- [`TEST-UI.md`](TEST-UI.md) — the operator diagnostic tool at `/portal/test/`
 - [`USER-REQUIREMENTS.md`](USER-REQUIREMENTS.md) — persona-side view of what
   each role can do today
 
@@ -155,7 +154,7 @@ silently drop their role attribution.
 | Tool | Audience | Purpose |
 |---|---|---|
 | `/portal/` | Operator (first run) | one-time deploy wizard |
-| `/portal/test/` | Operator (day-to-day) | poke at state, see what scenario is loaded, audit |
+
 | `/portal/app/` | Trainee + lead | the actual product — pick a scenario, run it, debrief |
 
 ## Day-1 scope (next-plan M1 + M3.1)

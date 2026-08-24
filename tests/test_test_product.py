@@ -271,7 +271,6 @@ def test_portal_app_doc_exists_and_links():
 
     # Must reference the parent docs.
     assert "SETUP-UI.md" in text, "PORTAL-APP.md should reference SETUP-UI.md"
-    assert "TEST-UI.md" in text, "PORTAL-APP.md should reference TEST-UI.md"
 
     # README must list the new doc in the docs/ tree.
     readme = (REPO / "README.md").read_text(encoding="utf-8")
@@ -279,15 +278,20 @@ def test_portal_app_doc_exists_and_links():
         "README.md should list PORTAL-APP.md in the docs/ tree"
     )
 
-    # README's portal URL table must mention all three portals.
-    for path in ["/portal/", "/portal/test/", "/portal/app/"]:
+    # README's portal URL table must mention both surviving portals.
+    for path in ["/portal/", "/portal/app/"]:
         assert path in readme, (
             f"README.md should mention {path!r} in the portal URL table"
         )
+    # The legacy /portal/test/ tool was removed when F3-F8 made
+    # /portal/app/ the canonical surface.
+    assert "/portal/test/" not in readme, (
+        "README.md should NOT reference the removed /portal/test/ legacy"
+    )
 
 
 def test_three_portals_consistently_described():
-    """The three portals (setup wizard, operator tool, user portal)
+    """The two surviving portals (setup wizard, operator tool, user portal)
     must be consistently named and described across the docs that
     mention them. Catches drift where one doc says 'two browser
     tools' and another says 'three'.
@@ -296,13 +300,11 @@ def test_three_portals_consistently_described():
         "README.md",
         "docs/TEST-PRODUCT.md",
         "docs/SETUP-UI.md",
-        "docs/TEST-UI.md",
         "docs/LIVE-DRILL-RUNBOOK.md",
         "docs/USER-REQUIREMENTS.md",
     ]
     portal_slugs = [
         ("/portal/", "setup wizard"),
-        ("/portal/test/", "operator"),
         ("/portal/app/", "user portal"),
     ]
     for relpath in docs_to_check:

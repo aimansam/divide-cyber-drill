@@ -9,7 +9,7 @@
 > and §17 for the post-§15 follow-ons.
 > See [`docs/TEST-PRODUCT.md`](docs/TEST-PRODUCT.md) for the L1/L2/L3 ship criteria.
 > Browser tools ship in the API container: setup wizard at `/portal/`,
-> operator test tool at `/portal/test/`, full cyber-range portal at `/portal/app/`.
+full cyber-range portal at `/portal/app/`.
 
 **div:ide** is a Proxmox-backed cyber drill platform for blue teams, red teams, and
 training cohorts. It spins up isolated, reproducible attack/defense scenarios as VMs,
@@ -58,7 +58,6 @@ divide-cyber-drill/
 │   ├── USER-REQUIREMENTS.md     # persona view: who needs what, what's wired, what's missing
 │   ├── SETUP-UI.md              # docs for the browser-based setup wizard at /portal/
 │   ├── PORTAL-APP.md            # docs for the React/Vite user portal at /portal/app/
-│   ├── TEST-UI.md               # docs for the operator test tool at /portal/test/
 │   └── images/                  # 6 architecture diagrams (auto-generated)
 ├── deploy/
 │   ├── docker-compose.yml       # control-plane stack
@@ -69,13 +68,13 @@ divide-cyber-drill/
 │   │   ├── app/                 # code
 │   │   │   ├── routers/         # drills, scenarios, proxmox, admin (setup wizard), health
 │   │   │   ├── services/        # proxmox client, runner adapters, admin (template builder), scen_sync
-│   │   │   └── main.py          # mounts /portal and /portal/test/ via StaticFiles
+│   │   │   └── main.py          # mounts /portal via StaticFiles
 │   │   ├── tests/               # pytest (276 tests)
 │   │   ├── scripts/             # proxmox-smoke.py
 │   │   └── Dockerfile
 │   └── portal/                  # static HTML+JS pages served by the API
 │       ├── index.html           # → /portal/  (setup wizard, 4 steps)
-│       └── test/index.html      # → /portal/test/  (operator test tool, 7 cards)
+
 ├── tools/                       # CLI entry points used by Makefile targets
 │   ├── gen_diagrams.py          # regenerates docs/images/*.png
 │   ├── preflight.py             # `make preflight` — 9 PVE/stack health checks
@@ -123,7 +122,7 @@ After `make up` (and `make portal-build` once, for the React one), browse to:
 | URL | Audience | Purpose | Doc |
 |---|---|---|---|
 | `http://localhost:8000/portal/`       | Operator (first run)   | Setup wizard — stand up a fresh PVE-backed deployment without SSH-ing into Proxmox | [`docs/SETUP-UI.md`](docs/SETUP-UI.md) |
-| `http://localhost:8000/portal/test/`  | Operator (day-to-day)  | Test tool — every control-plane endpoint as a click button | [`docs/TEST-UI.md`](docs/TEST-UI.md) |
+
 | `http://localhost:8000/portal/app/`   | Trainee + lead         | User portal — sign in, pick a scenario, run a drill, download a debrief (React + Vite) | [`docs/PORTAL-APP.md`](docs/PORTAL-APP.md) |
 
 The first two are vanilla HTML + JS — no build step. The third is a

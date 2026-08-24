@@ -443,7 +443,6 @@ point.
      -H "X-Divide-Token: <token>" | python3 -m json.tool
    ```
 
-The portal also serves `/portal/test/` (the operator diagnostic UI)
 and `/portal/` (the setup wizard you ran in §4). All three share
 the same FastAPI mount under `/portal/`. See [PORTAL-APP.md](PORTAL-APP.md).
 

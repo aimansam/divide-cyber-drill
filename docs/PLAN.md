@@ -135,7 +135,6 @@ divide-cyber-drill/
 │   ├── orchestrator/            # background workers (RQ)
 │   ├── portal/                  # browser portals
 │   │   ├── index.html           # /portal/ setup wizard (vanilla)
-│   │   ├── test/index.html      # /portal/test/ operator tool (vanilla)
 │   │   └── app/                 # /portal/app/ user portal (React/Vite)
 │   │       ├── src/             #    TypeScript + React components
 │   │       ├── package.json
@@ -419,7 +418,7 @@ On drill completion, report-builder extracts IOCs (IPs, domains, URLs, hashes) f
 - Template: `tpl-debian-cloudinit` (debian-13-genericcloud, qcow2 import
   via `local: /upload?content=import` + `POST /qemu/{vmid}/config`
   with `scsi0=local-lvm:0,import-from={volid}`).
-- Portal: `/portal/` setup wizard, `/portal/test/` operator tool.
+- Portal: `/portal/` setup wizard, `/portal/app/` user portal.
 - Run #11 — `status=succeeded`, `pve_vmid=109`, audit
   `run.started → asset.spawned → run.completed`, asset teardown
   to `stopped`. `make preflight` 9/9 READY. L1 ledger 9/9 ✅.
@@ -462,17 +461,6 @@ post-L1 plan in TEST-PRODUCT.md)
 - Tests: 236 → 243 (+7) covering endpoint shapes + UI render
   invariants. Live verified at commit `496efd1`.
 
-**Stage 16 — Test UI at `/portal/test/`** ✅
-- 7 cards expose every control-plane endpoint as click buttons
-  (scenarios, drills with start/refresh/cancel, assets, audit,
-  metrics, Proxmox state). Plus 2 new read-only endpoints added
-  to support the cards: `GET /api/v1/drills/{id}` and
-  `GET /api/v1/drills/{id}/audit`.
-- `tests/test_portal_smoke.py` (6 tests) — static-analysis regex
-  on the HTML+JS catching "JS calls a path that doesn't exist on
-  the API" without a browser. Avoided Playwright to keep CI image
-  small.
-- Tests: 236 → 256 (+20 across stages 15-16).
 
 **Stage 17 — Token middleware + CLI** ✅ (post-L1, item #4)
 - `services/api/app/core/auth.py` — HMAC-SHA256 compact tokens
@@ -836,158 +824,6 @@ what F3-F8 explicitly added (F4 added `websockets`).
 follow-on work.
 
 ---
----
-
-## 16. Where this doc stops being current (read [docs/TEST-PRODUCT.md](TEST-PRODUCT.md) for the live ledger)
-
-This file is **current as of F2 close-out (L2 18/18 ✅)**. The
-sections that grew stale over time have been updated:
-
-- §5 "Phase 1" was deferred multiple times — it's done.
-- §13 "What we've built" lists up to Stage 4 — the codebase is
-  at Stage 18 plus F1 (Half 1 + Half 2) plus F2 (5 commits).
-- §13 "Live Proxmox integration" said the read-only endpoints
-  return 502 — they return 200 now (since the `/access/permissions`
-  fix in commit `ab0ab58`).
-- "Tests: 56 passed" was the §13 snapshot — current count is
-  **399** (committed in F2.5 `2c21138`).
-
-For the live ledger of what's done / what's next:
-
-- **[docs/TEST-PRODUCT.md](TEST-PRODUCT.md)** — the L1/L2/L3 graded
-  checklist, the live `preflight` count, the test count, the per-
-  criterion progress. This file is the canonical answer to "where are
-  we right now?".
-- **[docs/USER-REQUIREMENTS.md](USER-REQUIREMENTS.md)** — persona-side
-  view (who can do what today, what's missing).
-- **[docs/SETUP-UI.md](SETUP-UI.md)** — the multi-step setup wizard
-  at `/portal/` (no SSH into PVE required, except for one `pveum`
-  grant).
-- **[docs/TEST-UI.md](TEST-UI.md)** — the operator diagnostic tool
-  at `/portal/test/` (7 cards, exposes every control-plane
-  endpoint). Vanilla HTML+JS.
-- **[docs/PORTAL-APP.md](PORTAL-APP.md)** — the user-facing React
-  portal at `/portal/app/`. Trainee + lead entry point; sign-in,
-  scenario pick, run lifecycle, debrief. React 18 + Vite + Tailwind
-  + shadcn/ui.
-- **[docs/LIVE-DRILL-RUNBOOK.md](LIVE-DRILL-RUNBOOK.md)** — step-by-step
-  instructions for the PVE-side work; check the runbook for the
-  canonical step ordering.
-
-### Day-1 of the F1 (functional product first) plan
-
-17. **User portal** at `/portal/app/` (commit `d0ce912`) — React 18 +
-    Vite + Tailwind + shadcn/ui. Ships `TokenBar` (X-Divide-Token
-    injection into `localStorage` + every `fetch()`) and
-    `ScenariosCard` (lists `/api/v1/scenarios` + click-to-pick).
-    9 regression tests (`tests/test_portal_app_smoke.py`). New
-    FastAPI StaticFiles mount at `/portal/app/` (registered **before**
-    `/portal` so the parent doesn't shadow the subpath). Compose
-    bind-mounts `services/portal/app/build` so a `make portal-build`
-    is reflected without an API image rebuild. **First modern UI
-    stack in the repo** — replaces the "edit HTML, refresh browser"
-    loop with HMR via `make portal-watch`. The F1 plan (§Next plan in
-    TEST-PRODUCT.md) targets Run lifecycle / Assets / Audit / Cancel /
-    Download report cards as next items.
-
-18. **RBAC enforcement (L2 2.9 closed)** ✅ — three commits:
-    * `1631448` substrate: `Role` enum (admin / lead / red / blue /
-      observer) + `require_role(...)` factory in
-      `app/core/auth.py`. Zero behavior change; reviewable in
-      isolation.
-    * `0c2da49` security fix: `dependencies=[Depends(require_role(ADMIN))]`
-      at the router level on `/api/v1/admin/*`. Closes the
-      anonymous-probe disclosure risk.
-    * matrix commit: per-endpoint role gates on `/api/v1/drills/*` +
-      own-runs-only filter for red/blue via the new
-      `app/services/authorization.py` module. The 30-parametrized
-      matrix in `services/api/tests/test_authorization.py`
-      enforces the persona matrix on every future endpoint
-      addition (one-line param entry).
-    * `tools/watch_drill.py` now sends the token on the cancel
-      POST (new `--token` flag + `$DIVIDE_TOKEN` env var).
-    * `tools/issue_token.py` restricts `--role` choices to the
-      enum (legacy `--role trainee` is rejected).
-    * `/api/v1/proxmox/*` stays anonymous in L2 — see the
-      `routers/proxmox.py` module docstring for the M5 plan.
-    Tests: 287 → 331 (+44 across the three commits).
-    `docs/USER-REQUIREMENTS.md` §2 flips from "target matrix"
-    to "enforced matrix"; §3 cross-cutting gaps #1 + #8 are
-    struck through (CLOSED).
-
-19. **Role-aware UI composition (M3.2 Half 1 closed)** ✅ — three commits:
-    * server: new `GET /api/v1/me` endpoint (gated by
-      `require_token`) returns the verified `sub`/`role`/`iat`/
-      `exp`/`ttl_remaining_s`. Removes the client-side JWT decode
-      footgun in `TokenBar`.
-    * lib: `lib/roles.ts` typed `Role` union + display labels;
-      `lib/auth.ts` `useMe()` hook with same-tab + cross-tab
-      subscription.
-    * cards: `MyRunsCard` (own-runs list, server-filtered) +
-      `RunLifecycleCard` (start + refresh + cancel own-only;
-      polls every 2s while live; cancel button disables with a
-      tooltip when the red user tries to cancel someone else's
-      run — mirrors the server 403).
-    * role router: `COMPOSITIONS` in `src/app.tsx` is the single
-      source of truth. Blue and observer don't get
-      `RunLifecycleCard`; they can't click "Start drill" and get
-      403 because the button isn't there.
-    Tests: 331 → 360 (+29: 11 server-side `/api/v1/me`, 18
-    static + bundle + wiring). `tests/test_portal_app_role_composition.py`
-    is the dedicated guard: 6 parametrized per-role cases + 12
-    shape/bundle/invariant checks. The server-side `Role` enum and
-    the portal `COMPOSITIONS` table are cross-checked: adding a
-    role in one without the other fails the test loudly.
-    Production JS bundle: 190 KB (61 KB gzipped), well under the
-    250 KB lazy-load trigger budget.
-    Half 2 (RunInspectorCard + AssetsCard + AuditExplorerCard +
-    PveOpsCard + ScenarioAuthoringCard) is the next commit; the
-    static-check tests already reserve the kind names so the
-    table comment is the only thing that needs updating.
-
-20. **Role-aware UI composition (M3.2 Half 2 closed — F1 plan
-    complete)** ✅ — single commit landing:
-    * cards: `RunInspectorCard` (full run detail — status,
-      started_by, duration, assets, error), `AssetsCard`
-      (copy-to-clipboard SSH targets per asset, falls back to
-      `document.execCommand` for older browsers), `AuditExplorerCard`
-      (append-only timeline with tone per action: RUN_COMPLETED
-      green, RUN_FAILED red, ASSET_SPAWNED sky, etc.), `PveOpsCard`
-      (admin-only read-only PVE health summary: probe + storage +
-      drill-template-status via three parallel GETs; the wizard
-      at `/portal/` stays the deploy surface for the upload +
-      create-template flows), `ScenarioAuthoringCard` (admin + lead —
-      paste YAML + Import; list active with Archive; list archived
-      with Restore; uses inline `fetch` for DELETE since api.ts only
-      has get+post).
-    * role router: `CardKind` union extended from 4 to 9 kinds;
-      `COMPOSITIONS` table extended per the matrix. Read-only
-      roles (blue, observer) don't get the cards that have write
-      buttons.
-    * production JS bundle: 215 KB (66 KB gzipped), still under
-      the 280 KB lazy-load trigger. If we add the wizard's
-      upload-QCOW2 flow to PveOpsCard in a follow-up we'll need
-      to start React.lazy.
-    Tests: 360 → 362 (+2 — composition file expanded the
-    parametrized cases + added the documented-role-set check;
-    bundle-size test was renamed Half-2 budget). Total now
-    **362 tests passing**. The F1 portal-cards plan is complete
-    — L3 3.11 flips from "partial closed" to "fully closed".
-
-The rest of this section calls out specific places where PLAN.md's
-text is misleading so future readers don't trust stale snippets:
-
-- §5 "Phase 1" was deferred multiple times — it's done; see commits
-  `ab0ab58` (preflight fix), `496efd1` (wizard), `cd0ccb5` (test UI).
-- §13 "What we've built" lists up to Stage 4 — the codebase is now
-  at Stage 12 (per [docs/TEST-PRODUCT.md](TEST-PRODUCT.md)). Use
-  TEST-PRODUCT.md's update log for the authoritative timeline.
-- §13 "Live Proxmox integration" says the read-only endpoints return
-  502. They return 200 now (token works since the
-  `/access/permissions` fix in commit `ab0ab58`).
-- "Tests: 56 passed" is from the §13 snapshot — current count is
-  243, see `make test`.
-
 ---
 
 ## 17. Roadmap (post-§15)

@@ -97,7 +97,7 @@ PVE OK?".
 - `POST /api/v1/drills` (will be rate-limited, next-plan #3).
 - `POST /api/v1/drills/{id}/cancel` with `reason` + `actor` body.
 - `GET /api/v1/drills/{id}` + `/audit` for live run inspection.
-- [`/portal/test/`](../services/portal/test/index.html) cards 1
+- `/portal/test/` cards 1
   (scenario picker), 2 (run lifecycle), 3 (cancel), 5 (audit log).
 - [`/portal/app/`](../services/portal/app/index.html) (commits
   `d0ce912`, `M3.2-Half1`, `M3.2-Half2`) — the lead's primary
@@ -371,7 +371,7 @@ L2 demo.
   team, or training cohort…").
 - [`PLAN.md`](PLAN.md) §7 — `noVNC + Guacamole` plan for trainee
   console access (the L3 answer to Persona 3 / 4's biggest gap).
-- [`TEST-UI.md`](TEST-UI.md) — the operator browser tool at
+
   `/portal/test/`.
 - [`PORTAL-APP.md`](PORTAL-APP.md) — the React/Vite user portal at
   `/portal/app/`.

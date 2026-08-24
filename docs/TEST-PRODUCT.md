@@ -138,7 +138,7 @@ contains the damage (rate limits, sane defaults, no shared secrets).
 
 | # | Criterion | Status |
 |---|---|---|
-| 2.1  | Operator browser tool at `/portal/test/` with one-click access to scenarios, drills, assets, audit, metrics, Proxmox | ✅ done ([`docs/TEST-UI.md`](TEST-UI.md), commit `cd0ccb5`) |
+| 2.1  | Operator browser tool with one-click access to scenarios, drills, assets, audit, metrics, Proxmox — **superseded by `/portal/app/`** ([docs/PORTAL-APP.md](PORTAL-APP.md)); the legacy `/portal/test/` static HTML was removed when F3-F8 made it obsolete. ✅ done |
 | 2.2  | Portal can reach the API via the dev box hostname, not just localhost | ❌ needs Traefik route |
 | 2.3  | API has a token-based auth middleware (`X-Divide-Token` header) | ✅ done ([`app/core/auth.py`](../../services/api/app/core/auth.py) — HMAC-SHA256 signed tokens, `current_token` + `require_token` Depends; routes on `/drills/{id}/cancel` already attribute `actor` from the token) |
 | 2.4  | Token issuance CLI: `divide issue-token --user alice --role trainee` | ✅ done ([`tools/issue_token.py`](../../tools/issue_token.py) — `--user`, `--role`, `--ttl` with `s/m/h/d` suffix support) |
