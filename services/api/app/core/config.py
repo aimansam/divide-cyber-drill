@@ -115,6 +115,21 @@ class Settings(BaseSettings):
     # ``drill_timeout_min > 0``.
     drill_timeout_enabled: bool = True
 
+    # F3-prep credential login. Lifetime of the HMAC token minted by
+    # POST /api/v1/auth/login, in seconds. Default 8h covers a working
+    # day; override for shorter demos. Clamped to a positive int at the
+    # router (zero / negative falls back to default).
+    login_token_ttl_s: int = 8 * 3600
+
+    # F3-prep bootstrap admin. On API startup, if BOTH vars are set AND
+    # no admin user exists, a row is created with role="admin". Used to
+    # seed the very first admin without an SSH session. Both vars are
+    # secrets: ``bootstrap_admin_password`` is a SecretStr so it's
+    # never echoed in logs. After the first admin exists the env vars
+    # are no-ops; remove them from the env file to reduce blast radius.
+    bootstrap_admin_sub: str | None = None
+    bootstrap_admin_password: SecretStr | None = None
+
 
 @lru_cache
 def get_settings() -> Settings:

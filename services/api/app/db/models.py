@@ -20,6 +20,7 @@ from typing import Any
 from sqlalchemy import (
     JSON,
     BigInteger,
+    Boolean,
     DateTime,
     Enum,
     ForeignKey,
@@ -32,7 +33,6 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base, TimestampMixin
-
 
 # --- enums ------------------------------------------------------------------
 
@@ -118,7 +118,7 @@ class Scenario(Base, TimestampMixin):
         DateTime(timezone=True), nullable=True
     )
 
-    runs: Mapped[list["Run"]] = relationship(back_populates="scenario")
+    runs: Mapped[list[Run]] = relationship(back_populates="scenario")
 
     def __repr__(self) -> str:  # pragma: no cover
         return f"<Scenario id={self.id} name={self.name!r} v{self.version}>"
@@ -166,7 +166,7 @@ class Run(Base, TimestampMixin):
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     scenario: Mapped[Scenario] = relationship(back_populates="runs")
-    assets: Mapped[list["Asset"]] = relationship(
+    assets: Mapped[list[Asset]] = relationship(
         back_populates="run", cascade="all, delete-orphan"
     )
 
@@ -219,6 +219,74 @@ class Asset(Base, TimestampMixin):
 
     def __repr__(self) -> str:  # pragma: no cover
         return f"<Asset id={self.id} run_id={self.run_id} {self.role!r} {self.status.value}>"
+
+
+# --- User -------------------------------------------------------------------
+
+
+class User(Base, TimestampMixin):
+    """A login-capable div:ide user (F3-prep credential login).
+
+    Replaces the bare ``tools/issue_token.py`` paste-your-token UX
+    with a real username + password flow. The token issued by
+    ``POST /api/v1/auth/login`` is the same HMAC-SHA256 token the
+    paste flow emits — :mod:`app.core.auth` doesn't care how the
+    caller got the token, only that it verifies.
+
+    Why a separate ``User`` table and not just another ``AuditLog``
+    actor name:
+
+      * Password storage needs an argon2 hash column. Audit rows are
+        append-only and don't carry secret material.
+      * ``disabled`` lets an admin disable an account without
+        deleting its history (audit still names the user).
+      * ``last_login_at`` is operational telemetry, not audit, and
+        belongs on the user record.
+
+    Bootstrap: on API startup, if ``DIVIDE_BOOTSTRAP_ADMIN_SUB`` +
+    ``DIVIDE_BOOTSTRAP_ADMIN_PASSWORD`` env vars are set AND no
+    admin exists, the user is created. The env-var path is the
+    only way to seed the first admin without a manual
+    ``divide create-user`` invocation. Subsequent admins are
+    added through ``POST /api/v1/admin/users`` (future L3 work) or
+    via the bootstrap-env-var override by removing the first
+    admin and re-bootstrapping.
+    """
+
+    __tablename__ = "users"
+    __table_args__ = (
+        Index("ix_users_role", "role"),
+        Index("ix_users_disabled", "disabled"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    # ``sub`` is the username that goes into the token. Unique so a
+    # second ``create_user`` raises IntegrityError (caller can
+    # decide whether to surface that as 409). Trimmed of leading /
+    # trailing whitespace; caller is responsible for lower-casing
+    # if the deployment cares.
+    sub: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    # Argon2id PHC string (``$argon2id$v=19$m=...,t=...,p=...$salt$hash``).
+    # Never log this; never return it from a router. ``verify_password``
+    # in :mod:`app.services.users` is the only legitimate reader.
+    password_hash: Mapped[str] = mapped_column(String(256), nullable=False)
+    # Free-form role string. We don't FK into an enum table — the
+    # canonical list lives on :class:`app.core.auth.Role` and is
+    # enforced at write time by :func:`app.services.users.create_user`.
+    role: Mapped[str] = mapped_column(String(32), nullable=False)
+    last_login_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # Admin kill switch. ``disabled=True`` users get 401 on
+    # ``POST /auth/login``; their existing tokens still verify
+    # until ``exp`` (consistent with the rest of the auth model —
+    # no revocation list yet).
+    disabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+
+    def __repr__(self) -> str:  # pragma: no cover
+        return f"<User id={self.id} sub={self.sub!r} role={self.role!r}>"
 
 
 # --- AuditLog ---------------------------------------------------------------
@@ -274,4 +342,5 @@ __all__ = [
     "RunStatus",
     "Scenario",
     "TimestampMixin",
+    "User",
 ]

@@ -13,7 +13,7 @@ from app import __version__
 from app.core.config import settings
 from app.core.logging import configure_logging
 from app.observability.middleware import PrometheusMiddleware
-from app.routers import admin, drills, health, me, proxmox, reports, scenarios
+from app.routers import admin, auth, drills, health, me, proxmox, reports, scenarios
 from app.services.scenario_sync import sync_files
 
 log = structlog.get_logger()
@@ -25,6 +25,60 @@ async def lifespan(app: FastAPI):
     log.info("divide_api.start", version=__version__, env=settings.env)
 
     if settings.sync_on_startup:
+        # F3-prep: bootstrap admin from env vars. Idempotent — only
+        # fires if the env vars are set AND no admin exists yet. We
+        # log loudly either way so operators can confirm intent.
+        try:
+            from app.db.session import get_sessionmaker
+            from app.services.users import (
+                DuplicateSubError,
+                UserStoreError,
+                create_user,
+                get_by_sub,
+            )
+
+            admin_sub = settings.bootstrap_admin_sub
+            admin_pw_secret = settings.bootstrap_admin_password
+            if admin_sub and admin_pw_secret is not None:
+                sm_boot = get_sessionmaker()
+                async with sm_boot() as boot_session:
+                    existing = await get_by_sub(boot_session, admin_sub)
+                    if existing is None:
+                        try:
+                            await create_user(
+                                boot_session,
+                                sub=admin_sub,
+                                password=admin_pw_secret.get_secret_value(),
+                                role="admin",
+                            )
+                            await boot_session.commit()
+                            log.info(
+                                "divide_api.bootstrap_admin.created",
+                                sub=admin_sub,
+                            )
+                        except DuplicateSubError:
+                            await boot_session.rollback()
+                            log.info(
+                                "divide_api.bootstrap_admin.race",
+                                sub=admin_sub,
+                            )
+                        except UserStoreError as exc:
+                            await boot_session.rollback()
+                            log.error(
+                                "divide_api.bootstrap_admin.failed",
+                                sub=admin_sub,
+                                error=str(exc),
+                            )
+                    else:
+                        log.info(
+                            "divide_api.bootstrap_admin.skipped_exists",
+                            sub=admin_sub,
+                        )
+            else:
+                log.info("divide_api.bootstrap_admin.skipped_no_env")
+        except Exception as exc:  # pragma: no cover - best-effort
+            log.error("divide_api.bootstrap_admin.crashed", error=str(exc))
+
         try:
             from app.db.session import get_sessionmaker
 
@@ -84,6 +138,7 @@ def create_app() -> FastAPI:
     app.add_middleware(PrometheusMiddleware)
 
     app.include_router(health.router, prefix="", tags=["health"])
+    app.include_router(auth.router, prefix="/api/v1/auth", tags=["auth"])
     app.include_router(me.router, prefix="/api/v1/me", tags=["me"])
     app.include_router(scenarios.router, prefix="/api/v1/scenarios", tags=["scenarios"])
     app.include_router(drills.router, prefix="/api/v1/drills", tags=["drills"])
