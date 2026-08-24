@@ -1,0 +1,106 @@
+apiVersion: divide/v1
+kind: Scenario
+metadata:
+  name: red-vs-blue-baseline
+  title: "Red vs Blue Baseline (Cyber-Range Topology Demo)"
+  version: 1
+  difficulty: beginner
+  duration_min: 30
+  tags:
+    - cyber-range
+    - red-team
+    - blue-team
+    - baseline
+    - topology-demo
+  authors:
+    - handle: divide-team
+      name: div:ide core
+
+spec:
+  objectives:
+    red:
+      - "Reach the file server from the attacker host via the router."
+      - "Plant a flag marker in the file server's audit log."
+    blue:
+      - "Watch the attacker arrive on the router and pivot into the blue subnet."
+      - "Identify the red team's IP via the log-aggregator's syslog feed."
+
+  # Three subnets showing the classic red↔router↔blue layout.
+  # The TopologyGraph card (F4-UI) renders these as:
+  #   red zone:    attacker (1)
+  #   router zone: router_fw (1)
+  #   blue zone:   victim_workstation (2), file_server (1), log_aggregator (1)
+  networks:
+    - name: red_vlan
+      cidr: 10.10.10.0/24
+      isolation: loose
+    - name: dmz
+      cidr: 10.10.20.0/24
+      isolation: tight
+    - name: blue_vlan
+      cidr: 10.10.30.0/24
+      isolation: loose
+
+  assets:
+    # --- Red zone: one attacker on the red subnet ---
+    - role: red_attacker
+      kind: vm
+      template: tpl-kali-cloudinit
+      count: 1
+      networks: [red_vlan]
+      exposed: true
+
+    # --- Router zone: bridges red_vlan ↔ blue_vlan ---
+    - role: router_fw
+      kind: vm
+      template: tpl-debian-router
+      count: 1
+      networks: [red_vlan, blue_vlan]
+
+    # --- Blue zone: 4 victims across the blue subnet ---
+    - role: victim_workstation
+      kind: vm
+      template: tpl-debian-cloudinit
+      count: 2
+      networks: [blue_vlan]
+
+    - role: file_server
+      kind: vm
+      template: tpl-debian-cloudinit
+      count: 1
+      networks: [blue_vlan]
+
+    - role: log_aggregator
+      kind: vm
+      template: tpl-debian-syslog
+      count: 1
+      networks: [blue_vlan]
+
+  telemetry:
+    sinks:
+      - type: minio
+        bucket: divide-artifacts
+      - type: stdout
+
+  artifacts:
+    sink_to: minio
+    bucket: divide-artifacts
+    retention_days: 7
+
+  win_conditions:
+    red:
+      - "attacker reaches file_server within 20 minutes of POST /drills."
+    blue:
+      - "log_aggregator ingests at least 1 syslog line from the router."
+
+  scoring:
+    red:
+      rules:
+        - id: pivot_success
+          weight: 100
+      pass_threshold: 50
+    blue:
+      rules:
+        - id: detection_made
+          weight: 100
+      pass_threshold: 50
