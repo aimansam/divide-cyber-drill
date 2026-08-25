@@ -938,7 +938,7 @@ uvicorn workers.
 | **R1** | **F8.5 — Redis pub/sub for multi-worker event fan-out** | G8 partial | ~3 h, 2 commits ✅ SHIPPED | Multi-worker uvicorn deployments lose SSE events across workers. A `RedisEventBus` adapter (with `InProcessEventBus` fallback) fixes the cross-worker fan-out without changing the API or the portal. |
 | **F9** | **DrillConsole consolidation** — embed LeaderboardCard + SocViewCard inside the live-drill view | UX | ~3 h, 3 commits | Today the operator flips between Observe (DrillConsole) and Admin (Leaderboard) tabs during a live drill. Consolidating both into the DrillConsole turns the Observe tab into the single live-drill screen. Biggest demo-quality win. |
 | **F10** | **Onboarding wizard** — 4-step first-time UX (bootstrap admin → pick scenario → form team → launch drill) | UX | ~4 h, 3 commits | `tools/issue_token.py` is fine for ops but ugly for first impressions. An in-portal wizard delegates to the existing API but presents a guided flow. Makes `make demo` a real product experience. |
-| **F11** | **Drill debrief artifact** — `GET /runs/{id}/debrief.md` returns a markdown play-by-play (per-team score, per-flag timing, pivot timeline, detection timeline, lessons-learned placeholder) | UX | ~3 h, 2 commits | Closes the "what just happened?" loop for leadership. The JSON after-action report is already there; F11 adds a human-readable sibling for hand-off. |
+| **F11** | **Drill debrief artifact** — `GET /runs/{id}/debrief.md` returns a markdown play-by-play (per-team score, per-flag timing, pivot timeline, detection timeline, lessons-learned placeholder) | UX | ~3 h, 2 commits ✅ SHIPPED | Closes the "what just happened?" loop for leadership. The JSON after-action report is already there; F11 adds a human-readable sibling for hand-off. |
 | **F12** | **Product packaging** — `README.md` with architecture diagram + screenshot of DrillConsole + 5-min walkthrough; `tools/demo.sh --record` produces a captured walkthrough; production-grade `docker-compose.production.yaml` (TLS termination, Authentik prod config); versioned release notes | UX | ~5 h, 3 commits | The outer shell. The platform is functional; this turns it into something you can hand to a customer. |
 
 **Priority order (operator impact ÷ effort):**
@@ -951,7 +951,10 @@ uvicorn workers.
 4. **F10** — onboarding UX (closes the "first-time user" gap).
 5. **F12** — packaging (the demo outer shell).
 
-**Total effort to shippable product:** ~18 h, ~13 commits.
+**Total effort to shippable product:** ~18 h, ~13 commits. **3
+of 5 pillars shipped: F9 (DrillConsole consolidation), R1 (Redis
+multi-worker), F11 (drill debrief).** Remaining: F10 (onboarding
+wizard) + F12 (product packaging).
 
 **Deprecation:** the previously-planned R2 (light theme + mobile
 + keyboard shortcuts) and R3-R7 (coaching / replay / bookings /
@@ -960,11 +963,11 @@ backlog). The 5 pillars above are the ones that turn div:ide
 into a final product; everything else is operator quality-of-life
 that can ship in any order afterward.
 
-**My pick (next plan): F11 — Drill debrief artifact.** F9 + R1
+**My pick (next plan): F10 — Onboarding wizard.** F9 + R1 + F11
 shipped (F9 commits `cbd181e` + `aeba832` + `2004e83`; R1 commits
-`19d5cce` + R1.2). F11 closes the "what just happened?" loop
-with leadership-facing markdown play-by-play. F10 (onboarding
-wizard) + F12 (product packaging) follow.
+`19d5cce` + `86020ef`; F11 commits `3683480` + `64256e1`). F10
+closes the "first-time user" gap with a 4-step in-portal wizard.
+F12 (product packaging) is the final pillar.
 
 ---
 
@@ -1065,22 +1068,30 @@ Backward-compat: all 23 F8 tests pass unchanged; the
 
 ### 18.3 F11 — Drill debrief artifact
 
-Status: planned.
+Status: SHIPPED (F11.1 + F11.2, commits `3683480` + `64256e1`).
+Runbook in [`docs/SECTION-11-DEBRIEF.md`](SECTION-11-DEBRIEF.md).
 
-Commits (2):
+What landed:
 
-  1. **F11.1** — `GET /api/v1/runs/{id}/debrief.md` returns
-     a markdown report assembled from `runs` + `assets` +
-     `flag_submissions` + `telemetry_events`. Sections:
-     summary, per-team score, per-flag timing (capture time +
-     decay-adjusted points), pivot timeline (red events),
-     detection timeline (blue events), asset capture table,
-     "Lessons learned" placeholder.
-  2. **F11.2** — "View debrief" button next to "Download
-     report" in `DrillConsole`. `docs/SECTION-11-DEBRIEF.md`
-     runbook + tests.
+  1. **F11.1** (`3683480`) — `GET /api/v1/drills/{id}/debrief.md`
+     returns a markdown play-by-play with seven sections
+     (summary, per-team score, per-flag timing, pivot timeline,
+     detection timeline, asset table, lessons learned). Mirrors
+     the JSON `/report` visibility + 409-on-non-terminal gate.
+     11 new tests in `test_f11_debrief.py`.
+  2. **F11.2** (`64256e1`) — "View debrief" button in
+     `DrillConsole` next to "Download report". Fetches the
+     markdown + opens it in a new browser tab (modern browsers
+     render .md inline). Popup-blocker fallback triggers a
+     download instead. Bundle +1.43 KB.
 
-API delta: 1 endpoint, ~150 LOC.
+API delta: 1 endpoint (`GET /drills/{id}/debrief.md`), ~400 LOC.
+Portal delta: ~80 LOC. New dep: none.
+
+Tests added: **11** total (all in `test_f11_debrief.py`).
+Full F8 + F9 + R1 + F11 regression: **147 passed, 1 skipped,
+0 failed**. Bundle: 262.11 KB (17.89 KB headroom under the 280 KB
+budget). `make verify-bundle` passes.
 
 ### 18.4 F10 — Onboarding wizard
 
@@ -1122,11 +1133,11 @@ Commits (3):
 
 After all five pillars ship:
 
-  * ~877 tests passing (current 869 + ~8 new for R1/F10/F11/F12).
-  * Portal bundle ~268 KB (still under the 280 KB budget;
-    F9 already at 260.68 KB leaves 19.32 KB of headroom).
+  * ~890 tests passing (current 880 + ~10 for F10/F12).
+  * Portal bundle ~268 KB (currently 262.11 KB after F11;
+    17.89 KB headroom under the 280 KB budget).
   * `make verify` includes the bundle-budget gate (F9.3 done)
-    + the new multi-worker SSE test (R1).
+    + the multi-worker SSE test (R1).
   * `README.md` walkthrough reproducible from a clean clone
     on a fresh Proxmox host.
   * div:ide ships as a self-contained cyber-range product.
