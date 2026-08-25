@@ -15,6 +15,9 @@
  *     the leaderboard + live SOC stream render inline below the
  *     audit feed. Single-team Runs hide these sections; the
  *     Admin tab still surfaces the leaderboard in that flow.
+ *   * F11.2: "View debrief" button (next to "Download report")
+ *     opens the markdown play-by-play in a new tab once the
+ *     run is terminal -- intended for hand-off to leadership.
  *
  * Polling: while RUNNING, every 2s. Otherwise every 5s for
  * post-terminal detail refreshes. The pulse dot stops when the
@@ -26,11 +29,12 @@
  * attention; the console puts everything for the active run on
  * one screen. F9 extends that one-screen property to multi-team
  * drills so the operator never has to flip tabs to check the
- * leaderboard or the SOC stream.
+ * leaderboard or the SOC stream. F11.2 extends it again so the
+ * post-drill hand-off lives in the same surface.
  */
 
 import { useEffect, useState } from "react";
-import { Activity, Download, Loader2, RefreshCw } from "lucide-react";
+import { Activity, Download, FileText, Loader2, RefreshCw } from "lucide-react";
 import { api, ApiError, getToken } from "@/lib/api";
 import { AssetsCard } from "./assets-card";
 import { ConsoleCard } from "./console-card";
@@ -143,6 +147,57 @@ export function DrillConsole({ pickedRunId, scenarioName }: DrillConsoleProps) {
     }
   }
 
+  // F11.2: open the markdown debrief in a new browser tab. Modern
+  // browsers render .md inline (with their own .md viewer); older
+  // browsers fall back to plain text which is still readable. The
+  // endpoint returns Content-Disposition: inline + text/markdown
+  // so the file is "viewable" rather than "downloadable". If the
+  // tab fails to open (popup blocker), the error surfaces in the
+  // same error alert as the report download.
+  function viewDebrief() {
+    if (pickedRunId === null) return;
+    const tok = getToken();
+    if (!tok) {
+      setError("debrief: no auth token; sign in first");
+      return;
+    }
+    // We can't pass a custom header to window.open; build a URL
+    // that the server accepts via the standard X-Divide-Token
+    // header. Since window.open drops headers, we open a
+    // blob: URL instead: fetch the debrief as text, wrap it
+    // in a Blob, and let the browser render it.
+    fetch(`/api/v1/drills/${pickedRunId}/debrief.md`, {
+      headers: { "X-Divide-Token": tok },
+    })
+      .then((r) => {
+        if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`);
+        return r.blob();
+      })
+      .then((blob) => {
+        const url = URL.createObjectURL(
+          new Blob([blob], { type: "text/markdown;charset=utf-8" }),
+        );
+        const win = window.open(url, "_blank", "noopener,noreferrer");
+        if (win === null) {
+          // Popup blocked -- fall back to an in-place link so the
+          // operator can right-click + "save as".
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = `drill-${pickedRunId}-debrief.md`;
+          a.textContent = "Download debrief";
+          a.style.display = "none";
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+        }
+        setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      })
+      .catch((e: unknown) => {
+        const msg = e instanceof Error ? e.message : String(e);
+        setError(`debrief fetch failed: ${msg}`);
+      });
+  }
+
   if (pickedRunId === null) {
     return (
       <EmptyState
@@ -215,16 +270,31 @@ export function DrillConsole({ pickedRunId, scenarioName }: DrillConsoleProps) {
             Refresh
           </Button>
           {run && (run.status === "succeeded" || run.status === "failed" || run.status === "timeout" || run.status === "cancelled" || run.status === "completed") && (
-            <Button
-              variant="default"
-              size="sm"
-              onClick={downloadReport}
-              disabled={reportPending}
-              data-testid="drill-download-report"
-            >
-              <Download className="mr-1 h-3 w-3" />
-              {reportPending ? "Preparing…" : "Download report"}
-            </Button>
+            <>
+              {/* F11.2: leadership-facing markdown play-by-play.
+                  Opens in a new tab (modern browsers render .md
+                  inline; older fall back to plain text). */}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={viewDebrief}
+                data-testid="drill-view-debrief"
+                aria-label="View debrief"
+              >
+                <FileText className="mr-1 h-3 w-3" />
+                View debrief
+              </Button>
+              <Button
+                variant="default"
+                size="sm"
+                onClick={downloadReport}
+                disabled={reportPending}
+                data-testid="drill-download-report"
+              >
+                <Download className="mr-1 h-3 w-3" />
+                {reportPending ? "Preparing…" : "Download report"}
+              </Button>
+            </>
           )}
         </div>
       </header>
