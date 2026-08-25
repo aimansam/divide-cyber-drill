@@ -937,7 +937,7 @@ uvicorn workers.
 |---|---|---|---|---|
 | **R1** | **F8.5 — Redis pub/sub for multi-worker event fan-out** | G8 partial | ~3 h, 2 commits ✅ SHIPPED | Multi-worker uvicorn deployments lose SSE events across workers. A `RedisEventBus` adapter (with `InProcessEventBus` fallback) fixes the cross-worker fan-out without changing the API or the portal. |
 | **F9** | **DrillConsole consolidation** — embed LeaderboardCard + SocViewCard inside the live-drill view | UX | ~3 h, 3 commits | Today the operator flips between Observe (DrillConsole) and Admin (Leaderboard) tabs during a live drill. Consolidating both into the DrillConsole turns the Observe tab into the single live-drill screen. Biggest demo-quality win. |
-| **F10** | **Onboarding wizard** — 4-step first-time UX (bootstrap admin → pick scenario → form team → launch drill) | UX | ~4 h, 3 commits | `tools/issue_token.py` is fine for ops but ugly for first impressions. An in-portal wizard delegates to the existing API but presents a guided flow. Makes `make demo` a real product experience. |
+| **F10** | **Onboarding wizard** — 4-step first-time UX (bootstrap admin → pick scenario → form team → launch drill) | UX | ~4 h, 3 commits ✅ SHIPPED | `tools/issue_token.py` is fine for ops but ugly for first impressions. An in-portal wizard delegates to the existing API but presents a guided flow. Makes `make demo` a real product experience. |
 | **F11** | **Drill debrief artifact** — `GET /runs/{id}/debrief.md` returns a markdown play-by-play (per-team score, per-flag timing, pivot timeline, detection timeline, lessons-learned placeholder) | UX | ~3 h, 2 commits ✅ SHIPPED | Closes the "what just happened?" loop for leadership. The JSON after-action report is already there; F11 adds a human-readable sibling for hand-off. |
 | **F12** | **Product packaging** — `README.md` with architecture diagram + screenshot of DrillConsole + 5-min walkthrough; `tools/demo.sh --record` produces a captured walkthrough; production-grade `docker-compose.production.yaml` (TLS termination, Authentik prod config); versioned release notes | UX | ~5 h, 3 commits | The outer shell. The platform is functional; this turns it into something you can hand to a customer. |
 
@@ -951,10 +951,10 @@ uvicorn workers.
 4. **F10** — onboarding UX (closes the "first-time user" gap).
 5. **F12** — packaging (the demo outer shell).
 
-**Total effort to shippable product:** ~18 h, ~13 commits. **3
+**Total effort to shippable product:** ~18 h, ~13 commits. **4
 of 5 pillars shipped: F9 (DrillConsole consolidation), R1 (Redis
-multi-worker), F11 (drill debrief).** Remaining: F10 (onboarding
-wizard) + F12 (product packaging).
+multi-worker), F11 (drill debrief), F10 (onboarding wizard).**
+Remaining: F12 (product packaging).
 
 **Deprecation:** the previously-planned R2 (light theme + mobile
 + keyboard shortcuts) and R3-R7 (coaching / replay / bookings /
@@ -963,11 +963,11 @@ backlog). The 5 pillars above are the ones that turn div:ide
 into a final product; everything else is operator quality-of-life
 that can ship in any order afterward.
 
-**My pick (next plan): F10 — Onboarding wizard.** F9 + R1 + F11
-shipped (F9 commits `cbd181e` + `aeba832` + `2004e83`; R1 commits
-`19d5cce` + `86020ef`; F11 commits `3683480` + `64256e1`). F10
-closes the "first-time user" gap with a 4-step in-portal wizard.
-F12 (product packaging) is the final pillar.
+**My pick (next plan): F12 — Product packaging.** F9 + R1 + F11
++ F10 shipped (F9 commits `cbd181e` + `aeba832` + `2004e83`; R1
+commits `19d5cce` + `86020ef`; F11 commits `3683480` + `64256e1`;
+F10 commits `2ab897a` + `a8db813`). F12 closes the loop with
+README + demo walkthrough + production docker-compose.
 
 ---
 
@@ -1095,22 +1095,39 @@ budget). `make verify-bundle` passes.
 
 ### 18.4 F10 — Onboarding wizard
 
-Status: planned.
+Status: SHIPPED (F10.1 + F10.2 + F10.3 + F10.4, commits `2ab897a`
++ `a8db813`). Runbook in [`docs/SECTION-10-ONBOARDING.md`](SECTION-10-ONBOARDING.md).
 
-Commits (3):
+What landed:
 
-  1. **F10.1** — `services/portal/app/src/components/portal/onboarding-wizard.tsx`
-     with 4 steps (bootstrap admin -> pick scenario -> form team
-     -> launch drill). Each step is a form posting to the
-     existing endpoint (`/api/v1/auth/login`, scenario list,
-     `/api/v1/exercises`, `/api/v1/exercises/{id}/start`).
-  2. **F10.2** — `app.tsx` routes `/onboarding` to the wizard;
-     if user has no `me.role` (anonymous), redirect there
-     instead of `operate`.
-  3. **F10.3** — `docs/SECTION-10-ONBOARDING.md` + portal tests.
+  1. **F10.1 + F10.2** (`2ab897a`) — two new endpoints on
+     `/api/v1/auth`:
+       * `POST /setup` (public, single-shot): bootstrap the
+         first admin; 409 if any user exists.
+       * `POST /users` (admin-only): create a user with a
+         specific role. Used by the wizard's "form team" step.
+     11 new tests in `test_f10_setup.py` covering happy paths,
+     RBAC (red/blue get 403), and the single-shot guard.
+  2. **F10.3 + F10.4** (`a8db813`) — `OnboardingWizard`
+     portal component (4 steps) wired into `app.tsx` as the
+     default anonymous-user view. The wizard short-circuits
+     step 1 → SignInCard on 409, step 2 → step 3 or 4 based on
+     the chosen scenario's team count, and triggers an
+     `onLaunched(runId)` callback that lands the operator on
+     the live DrillConsole.
 
-Bundle delta: ~256 KB -> ~268 KB (still 12 KB under the 280 KB
-budget).
+  * API tweak: `GET /api/v1/scenarios` now includes the
+    `spec` field so the wizard can detect multi-team scenarios
+    without an N+1 fetch.
+
+API delta: 2 endpoints (`POST /auth/setup`, `POST /auth/users`)
++ 1 response field (`scenarios.spec`). Portal delta: ~750 LOC.
+New dep: none.
+
+Tests added: **11** (all in `test_f10_setup.py`).
+Full F8 + F9 + R1 + F10 + F11 regression: **158 passed,
+1 skipped, 0 failed**. Bundle: 275.76 KB (4.24 KB headroom
+under the 280 KB budget). `make verify-bundle` passes.
 
 ### 18.5 F12 — Product packaging
 
@@ -1133,9 +1150,9 @@ Commits (3):
 
 After all five pillars ship:
 
-  * ~890 tests passing (current 880 + ~10 for F10/F12).
-  * Portal bundle ~268 KB (currently 262.11 KB after F11;
-    17.89 KB headroom under the 280 KB budget).
+  * ~900 tests passing (current 891 + ~10 for F12).
+  * Portal bundle ~270 KB (currently 275.76 KB after F10;
+    4.24 KB headroom under the 280 KB budget).
   * `make verify` includes the bundle-budget gate (F9.3 done)
     + the multi-worker SSE test (R1).
   * `README.md` walkthrough reproducible from a clean clone
