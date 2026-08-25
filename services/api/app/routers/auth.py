@@ -40,13 +40,18 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
+from sqlalchemy import func as sql_func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import Role, current_token, require_role, sign_token
 from app.core.config import settings
+from app.db import models as db_models
 from app.db.session import get_session
 from app.services.users import (
+    DuplicateSubError,
+    UserStoreError,
     authenticate,
+    create_user,
     list_users,
     touch_last_login,
 )
@@ -294,6 +299,166 @@ async def list_users_endpoint(
         )
         for u in rows
     ]
+
+
+# --- F10: first-admin bootstrap + admin user creation -------------------
+
+
+class SetupRequest(BaseModel):
+    """Body for ``POST /auth/setup``.
+
+    Used by the in-portal onboarding wizard (F10.3) to create
+    the very first admin without requiring the operator to set
+    ``DIVIDE_BOOTSTRAP_ADMIN_*`` env vars + restart the API.
+
+    Public endpoint; only the first call succeeds. Once any
+    user exists, the wizard falls through to the sign-in flow.
+    """
+
+    sub: str = Field(min_length=1, max_length=64)
+    password: str = Field(min_length=8, max_length=512)
+
+
+@router.post(
+    "/setup",
+    summary="F10: bootstrap the very first admin (public, single-shot)",
+    status_code=status.HTTP_201_CREATED,
+)
+async def setup_first_admin(
+    body: SetupRequest,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> LoginResponse:
+    """Create the first admin if (and only if) no users exist yet.
+
+    Status codes:
+      * 201 -- first admin created; returns the login response
+                so the wizard can stash the token + redirect.
+      * 409 -- at least one user already exists. The wizard
+                treats this as "step 1 already complete" and
+                advances to step 2.
+
+    Why the endpoint is public:
+      The first admin can't have a token yet (no token = no
+      admin = can't create the admin). So the only way to break
+      the chicken-and-egg cycle is a public endpoint that's
+      gated by the "no users yet" invariant.
+
+    Why the single-shot guard matters:
+      Once the admin is created, the endpoint must reject
+      further calls so a leaked setup URL can't grow the user
+      table. We check the user count under a SELECT and race-
+      tolerate by re-checking after insert.
+
+    Password policy: minimum 8 characters. We don't enforce
+    complexity here -- operators using the wizard are typically
+    on a LAN deployment where the threat model is "stolen
+    laptop", not "online brute force". The login endpoint's
+    rate-limit (5 attempts / 15 min per sub) covers the brute
+    force case.
+    """
+    # Single-shot gate: 409 if any user already exists.
+    n = (
+        await session.execute(select(sql_func.count(db_models.User.id)))
+    ).scalar_one()
+    if n and n > 0:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "setup is single-shot: at least one user already exists; "
+                "sign in instead"
+            ),
+        )
+
+    try:
+        user = await create_user(
+            session, sub=body.sub, password=body.password, role=Role.ADMIN.value
+        )
+        await session.commit()
+    except DuplicateSubError:
+        # Lost a race with another setup call.
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"user with sub {body.sub!r} already exists",
+        )
+    except UserStoreError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        )
+
+    now = int(time.time())
+    ttl = _login_token_ttl_s()
+    return LoginResponse(
+        token=sign_token(sub=user.sub, role=user.role, ttl_s=ttl),
+        sub=user.sub,
+        role=user.role,
+        iat=now,
+        exp=now + ttl,
+        ttl_remaining_s=ttl,
+    )
+
+
+class CreateUserRequest(BaseModel):
+    """Body for ``POST /auth/users`` (F10.2).
+
+    Admin-only. Used by the wizard's "form team" step to create
+    red-team / blue-team players in bulk before launching the
+    exercise.
+    """
+
+    sub: str = Field(min_length=1, max_length=64)
+    password: str = Field(min_length=1, max_length=512)
+    role: str = Field(min_length=1, max_length=32)
+
+
+@router.post(
+    "/users",
+    summary="F10.2: admin creates a user (red/blue/lead/etc.)",
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_role(Role.ADMIN))],
+)
+async def create_user_endpoint(
+    body: CreateUserRequest,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    _token=Depends(current_token),
+) -> UserPublic:
+    """Insert a new user. Mirrors the login path's error codes.
+
+    Status codes:
+      * 201 -- user created; returns the public row.
+      * 409 -- sub already exists.
+      * 422 -- bad body (sub empty, role unknown, etc.).
+
+    Why an admin endpoint rather than a self-signup:
+      div:ide is a closed cyber-range. New users are added by
+      the operator (admin) before a drill starts -- they don't
+      self-register. Mirrors the auth model in TryHackMe /
+      HackTheBox / RangeForce.
+    """
+    try:
+        user = await create_user(
+            session, sub=body.sub, password=body.password, role=body.role
+        )
+        await session.commit()
+    except DuplicateSubError:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"user with sub {body.sub!r} already exists",
+        )
+    except UserStoreError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        )
+
+    await session.refresh(user)
+    return UserPublic(
+        sub=user.sub,
+        role=user.role,
+        disabled=user.disabled,
+        last_login_at=user.last_login_at.isoformat() if user.last_login_at else None,
+        created_at=user.created_at.isoformat(),
+    )
 
 
 __all__ = ["router"]
