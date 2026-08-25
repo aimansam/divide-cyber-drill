@@ -7,8 +7,32 @@
 > **Audience:** Proxmox operators who own the network plumbing. The
 > runner does the API-level orchestration; you do the OS-level
 > plumbing on each PVE node.
+>
+> **F-pve-bridge-wizard (SDN variant, 2026-08):** the first-time
+> portal wizard now has a Step 0 that drives PVE's Software-Defined
+> Networking API to create the Linux bridges for you -- no SSH, no
+> editing `/etc/network/interfaces`, no `ifreload`. The CLI escape
+> hatch is `pvesh` against `/cluster/sdn/{zones,vnets}`. The
+> manual steps in this runbook are still the source of truth -- the
+> wizard just automates them via a different API path.
 
 ## TL;DR
+
+**Default path:** open the portal → first-time wizard Step 0
+auto-provisions everything via PVE SDN. The CLI escape hatch is:
+
+```bash
+# One-time: create the div:ide zone on the cluster
+pvesh create /cluster/sdn/zones -zone divide -type simple -bridge vmbr0
+
+# Per scenario network: create a VNet (= one Linux bridge per node)
+pvesh create /cluster/sdn/vnets -vnet vmbr100 -zone divide
+
+# Confirm the bridge landed on the node
+pvesh get /nodes/pve/network | jq '.data[] | select(.iface=="vmbr100")'
+```
+
+**Manual path** (when you can't or don't want to use the wizard):
 
 ```bash
 # On every PVE node that will host a cyber-range drill:
@@ -69,14 +93,35 @@ the node that has the templates. We'll call it `pve`.
 
 ### 2. Add the bridges
 
-For each scenario `spec.networks[]` entry, add a stanza to
-`/etc/network/interfaces` (or `/etc/network/interfaces.d/divide.conf`):
+For each scenario `spec.networks[]` entry, create a VNet in the
+`divide` SDN zone (or add a stanza to `/etc/network/interfaces` for
+the legacy non-SDN path; PVE treats both identically):
+
+**SDN path (PVE 8.1+ / PVE 9 — preferred):**
 
 ```bash
 # Replace vmbr100 with whichever F3-allocated bridge the runner will
 # call create_bridge() with. The runner uses vmbr100, vmbr101, …
 # starting from 100 per declared network.
 
+# One-time: create the div:ide zone on the cluster.
+pvesh create /cluster/sdn/zones -zone divide -type simple -bridge vmbr0
+
+# Per network: create a VNet (one Linux bridge per node on the cluster).
+pvesh create /cluster/sdn/vnets -vnet vmbr100 -zone divide
+
+# Verify the bridge landed on the node.
+pvesh get /nodes/pve/network | jq '.data[] | select(.iface=="vmbr100")'
+```
+
+PVE 8.1+ ships the SDN controller by default; PVE 9 always has it.
+No additional package install is needed.
+
+**Legacy path (PVE ≤ 8.0 or non-SDN clusters):**
+
+```bash
+# For each scenario spec.networks[] entry, add a stanza to
+# /etc/network/interfaces (or /etc/network/interfaces.d/divide.conf):
 auto vmbr100
 iface vmbr100 inet static
     address 10.10.10.1/24
@@ -87,23 +132,17 @@ iface vmbr100 inet static
     # bridge and other vmbrs (no ip_forward by default).
     post-up   iptables -A FORWARD -i vmbr100 -j DROP
     post-down iptables -D FORWARD -i vmbr100 -j DROP
-```
 
-Reload without dropping the SSH session:
-
-```bash
+# Reload without dropping the SSH session.
 ifreload -a
-# Or, if you don't have ifupdown2 installed:
-# systemctl reload networking
-# (slower; safer)
+
+# Verify the bridge exists.
+ip link show vmbr100   # Should show: state UP
 ```
 
-Verify the bridge exists:
-
-```bash
-ip link show vmbr100
-# Should show: state UP, with "vmbr100" as the master name
-```
+The legacy path is still supported for older PVE installs where SDN
+isn't available, but new deployments should use SDN — it's purely
+API-driven, requires no SSH access, and survives PVE upgrades.
 
 ### 3. Whitelist the bridge with the API
 

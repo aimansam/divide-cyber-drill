@@ -28,14 +28,19 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
+import structlog
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.auth import Role, require_role
+from app.core.auth import Role, TokenData, require_role
+from app.db.session import get_session
 from app.services import admin as admin_svc
 from app.services.proxmox import ProxmoxAPIError, ProxmoxNotConfiguredError, list_storage
+
+log = structlog.get_logger()
 
 # Router-level gate: every endpoint in this module requires an admin
 # token. ``dependencies=`` is a FastAPI feature that runs the listed
@@ -326,3 +331,360 @@ async def start_first_drill(body: StartFirstDrillRequest) -> dict[str, Any]:
                 detail=dr.text[:500],
             )
         return dr.json()
+
+
+# ---------------------------------------------------------------------------
+# F-pve-bridge-wizard: PVE bridge provisioning
+# ---------------------------------------------------------------------------
+#
+# Three endpoints, used by the wizard's Step 0 + by the CLI escape
+# hatch (tools/pve_setup_bridges.py):
+#
+#   GET  /api/v1/admin/expected-bridges   -- pure DB read
+#   GET  /api/v1/admin/pve-bridge-status  -- expected vs actual on PVE
+#   POST /api/v1/admin/pve-setup-bridges  -- SSH into PVE, write drop-in
+
+
+class ExpectedBridge(BaseModel):
+    name: str
+    cidr: str
+    gateway_ip: str
+    scenario: str
+    network: str
+
+
+class ExpectedBridgesResponse(BaseModel):
+    bridges: list[ExpectedBridge]
+    conflicts: list[str]
+
+
+class PveBridgeStatusResponse(BaseModel):
+    node: str
+    expected: list[str]
+    present: list[str]
+    missing: list[str]
+    ready: bool
+
+
+class PveSetupBridgesRequest(BaseModel):
+    """Body for ``POST /admin/pve-setup-bridges``.
+
+    F-pve-bridge-wizard (SDN variant): the wizard no longer collects
+    SSH credentials in the browser. The credentials are whatever was
+    saved in Step -1 (``POST /admin/pve-config``) or the env-var
+    fallback. The request body only carries operational flags.
+    """
+
+    dry_run: bool = Field(
+        default=False,
+        description=(
+            "If true, return the would-be SDN POST list without "
+            "actually calling PVE. Useful for the wizard's pre-flight."
+        ),
+    )
+    node: str = Field(
+        default="pve",
+        max_length=64,
+        description=(
+            "PVE node name to verify bridges on. Defaults to 'pve'; "
+            "override when the runner is pinned to a specific node."
+        ),
+    )
+
+
+@router.get(
+    "/expected-bridges",
+    summary="List the bridges the runner expects on PVE",
+)
+async def get_expected_bridges(
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> ExpectedBridgesResponse:
+    """Pure DB read; no PVE interaction."""
+    from app.services.pve_bridges import plan_bridges_from_db
+
+    plan = await plan_bridges_from_db(session)
+    return ExpectedBridgesResponse(
+        bridges=[
+            ExpectedBridge(
+                name=b.name,
+                cidr=b.cidr,
+                gateway_ip=b.gateway_ip,
+                scenario=b.scenario,
+                network=b.network,
+            )
+            for b in plan.bridges
+        ],
+        conflicts=plan.conflicts,
+    )
+
+
+@router.get(
+    "/pve-bridge-status",
+    summary="Which expected bridges are missing on PVE?",
+)
+async def get_pve_bridge_status(
+    node: str = "pve",
+    session: Annotated[AsyncSession, Depends(get_session)] = None,  # type: ignore[assignment]
+) -> PveBridgeStatusResponse:
+    """Cross-reference expected with actual PVE state."""
+    from app.services.pve_bridges import (
+        fetch_present_bridges,
+        plan_bridges_from_db,
+    )
+
+    plan = await plan_bridges_from_db(session)
+    expected = [b.name for b in plan.bridges]
+    present = await fetch_present_bridges(node)
+    missing = [n for n in expected if n not in present]
+    return PveBridgeStatusResponse(
+        node=node,
+        expected=expected,
+        present=sorted(present),
+        missing=missing,
+        ready=not missing,
+    )
+
+
+# --- SDN readiness probe (F-pve-bridge-wizard, SDN variant) -------------
+#
+# The wizard's Step 0 needs to know whether the active PVE token has
+# ``SDN.Allocate`` permission *before* the operator clicks the
+# "Set up bridges" button. This endpoint runs the same probe the
+# applier uses, but in read-only form, and returns a structured
+# SdnReadiness the UI can render directly.
+#
+# Returns 200 even on permission failure -- the wizard needs the
+# error structure, not a 4xx, so it can render the remediation card.
+
+
+@router.get(
+    "/pve-sdn-status",
+    summary="Is PVE reachable, and does the token have SDN.Allocate?",
+)
+async def get_pve_sdn_status(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    node: str = "pve",
+) -> dict[str, Any]:
+    """Probe PVE's SDN state without creating anything.
+
+    Returns the active SDN zone's name, the Vnets already on the
+    cluster, and the Vnets that are still missing relative to the
+    plan. Permission errors are returned in the body (not as 4xx) so
+    the wizard can render the literal PVE message + a copy-pasteable
+    ``pveum aclmod`` hint.
+    """
+    from app.services.pve_bridges import plan_bridges_from_db
+    from app.services.pve_sdn import (
+        SdnError,
+        SdnPermissionError,
+        get_active_auth,
+        read_sdn_state,
+    )
+
+    plan = await plan_bridges_from_db(session)
+    expected = [b.name for b in plan.bridges]
+
+    try:
+        auth = get_active_auth(node=node)
+    except SdnError as exc:
+        # No creds configured -- operator must complete Step -1 first.
+        return {
+            "reachable": False,
+            "zone_present": False,
+            "zone_name": "divide",
+            "vnets_present": [],
+            "vnets_missing": expected,
+            "error": str(exc),
+            "pveum_hint": None,
+            "required_role": None,
+        }
+
+    try:
+        readiness = await read_sdn_state(auth=auth, expected_vnets=expected)
+        return {
+            "reachable": readiness.reachable,
+            "zone_present": readiness.zone_present,
+            "zone_name": readiness.zone_name,
+            "vnets_present": readiness.vnets_present,
+            "vnets_missing": readiness.vnets_missing,
+            "error": readiness.error,
+            "pveum_hint": readiness.pveum_hint,
+            "required_role": readiness.required_role,
+        }
+    except SdnPermissionError as exc:
+        # Shouldn't happen (read_sdn_state catches it) but defensive.
+        return {
+            "reachable": True,
+            "zone_present": False,
+            "zone_name": "divide",
+            "vnets_present": [],
+            "vnets_missing": expected,
+            "error": str(exc),
+            "pveum_hint": exc.pveum_hint,
+            "required_role": exc.required_role,
+        }
+    except SdnError as exc:
+        log.warning("pve_sdn.status_failed", error=str(exc))
+        return {
+            "reachable": False,
+            "zone_present": False,
+            "zone_name": "divide",
+            "vnets_present": [],
+            "vnets_missing": expected,
+            "error": str(exc),
+            "pveum_hint": None,
+            "required_role": None,
+        }
+
+
+class PveSetupBridgesResponse(BaseModel):
+    ok: bool
+    added: list[str]
+    already_present: list[str]
+    reload_ok: bool
+    reload_method: str
+    verify_ok: bool
+    config_path: str
+    dry_run: bool
+    message: str
+
+
+@router.post(
+    "/pve-setup-bridges",
+    summary="Create the F3 bridges on PVE via SDN",
+)
+async def post_pve_setup_bridges(
+    body: PveSetupBridgesRequest,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> PveSetupBridgesResponse:
+    """Drive the PVE SDN controller to realize the bridge plan.
+
+    Uses the credentials already saved in Step -1 of the wizard
+    (``pve_config`` DB row, with env-var fallback) -- there is no
+    longer any need for the operator to supply SSH credentials in the
+    browser. PVE 8.1+ exposes ``/cluster/sdn/{zones,vnets}`` which
+    creates Linux bridges purely via API; PVE then propagates them to
+    every node in the cluster.
+
+    Errors:
+      * 409 -- bridge plan has conflicts (resolve scenario CIDRs first)
+      * 502 -- PVE rejected the SDN POST (e.g. token lacks ``SDN.Allocate``)
+      * 503 -- no PVE creds configured yet (complete Step -1 first)
+    """
+    from app.services.pve_bridges import (
+        BridgePlanError,
+        plan_bridges_from_db,
+    )
+    from app.services.pve_sdn import (
+        SdnError,
+        SdnPermissionError,
+        apply_sdn_plan,
+        get_active_auth,
+        to_apply_result,
+    )
+
+    plan = await plan_bridges_from_db(session)
+    if plan.conflicts:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "bridge plan has conflicts; resolve before applying: "
+                + "; ".join(plan.conflicts)
+            ),
+        )
+    if not plan.bridges:
+        return PveSetupBridgesResponse(
+            ok=True,
+            added=[],
+            already_present=[],
+            reload_ok=True,
+            reload_method="none",
+            verify_ok=True,
+            config_path="",
+            dry_run=body.dry_run,
+            message="no bridges required by any active scenario",
+        )
+
+    try:
+        auth = get_active_auth(node=body.node)
+    except SdnError as exc:
+        # No creds yet -- wizard must complete Step -1 first.
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=(
+                f"{exc} -- complete wizard Step -1 (PVE credentials) "
+                "or set PROXMOX_* env vars in deploy/.env."
+            ),
+        ) from exc
+
+    if body.dry_run:
+        # Don't call PVE; just report what would happen.
+        sdn = await apply_sdn_plan(plan, auth=auth, dry_run=True)
+        return PveSetupBridgesResponse(
+            ok=True,
+            added=sdn.vnets_created,
+            already_present=sdn.vnets_already_present,
+            reload_ok=True,
+            reload_method="sdn-dry-run",
+            verify_ok=True,
+            config_path=sdn.raw_responses[0].get("would_create_zone", "divide"),
+            dry_run=True,
+            message=(
+                f"dry_run: would create {len(sdn.vnets_already_present)} "
+                f"Vnet(s) in zone 'divide' on PVE {auth.base_url}"
+            ),
+        )
+
+    try:
+        sdn = await apply_sdn_plan(plan, auth=auth)
+    except SdnPermissionError as exc:
+        # PVE said "Permission check failed (/sdn/zones, SDN.Allocate)".
+        # Surface the literal PVE message + a copy-pasteable pveum hint
+        # so the wizard can render a remediation card.
+        log.warning(
+            "pve_sdn.apply.permission_denied",
+            host=auth.base_url,
+            role=exc.required_role,
+            error=str(exc),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "message": str(exc),
+                "required_role": exc.required_role,
+                "pveum_hint": exc.pveum_hint,
+                "pve_path": exc.pve_path,
+            },
+        ) from exc
+    except SdnError as exc:
+        log.warning(
+            "pve_sdn.apply.failed",
+            host=auth.base_url,
+            error=str(exc),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"PVE rejected the SDN request: {exc}",
+        ) from exc
+    except BridgePlanError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=str(exc),
+        )
+
+    result = to_apply_result(plan, sdn)
+    return PveSetupBridgesResponse(
+        ok=result.reload_ok and result.verify_ok,
+        added=result.added,
+        already_present=result.already_present,
+        reload_ok=result.reload_ok,
+        reload_method=result.reload_method,
+        verify_ok=result.verify_ok,
+        config_path=result.config_path,
+        dry_run=False,
+        message=(
+            f"created SDN zone + {len(result.added)} Vnet(s); "
+            f"propagation {'ok' if result.verify_ok else 'TIMED OUT'} "
+            f"after {sdn.propagation_wait_s:.1f}s"
+        ),
+    )

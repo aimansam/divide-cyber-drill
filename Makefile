@@ -8,7 +8,7 @@ API_DIR := services/api
 
 .DEFAULT_GOAL := help
 
-.PHONY: help up down logs ps restart build pull lint format test test-live-pg smoke proxmox-ping diag clean validate-scenarios migrate db-upgrade db-downgrade db-revision smoke-run sync-scenarios upload-template live-drill demo demo-open portal-build portal-watch portal-install verify-bundle
+.PHONY: help up down logs ps restart build pull lint format test test-live-pg smoke proxmox-ping diag clean validate-scenarios migrate db-upgrade db-downgrade db-revision smoke-run sync-scenarios upload-template live-drill demo demo-open portal-build portal-watch portal-install verify-bundle pve-bridge-status pve-setup-bridges
 
 help: ## Show this help.
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -186,3 +186,24 @@ demo: ## Run the F4-UI demo runner (one-command bootstrap).
 
 demo-open: ## Demo runner that also tries to open the portal in a browser.
 	@bash tools/demo.sh --open
+
+# --- F-pve-bridge-wizard (SDN variant): PVE bridge provisioning -------
+# The wizard's Step 0 is the day-1 default; these targets let ops
+# who can't use the UI check status + apply. Both targets shell
+# out to the API directly via curl -- there's no longer a Python
+# CLI helper because the wizard handles all SSH/SDN paths itself.
+
+DIVIDE_API_BASE ?= http://localhost:8000
+DIVIDE_ADMIN_TOKEN ?= $(shell $(PYTHON) tools/issue_token.py --user admin --role admin --ttl 1h 2>/dev/null || echo '')
+
+pve-bridge-status: ## Show which F3 bridges the runner needs vs. what's on PVE (dry-run safe).
+	@if [[ -z "$(DIVIDE_ADMIN_TOKEN)" ]]; then echo "Set DIVIDE_ADMIN_TOKEN or run via the wizard"; exit 2; fi
+	@curl -s $(DIVIDE_API_BASE)/api/v1/admin/pve-bridge-status \
+		-H "X-Divide-Token: $(DIVIDE_ADMIN_TOKEN)" | $(PYTHON) -m json.tool
+
+pve-setup-bridges: ## Create the F3 bridges via PVE SDN (no SSH). Uses creds from pve_config or env.
+	@if [[ -z "$(DIVIDE_ADMIN_TOKEN)" ]]; then echo "Set DIVIDE_ADMIN_TOKEN or run via the wizard"; exit 2; fi
+	@curl -s -X POST $(DIVIDE_API_BASE)/api/v1/admin/pve-setup-bridges \
+		-H "X-Divide-Token: $(DIVIDE_ADMIN_TOKEN)" \
+		-H "Content-Type: application/json" \
+		-d '{"dry_run": false}' | $(PYTHON) -m json.tool
