@@ -231,10 +231,15 @@ export async function submitPasswordReset(
 // the admin UI's "reset to env-vars" escape hatch -- not used by the
 // wizard itself, but included here for consistency.
 //
-// These are admin-only endpoints; the caller must already hold a
-// valid admin token (the wizard mints one in Step 1 -- but this step
-// runs BEFORE Step 1, so the wizard's mount path has to use the
-// token from /auth/setup or similar; see OnboardingWizard).
+// Auth note (P11): these are admin-only endpoints, but Step -1
+// runs BEFORE Step 1 (admin bootstrap), so the wizard's mount path
+// has no admin token yet. The useEffect that calls getPveConfig
+// catches the expected 401 (no auth header on first paint) and
+// renders an empty form -- the operator submits, PveCredentialsStep
+// posts, the wizard advances. Once Step 1 mints an admin token,
+// subsequent wizard mounts (e.g. revisiting the wizard tab after
+// a session rotation) auto-skip past Step -1 because the GET now
+// succeeds. See OnboardingWizard for the step transitions.
 
 export interface PveConfigPublic {
   source: "db" | "env";
