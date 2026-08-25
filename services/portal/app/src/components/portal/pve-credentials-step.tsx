@@ -92,18 +92,31 @@ export function PveCredentialsStep({
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
 
-  // On mount, check whether the API already has a config. If yes,
-  // render the "already configured" banner (and the wizard's parent
-  // will short-circuit past this step on the next tick via onContinue).
+  // On mount, check whether the API already has a config. Two cases:
+  //   cfg.source === "db"  -> operator has already saved a config
+  //                          in this session/this deployment. Render
+  //                          the "already configured" banner and
+  //                          auto-advance past this step on the next
+  //                          tick (the parent will short-circuit).
+  //   cfg.source === "env" -> nothing in DB; the API is reading from
+  //                          PROXMOX_* env vars. Show the empty form
+  //                          so the operator can save their preferred
+  //                          creds into the DB (Step -1's job).
+  // We need admin auth for this endpoint, but Step -1 runs BEFORE
+  // Step 1; if we don't have a token yet, the response is 401 and
+  // we render an empty form (the operator fills in creds, posts,
+  // and progresses normally).
   useEffect(() => {
     let cancelled = false;
     async function probe() {
       setChecking(true);
       setError(null);
+      let cfgForAdvance: PveConfigPublic | null = null;
       try {
         const cfg = await getPveConfig();
         if (cancelled) return;
         setExisting(cfg);
+        cfgForAdvance = cfg;
         // Pre-fill the form from the existing config so the operator
         // can see what's set. token_secret is always masked; they'll
         // have to re-type it if they want to update.
@@ -127,12 +140,28 @@ export function PveCredentialsStep({
       } finally {
         if (!cancelled) setChecking(false);
       }
+      // Auto-skip only when the API reports source === "db" (a real
+      // saved row). The env-var path still gets the form so the
+      // operator can promote creds to the DB. We schedule the
+      // advance after a brief tick so the operator sees the
+      // "already configured" banner (and so React has time to
+      // commit the state update).
+      if (
+        !cancelled &&
+        cfgForAdvance &&
+        cfgForAdvance.source === "db" &&
+        cfgForAdvance.host
+      ) {
+        setTimeout(() => {
+          if (!cancelled) onContinue();
+        }, 400);
+      }
     }
     probe();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [onContinue]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
