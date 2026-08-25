@@ -1,0 +1,332 @@
+name: divide-cyber-drill-prod
+
+# F12.3: production-grade deployment for div:ide.
+#
+# Key differences from deploy/docker-compose.yml:
+#
+#   * Multi-worker uvicorn (4 workers). R1 requires Redis pub/sub
+#     for SSE cross-worker fan-out -- DIVIDE_EVENT_BUS=redis is
+#     the default here (the dev compose defaults to memory).
+#   * Traefik fronts the API with Let's Encrypt TLS. Public
+#     ingress on :443. The api service is no longer published
+#     on a host port.
+#   * JSON logging (DIVIDE_LOG_LEVEL=INFO + structlog formatter)
+#     so logs ship cleanly to Loki / Elasticsearch / CloudWatch.
+#   * Resource limits on every service (CPU + memory).
+#   * Authentik in production mode (instead of dev quickstart).
+#   * No bind mounts for source code -- the api image is built
+#     once via `make build` and used as-is.
+#   * Scenarios are baked into the image at build time (the
+#     Dockerfile copies examples/scenarios into /app/scenarios).
+#   * Healthchecks tightened to 10s intervals + 5s timeouts.
+#
+# Bring up:
+#
+#   cp deploy/.env.example deploy/.env.production
+#   # edit .env.production -- set all secrets + the public hostname
+#   docker compose -f deploy/docker-compose.production.yaml --env-file deploy/.env.production up -d
+#
+# Required env vars (all from the .env.production file):
+#
+#   POSTGRES_PASSWORD        -- strong random 32+ chars
+#   MINIO_ROOT_PASSWORD      -- strong random 32+ chars
+#   DIVIDE_TOKEN_SECRET      -- strong random 32+ chars (HMAC)
+#   PROXMOX_TOKEN_SECRET     -- PVE API token secret
+#   PROXMOX_HOST             -- pve.example.com (LAN)
+#   PROXMOX_TOKEN_ID         -- divide@pve!div-api
+#   AUTHENTIK_BOOTSTRAP_PASSWORD  -- admin password (change after first login)
+#   DIVIDE_BOOTSTRAP_ADMIN_SUB    -- first admin username
+#   DIVIDE_BOOTSTRAP_ADMIN_PASSWORD  -- first admin password
+#   ACME_EMAIL               -- for Let's Encrypt registration
+#   PUBLIC_HOSTNAME          -- e.g. divide.example.com
+
+services:
+  api:
+    image: divide/api:${DIVIDE_API_TAG:-latest}
+    container_name: divide-api
+    restart: always
+    # No host port -- Traefik fronts the public ingress.
+    expose:
+      - "8000"
+    environment:
+      DIVIDE_ENV: production
+      DIVIDE_LOG_LEVEL: ${DIVIDE_LOG_LEVEL:-INFO}
+      DIVIDE_DB_URL: postgresql+asyncpg://divide:${POSTGRES_PASSWORD}@postgres:5432/divide
+      DIVIDE_REDIS_URL: redis://redis:6379/0
+      # R1: SSE across workers requires the Redis-backed bus.
+      # Overriding the default in the dev compose.
+      DIVIDE_EVENT_BUS: redis
+      DIVIDE_MINIO_ENDPOINT: minio:9000
+      DIVIDE_MINIO_ACCESS_KEY: ${MINIO_ROOT_USER}
+      DIVIDE_MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD}
+      DIVIDE_MINIO_BUCKET: ${MINIO_BUCKET:-divide-artifacts}
+      # Scenarios are baked into the image; no DIVIDE_SCENARIOS_DIR.
+      # Sync still runs on startup so any DB-side edits get rolled in.
+      DIVIDE_SYNC_ON_STARTUP: "true"
+      # First admin from the env (idempotent).
+      DIVIDE_BOOTSTRAP_ADMIN_SUB: ${DIVIDE_BOOTSTRAP_ADMIN_SUB}
+      DIVIDE_BOOTSTRAP_ADMIN_PASSWORD: ${DIVIDE_BOOTSTRAP_ADMIN_PASSWORD}
+      DIVIDE_LOGIN_TOKEN_TTL_S: ${DIVIDE_LOGIN_TOKEN_TTL_S:-28800}
+      # HMAC token secret -- explicit (no env-var fallback).
+      DIVIDE_TOKEN_SECRET: ${DIVIDE_TOKEN_SECRET}
+      # Proxmox.
+      PROXMOX_HOST: ${PROXMOX_HOST}
+      PROXMOX_PORT: ${PROXMOX_PORT:-8006}
+      PROXMOX_USER: ${PROXMOX_USER:-divide@pve}
+      PROXMOX_TOKEN_ID: ${PROXMOX_TOKEN_ID}
+      PROXMOX_TOKEN_SECRET: ${PROXMOX_TOKEN_SECRET}
+      PROXMOX_VERIFY_SSL: ${PROXMOX_VERIFY_SSL:-true}
+      # Multi-worker: uvicorn is launched with --workers 4
+      # (see the `command:` override below).
+      WEB_CONCURRENCY: "4"
+    command:
+      - "uvicorn"
+      - "app.main:app"
+      - "--host"
+      - "0.0.0.0"
+      - "--port"
+      - "8000"
+      - "--workers"
+      # 4 workers = roughly 4x throughput on JSON endpoints.
+      # R1 makes SSE work across all of them via Redis.
+      - "4"
+      - "--proxy-headers"
+      # Honor X-Forwarded-For / X-Forwarded-Proto from Traefik
+      # so redirect URLs + CORS use the public scheme.
+      - "--forwarded-allow-ips"
+      - "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+      - "--log-config"
+      - "/app/logging.json"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    networks: [divide-net]
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz', timeout=2).read()"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: "4"
+          memory: 4G
+        reservations:
+          cpus: "1"
+          memory: 1G
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: divide-postgres
+    restart: always
+    environment:
+      POSTGRES_DB: divide
+      POSTGRES_USER: divide
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks: [divide-net]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U divide -d divide"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 2G
+
+  redis:
+    image: redis:7-alpine
+    container_name: divide-redis
+    restart: always
+    command:
+      # Production: enable AOF for durability (R1's pub/sub
+      # tolerates loss but the cache + rate-limit buckets don't).
+      - "redis-server"
+      - "--appendonly"
+      - "yes"
+      - "--appendfsync"
+      - "everysec"
+    volumes:
+      - redis-data:/data
+    networks: [divide-net]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 1G
+
+  minio:
+    image: minio/minio:RELEASE.2024-08-29T01-40-52Z
+    container_name: divide-minio
+    restart: always
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    volumes:
+      - minio-data:/data
+    networks: [divide-net]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 2G
+
+  # F12.3: Traefik fronts the public ingress with Let's Encrypt.
+  # Public hostname is ${PUBLIC_HOSTNAME}; ACME email is ${ACME_EMAIL}.
+  traefik:
+    image: traefik:v3.1
+    container_name: divide-traefik
+    restart: always
+    ports:
+      - "443:443"
+      # ACME HTTP-01 challenge requires :80.
+      - "80:80"
+    environment:
+      TRAEFIK_API_DASHBOARD: "true"
+      TRAEFIK_LOG_LEVEL: INFO
+      TRAEFIK_PROVIDERS_DOCKER: "true"
+      TRAEFIK_PROVIDERS_DOCKER_EXPOSEDBYDEFAULT: "false"
+      TRAEFIK_CERTIFICATES_RESOLVERS_LETSENCRYPT_ACME_EMAIL: ${ACME_EMAIL}
+      TRAEFIK_CERTIFICATES_RESOLVERS_LETSENCRYPT_ACME_TLSCHALLENGE: "true"
+      TRAEFIK_CERTIFICATES_RESOLVERS_LETSENCRYPT_ACME_STORAGE: /letsencrypt/acme.json
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - traefik-letsencrypt:/letsencrypt
+    networks: [divide-net]
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 512M
+    labels:
+      # Traefik dashboard on a separate path / dashboard.
+      - "traefik.enable=true"
+      - "traefik.http.routers.dashboard.rule=Host(`${PUBLIC_HOSTNAME}`) && PathPrefix(`/dashboard`)"
+      - "traefik.http.routers.dashboard.service=api@internal"
+      - "traefik.http.routers.dashboard.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.dashboard.middlewares=auth"
+
+      # Public API + portal routes.
+      - "traefik.enable=true"
+      - "traefik.http.routers.api.rule=Host(`${PUBLIC_HOSTNAME}`)"
+      - "traefik.http.routers.api.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.api.service=api"
+      - "traefik.http.services.api.loadbalancer.server.port=8000"
+      - "traefik.docker.network=divide-net"
+
+      # Force HTTPS: 301 redirect from HTTP -> HTTPS for the same host.
+      - "traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https"
+      - "traefik.http.middlewares.redirect-to-https.redirectscheme.permanent=true"
+      - "traefik.http.routers.api-http.rule=Host(`${PUBLIC_HOSTNAME}`)"
+      - "traefik.http.routers.api-http.entrypoints=web"
+      - "traefik.http.routers.api-http.middlewares=redirect-to-https"
+
+  # F12.3: Authentik in production mode (instead of dev quickstart).
+  # Replaces the docker-compose dev `authentik-server` + `authentik-worker`
+  # pair -- in prod both run from the same image with different
+  # commands. See https://docs.goauthentik.io/docs/install-config/install/docker-compose
+  authentik-server:
+    image: ghcr.io/goauthentik/server:2024.8
+    container_name: divide-authentik-server
+    restart: always
+    environment:
+      AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY}
+      AUTHENTIK_BOOTSTRAP_PASSWORD: ${AUTHENTIK_BOOTSTRAP_PASSWORD}
+      AUTHENTIK_BOOTSTRAP_EMAIL: ${AUTHENTIK_BOOTSTRAP_EMAIL:-admin@${PUBLIC_HOSTNAME}}
+      AUTHENTIK_POSTGRESQL__HOST: authentik-postgres
+      AUTHENTIK_POSTGRESQL__NAME: authentik
+      AUTHENTIK_POSTGRESQL__USER: authentik
+      AUTHENTIK_POSTGRESQL__PASSWORD: ${AUTHENTIK_POSTGRESQL_PASSWORD}
+      AUTHENTIK_LOG_LEVEL: info
+    volumes:
+      - authentik-media:/media
+      - authentik-templates:/templates
+    networks: [divide-net]
+    depends_on:
+      authentik-postgres:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 2G
+
+  authentik-worker:
+    image: ghcr.io/goauthentik/server:2024.8
+    container_name: divide-authentik-worker
+    restart: always
+    command: worker
+    environment:
+      AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY}
+      AUTHENTIK_POSTGRESQL__HOST: authentik-postgres
+      AUTHENTIK_POSTGRESQL__NAME: authentik
+      AUTHENTIK_POSTGRESQL__USER: authentik
+      AUTHENTIK_POSTGRESQL__PASSWORD: ${AUTHENTIK_POSTGRESQL_PASSWORD}
+    volumes:
+      - authentik-media:/media
+      - authentik-templates:/templates
+    networks: [divide-net]
+    depends_on:
+      authentik-postgres:
+        condition: service_healthy
+      authentik-server:
+        condition: service_started
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 2G
+
+  authentik-postgres:
+    image: postgres:16-alpine
+    container_name: divide-authentik-postgres
+    restart: always
+    environment:
+      POSTGRES_DB: authentik
+      POSTGRES_USER: authentik
+      POSTGRES_PASSWORD: ${AUTHENTIK_POSTGRESQL_PASSWORD}
+    volumes:
+      - authentik-postgres-data:/var/lib/postgresql/data
+    networks: [divide-net]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U authentik -d authentik"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres-data:
+  redis-data:
+  minio-data:
+  traefik-letsencrypt:
+  authentik-media:
+  authentik-templates:
+  authentik-postgres-data:
+
+networks:
+  divide-net:
+    driver: bridge
