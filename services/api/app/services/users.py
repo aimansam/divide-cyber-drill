@@ -352,10 +352,17 @@ async def consume_reset_token(
 ) -> db_models.User:
     """Validate a (sub, token) pair and clear the token on success.
 
-    Raises :class:`InvalidResetTokenError` on any failure. On
-    success the token columns are cleared (single-use semantics)
-    and the user row is returned so the caller can write the new
-    password hash. The caller is responsible for committing.
+    Atomic single-statement contract (P9): the entire check +
+    consume is one UPDATE statement with WHERE clauses for every
+    invariant. Two concurrent requests with the same valid token
+    race at the database; only one of the UPDATEs affects a row
+    (since both stamp the same target user). The first commits,
+    the second sees ``rowcount == 0`` and raises
+    :class:`InvalidResetTokenError`. This eliminates the read-
+    then-write window the previous implementation had.
+
+    The caller is responsible for committing after writing the
+    new password hash.
     """
     user = await get_by_sub(session, sub)
     if user is None:
@@ -367,10 +374,26 @@ async def consume_reset_token(
     if _as_utc(user.reset_token_expires_at) < datetime.now(UTC):
         # Don't bother clearing — the expiry already invalidates.
         raise InvalidResetTokenError("token expired")
-    # Single-use: clear before returning.
-    user.reset_token = None
-    user.reset_token_expires_at = None
+    # P9: atomic consume. WHERE matches on sub AND
+    # reset_token == token AND reset_token IS NOT NULL. If a
+    # concurrent request already cleared, rowcount == 0.
+    from sqlalchemy import update
+
+    stmt = (
+        update(db_models.User)
+        .where(db_models.User.sub == sub)
+        .where(db_models.User.reset_token == token)
+        .where(db_models.User.reset_token.isnot(None))
+        .values(
+            reset_token=None,
+            reset_token_expires_at=None,
+        )
+    )
+    result = await session.execute(stmt)
+    if result.rowcount == 0:
+        raise InvalidResetTokenError("token already consumed")
     await session.flush()
+    await session.refresh(user)
     return user
 
 

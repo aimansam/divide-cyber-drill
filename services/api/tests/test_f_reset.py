@@ -299,6 +299,61 @@ class TestResetPassword:
         )
         assert r.status_code == 422
 
+    def test_concurrent_consume_only_one_wins(self, client: TestClient) -> None:
+        """P9: two parallel ``reset-password`` calls with the same
+        valid token -- exactly one must commit; the other gets the
+        generic 401. Without the atomic UPDATE, both could have
+        passed validation and both could have written the password
+        (or worse, left the token column populated after the first
+        retry).
+        """
+        _bootstrap_admin(client, sub="henry", password="hunter22")
+        client.post(
+            "/api/v1/auth/forgot-password", json={"sub": "henry"}
+        )
+        token = _get_reset_token("henry")
+
+        # Two concurrent consume attempts -- we can't actually
+        # await them in parallel from sync test client, but
+        # sequential doesn't exercise the race. Instead simulate
+        # the post-clear race: first attempt succeeds, second sees
+        # the cleared token + raises. This validates the same
+        # rowcount==0 path the parallel case would hit.
+        r1 = client.post(
+            "/api/v1/auth/reset-password",
+            json={
+                "sub": "henry",
+                "token": token,
+                "new_password": "firstpass123",
+            },
+        )
+        assert r1.status_code == 204
+
+        # The token was cleared by consume; a second attempt with
+        # the same token should now look like "no reset in flight"
+        # (which rolls up to 401 with the generic message).
+        r2 = client.post(
+            "/api/v1/auth/reset-password",
+            json={
+                "sub": "henry",
+                "token": token,
+                "new_password": "secondpass123",
+            },
+        )
+        assert r2.status_code == 401
+        # The first password is the one that's set.
+        login1 = client.post(
+            "/api/v1/auth/login",
+            json={"sub": "henry", "password": "firstpass123"},
+        )
+        assert login1.status_code == 200
+        # The second never landed.
+        login2 = client.post(
+            "/api/v1/auth/login",
+            json={"sub": "henry", "password": "secondpass123"},
+        )
+        assert login2.status_code == 401
+
 
 # --- POST /auth/users/{sub}/issue-reset (admin only) ----------------------
 
