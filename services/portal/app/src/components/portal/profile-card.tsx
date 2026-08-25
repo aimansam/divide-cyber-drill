@@ -16,9 +16,14 @@
  * (see app.services.authorization.visible_runs_query). So the
  * card just renders the existing DashboardCard with no further
  * filtering — the visibility filter IS the profile filter.
+ *
+ * F-auth-help: also renders RoleCapabilitiesCard so the operator
+ * sees what their role is and what they can do, without having
+ * to read the source.
  */
 
 import { DashboardCard } from "./dashboard-card";
+import { RoleCapabilitiesCard } from "./role-capabilities-card";
 import type { Role } from "@/lib/roles";
 
 export function ProfileCard({
@@ -44,6 +49,7 @@ export function ProfileCard({
           ) : null}
         </p>
       </header>
+      <RoleCapabilitiesCard meRole={meRole} meSub={meSub} />
       <DashboardCard
         meRole={meRole}
         meSub={meSub}
