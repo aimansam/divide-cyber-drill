@@ -399,6 +399,13 @@ class User(Base, TimestampMixin):
     disabled: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False, server_default="false"
     )
+    # WireGuard peer ID — UUID assigned on first VPN config request.
+    # Stable across logins; used as seed to derive the peer keypair
+    # deterministically from DIVIDE_WG_PEER_SECRET. NULL until the
+    # user fetches their config for the first time.
+    wg_peer_id: Mapped[str | None] = mapped_column(
+        String(36), nullable=True, unique=True
+    )
 
     def __repr__(self) -> str:  # pragma: no cover
         return f"<User id={self.id} sub={self.sub!r} role={self.role!r}>"

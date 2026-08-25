@@ -130,6 +130,34 @@ class Settings(BaseSettings):
     bootstrap_admin_sub: str | None = None
     bootstrap_admin_password: SecretStr | None = None
 
+    # WireGuard VPN settings.
+    #
+    # DIVIDE_WG_HOST — the public IP/hostname trainees use in their
+    #   [Peer] Endpoint line. Must be reachable from the internet (or
+    #   the LAN for internal-only deployments). Defaults to empty which
+    #   makes the config say "Endpoint = <your-server-ip>:51820" as a
+    #   reminder to set it.
+    #
+    # DIVIDE_WG_PEER_SECRET — a random 32+ char string used to
+    #   deterministically derive each user's keypair. Change this to
+    #   invalidate all existing peer configs (forces re-download).
+    #   Generate with: python3 -c "import secrets; print(secrets.token_hex(32))"
+    #
+    # DIVIDE_WG_SUBNET — the VPN address pool. Clients get addresses
+    #   from this pool; the server takes .1. Default: 10.13.37.0/24.
+    #
+    # DIVIDE_WG_ALLOWED_IPS — what the client routes over VPN. Default
+    #   routes only the drill subnet (10.10.0.0/16) so trainees keep
+    #   normal internet access and only drill VM traffic goes through VPN.
+    #
+    # DIVIDE_WG_DNS — DNS server pushed to the client. Default: 1.1.1.1.
+    wg_host: str = ""
+    wg_peer_secret: SecretStr = SecretStr("change-me-generate-with-secrets-token-hex-32")
+    wg_subnet: str = "10.13.37.0/24"
+    wg_allowed_ips: str = "10.10.0.0/16, 10.13.37.0/24"
+    wg_dns: str = "1.1.1.1"
+    wg_port: int = 51820
+
 
 @lru_cache
 def get_settings() -> Settings:

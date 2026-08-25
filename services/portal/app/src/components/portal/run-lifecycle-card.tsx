@@ -26,9 +26,11 @@
 
 import { useEffect, useRef, useState } from "react";
 import {
+  Download,
   Loader2,
   Play,
   RefreshCw,
+  Shield,
   Square,
   AlertTriangle,
 } from "lucide-react";
@@ -314,6 +316,11 @@ export function RunLifecycleCard({
               </div>
             )}
 
+            {/* VPN config download — shown while a drill is live or just finished */}
+            {run && (
+              <VpnDownloadButton runStatus={run.status} />
+            )}
+
             {canCancelThis && hasLiveRun && (
               <div className="flex items-center gap-2">
                 <Input
@@ -338,5 +345,100 @@ export function RunLifecycleCard({
         )}
       </CardContent>
     </Card>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// VpnDownloadButton
+// ---------------------------------------------------------------------------
+// Appears on any live or recently-completed drill. Calls
+// GET /api/v1/auth/vpn-config, which returns the .conf text, then
+// triggers a browser download. The button is self-contained so it
+// can be added to other cards later without prop-drilling.
+
+function VpnDownloadButton({ runStatus }: { runStatus: string }) {
+  const [downloading, setDownloading] = useState(false);
+  const [vpnIp, setVpnIp] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const SHOW_STATUSES = new Set([
+    "pending", "running",
+    "succeeded", "completed",
+    "failed", "timeout", "cancelled", "canceled",
+  ]);
+  if (!SHOW_STATUSES.has(runStatus)) return null;
+
+  async function download() {
+    setDownloading(true);
+    setError(null);
+    try {
+      const data = await api.get<{
+        config: string;
+        filename: string;
+        client_ip: string;
+        server_ip: string;
+        allowed_ips: string;
+      }>("/api/v1/auth/vpn-config");
+
+      setVpnIp(data.client_ip);
+
+      // Trigger browser download of the .conf file
+      const blob = new Blob([data.config], { type: "text/plain" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = data.filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (e: unknown) {
+      const msg = e instanceof ApiError ? `HTTP ${e.status}` : String(e);
+      setError(`VPN config failed: ${msg}`);
+    } finally {
+      setDownloading(false);
+    }
+  }
+
+  return (
+    <div className="rounded-md border border-border bg-muted/30 p-3 space-y-2">
+      <div className="flex items-center gap-2 text-sm font-medium">
+        <Shield className="h-4 w-4 text-primary shrink-0" />
+        Connect via WireGuard VPN
+      </div>
+      <p className="text-xs text-muted-foreground">
+        Download your personal VPN config, import it into the{" "}
+        <a
+          href="https://www.wireguard.com/install/"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="underline"
+        >
+          WireGuard client
+        </a>
+        , then connect. Your drill VMs will be reachable directly.
+      </p>
+      {vpnIp && (
+        <p className="font-mono text-xs text-emerald-400">
+          Your VPN IP: {vpnIp}
+        </p>
+      )}
+      {error && (
+        <p className="text-xs text-destructive">{error}</p>
+      )}
+      <Button
+        size="sm"
+        variant="outline"
+        onClick={download}
+        disabled={downloading}
+      >
+        {downloading ? (
+          <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+        ) : (
+          <Download className="mr-2 h-3.5 w-3.5" />
+        )}
+        {downloading ? "Generating…" : "Download VPN config"}
+      </Button>
+    </div>
   );
 }
