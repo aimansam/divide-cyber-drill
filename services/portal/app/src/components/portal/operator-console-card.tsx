@@ -98,6 +98,29 @@ export function OperatorConsoleCard() {
     }
   }
 
+  async function reset(id: number) {
+    setPending(id);
+    try {
+      await api.post(`/api/v1/drills/${id}/reset`);
+      await load();
+    } catch (e: unknown) {
+      const status = e instanceof ApiError ? e.status : 0;
+      // 409: the run has no template snapshot. Tell the
+      // operator what to do next (use save-as-template
+      // first) -- the F7 reset semantics require a snapshot.
+      if (status === 409) {
+        setError(
+          "reset failed: this run has no template snapshot. " +
+            "POST /api/v1/drills/{id}/save-as-template first, then retry.",
+        );
+      } else {
+        setError(`reset failed: HTTP ${status || "unknown"}`);
+      }
+    } finally {
+      setPending(null);
+    }
+  }
+
   function deferred(feature: string) {
     setError(`${feature} — ships with the F7 / F8 plans.`);
   }
@@ -113,8 +136,10 @@ export function OperatorConsoleCard() {
             </span>
           </CardTitle>
           <CardDescription>
-            Live runs across the cyber range. Stop is wired; reset +
-            inject ship with F7 / F8.
+            Live runs across the cyber range. Stop / Reset / Inject
+            are all wired to their respective backend endpoints
+            (F2.5 / F7 / F8). Inject opens a small modal for
+            manual telemetry events.
           </CardDescription>
         </div>
         <Button
@@ -183,11 +208,12 @@ export function OperatorConsoleCard() {
                   <Button
                     variant="ghost"
                     size="sm"
-                    onClick={() => deferred("Reset to clean state")}
+                    onClick={() => reset(r.id)}
+                    disabled={pending === r.id}
                     data-testid="operator-reset"
                   >
                     <RotateCcw className="mr-1 h-3 w-3" />
-                    Reset
+                    {pending === r.id ? "Resetting…" : "Reset"}
                   </Button>
                   <Button
                     variant="ghost"
