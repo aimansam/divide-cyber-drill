@@ -952,9 +952,10 @@ uvicorn workers.
 5. **F12** — packaging (the demo outer shell).
 
 **Total effort to shippable product:** ~18 h, ~13 commits. **5
-of 5 pillars shipped:** F9 (DrillConsole consolidation), R1 (Redis
-multi-worker), F11 (drill debrief), F10 (onboarding wizard),
-F12 (product packaging). **§18 closed.**
+of 5 pillars shipped + 1 polish pass:** F9 (DrillConsole
+consolidation), R1 (Redis multi-worker), F11 (drill debrief),
+F10 (onboarding wizard), F12 (packaging), **F9.4 (wired three
+deferred buttons)**. **§18 closed.**
 
 **Deprecation:** the previously-planned R2 (light theme + mobile
 + keyboard shortcuts) and R3-R7 (coaching / replay / bookings /
@@ -1126,7 +1127,7 @@ New dep: none.
 
 Tests added: **11** (all in `test_f10_setup.py`).
 Full F8 + F9 + R1 + F10 + F11 regression: **158 passed,
-1 skipped, 0 failed**. Bundle: 275.76 KB (4.24 KB headroom
+1 skipped, 0 failed**. Bundle: 273.53 KB (6.47 KB headroom).
 under the 280 KB budget). `make verify-bundle` passes.
 
 ### 18.5 F12 — Product packaging
@@ -1175,8 +1176,8 @@ production-deployable via `docker-compose.production.yaml`.
 All five pillars shipped (commits listed in §17 / §18.5).
 Final state:
 
-  * 891 tests passing (F12 was docs-only; no test delta).
-  * Portal bundle 275.76 KB (4.24 KB under the 280 KB ceiling;
+  * 901 tests passing (F12 was docs-only; F9.4 added 10 toggle-disabled tests).
+  * Portal bundle 273.53 KB (6.47 KB under the 280 KB ceiling;
     enforced by `make verify-bundle`).
   * `make verify` runs the 5-step gate: lint + test +
     preflight + smoke + bundle-budget.

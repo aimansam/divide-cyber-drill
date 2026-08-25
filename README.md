@@ -5,12 +5,13 @@
 > streams live telemetry to a SOC view, scores flags with
 > time-decay, and produces leadership-ready markdown debriefs.
 >
-> **Status (F12 shipped):** all five final-product pillars
+> **Status (F12 + F9.4 shipped):** all five final-product pillars
 > closed — F9 (DrillConsole consolidation), R1 (multi-worker
 > SSE via Redis pub/sub), F11 (drill debrief artifact),
-> F10 (4-step onboarding wizard), F12 (this packaging).
-> **891 tests passing** (431 root + 460 API), portal bundle
-> 275.76 KB (4.24 KB under the 280 KB ceiling).
+> F10 (4-step onboarding wizard), F12 (packaging), F9.4 (wired
+> the three deferred buttons the §18 audit flagged).
+> **901 tests passing** (431 root + 470 API), portal bundle
+> 273.53 KB (6.47 KB under the 280 KB ceiling).
 >
 > See [`docs/PLAN.md`](docs/PLAN.md) §17-§19 for the full
 > roadmap + closure summary.
@@ -134,7 +135,7 @@ divide-cyber-drill/
 │   │   └── pyproject.toml
 │   └── portal/app/                   React + Vite portal (CDN-style)
 │       ├── src/components/portal/    20+ components (cards)
-│       └── build/                    vite bundle (275.76 KB)
+│       └── build/                    vite bundle (273.53 KB)
 ├── deploy/
 │   ├── docker-compose.yml            Dev stack (single-worker)
 │   ├── docker-compose.production.yaml  F12.3 production stack (multi-worker + Redis)
@@ -181,7 +182,7 @@ divide-cyber-drill/
     browser. No `tools/issue_token.py` required for first-time
     operators.
   * **Bundle budget** (F9.3): `make verify-bundle` enforces
-    the 280 KB ceiling; current bundle is 275.76 KB.
+    the 280 KB ceiling; current bundle is 273.53 KB.
   * **Secure by default**: argon2id password hashes, HMAC
     tokens with TTL, RBAC on every endpoint, rate-limit on
     `POST /drills`, audit log on every state transition,
@@ -208,7 +209,7 @@ environment:
 ## Running tests
 
 ```bash
-make test           # 891 tests across api/ + root
+make test           # 901 tests across api/ + root
 make lint           # ruff + mypy
 make verify         # 5-step gate: lint + test + preflight + smoke + bundle-budget
 make verify-bundle  # F9.3: portal bundle under 280 KB
