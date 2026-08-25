@@ -35,6 +35,7 @@ which the runner doesn't know how to handle.
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import Any
 
 from proxmoxer import ProxmoxAPI
@@ -48,6 +49,8 @@ from app.runners.adapter import (
     VmState,
 )
 from app.services.proxmox import ProxmoxAPIError, ProxmoxNotConfiguredError
+
+log = logging.getLogger(__name__)
 
 
 _DEFAULT_TIMEOUT_S = 30.0
@@ -335,22 +338,22 @@ class RealProxmoxAdapter(ProxmoxAdapter):
 
         PVE bridges (vmbrN) are per-node, but for the cyber range we
         consistently use a single node for the whole drill so we only
-        need to create it on that node. A drill's bridge shows up in
-        ``/etc/network/interfaces`` on each host; we'd typically manage
-        that via Ansible out of band (see docs/F3-RUNBOOK.md).
+        need to create it on that node. Bridges are managed via PVE's
+        Software-Defined Networking stack (see
+        ``docs/PROXMOX-SETUP.md §4``): the wizard's Step 0 creates
+        the ``divide`` zone + one VNet per declared network via
+        ``POST /cluster/sdn/{zones,vnets}``.
 
-        For the scope of F3 we treat the bridge as an IP-binding
-        device the VM's NIC attaches to. The actual ``vmbrN`` creation
-        is operator-supplied (PVE doesn't expose a public endpoint to
-        create vmbrN — it's an /etc/network/interfaces edit + ifreload).
-        So this method asserts the bridge already exists on the target
-        node (calls ``/nodes/{node}/network`` and looks for it). If
-        not found, raises ``ProxmoxAPIError`` so the runner fails
-        loudly — operators see the missing-bridge reason in the
-        run report and remediate before retrying.
+        The runner no longer creates bridges itself -- it asserts the
+        bridge already exists on the target node (calls
+        ``/nodes/{node}/network`` and looks for ``iface == <bridge>``).
+        If not found, raises ``ProxmoxAPIError`` with a wizard
+        action path, so operators see the missing-bridge reason in
+        the run report and can re-run Step 0 of the wizard to fix it.
 
-        An empty / non-existent / unmanaged PVE install gets a clear
-        'bridge vmbrN not configured' error rather than a 500.
+        The error message no longer references ``/etc/network/interfaces``
+        or ``ifreload`` -- those were the SSH-era remediation steps
+        and would mislead the operator today.
         """
         def _do() -> None:
             client = self._get_client()
@@ -360,22 +363,52 @@ class RealProxmoxAdapter(ProxmoxAdapter):
             if spec.bridge not in existing:
                 raise ProxmoxAPIError(
                     f"bridge {spec.bridge!r} not configured on PVE node "
-                    f"{node_name!r} — operator must add it to "
-                    f"/etc/network/interfaces and run `ifreload -a` "
-                    f"(see docs/F3-RUNBOOK.md §2)"
+                    f"{node_name!r} -- create it via the wizard's Step 0 "
+                    f"(POST /api/v1/admin/pve-setup-bridges) or via "
+                    f"`pvesh create /cluster/sdn/vnets -vnet {spec.bridge} "
+                    f"-zone divide` (see docs/PROXMOX-SETUP.md §4)"
                 )
 
         await self._call(_do)
 
     async def remove_bridge(self, bridge: str) -> None:
-        """No-op for the real PVE; bridge lifecycle is operator-owned.
+        """Best-effort cleanup of an SDN-created VNet on PVE.
 
-        The PVE bridge is created via /etc/network/interfaces edits
-        and `ifreload`. The runner can't remove it without sudo on
-        the host, so we deliberately do nothing here. Operators
-        clean up with their Ansible runbook.
+        Since F-pve-bridge-wizard (SDN variant), bridges are managed
+        as SDN Vnets in the ``divide`` zone. The runner can delete
+        them via ``DELETE /cluster/sdn/vnets/{bridge}`` -- no
+        host-shell access required. We do this so that a failed
+        drill doesn't leave orphan Vnets accumulating on the cluster.
+
+        Older docstrings said the runner never deletes bridges. That
+        was true when bridges were created via ``/etc/network/interfaces``
+        (which the runner can't edit). With SDN, deletion is just
+        one HTTP call, and leaving the bridge behind leaks cluster
+        state. Best-effort: if the PVE call fails (e.g. permissions,
+        transient network), we log and move on -- the operator can
+        run ``pvesh delete /cluster/sdn/zones/divide`` to wipe the
+        whole zone if needed.
         """
-        return None
+        def _do() -> None:
+            client = self._get_client()
+            try:
+                client.cluster.sdn.vnets(bridge).delete()
+            except Exception as exc:  # noqa: BLE001
+                # Logged here -- the calling code wraps _call() with
+                # its own error handling and we don't want to mask
+                # a genuine runner failure by raising on cleanup.
+                log.warning(
+                    "pve_runner.remove_bridge.failed",
+                    bridge=bridge,
+                    error=str(exc),
+                )
+
+        try:
+            await self._call(_do)
+        except Exception:  # noqa: BLE001
+            # Defensive: an SDN-delete that explodes should never
+            # break an otherwise-successful drill's teardown.
+            pass
 
     async def attach_network(
         self, vmid: int, node: str, bridge: str, nic_id: int
