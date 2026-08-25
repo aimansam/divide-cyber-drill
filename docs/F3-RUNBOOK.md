@@ -46,26 +46,33 @@ pvesh get /nodes/pve/network | jq '.data[] | select(.iface=="vmbr100")'
 
 ## Why this needs a runbook
 
-PVE does **not** expose a public API for creating `vmbrN` bridges.
-Bridges live in `/etc/network/interfaces` (or `/etc/network/interfaces.d/`)
-and are activated by `ifreload -a`. The runner can't make those edits
-without sudo on each PVE host.
+Bridges are managed via PVE's Software-Defined Networking stack
+(PVE 8.1+ / PVE 9): the runner no longer creates them through
+SSH or by editing `/etc/network/interfaces`. Instead, the wizard's
+Step 0 (or `POST /api/v1/admin/pve-setup-bridges`) creates a
+Simple zone named `divide` plus one VNet per declared network via
+`POST /cluster/sdn/{zones,vnets}`. PVE auto-propagates the
+resulting Linux bridges to every node in the cluster.
 
-So:
+The runner's role shrinks to *assertion + best-effort cleanup*:
 
 - **Runner surface:** `RealProxmoxAdapter.create_bridge(spec)` asserts
-  that the bridge already exists by calling
-  `GET /nodes/{node}/network` and looking for `iface: <bridge>`. If the
-  bridge is missing, the call raises `ProxmoxAPIError` with a clear
-  `bridge vmbrN not configured on PVE node pve — operator must add
-  it to /etc/network/interfaces and run ifreload -a (see docs/F3-
-  RUNBOOK.md §2)` error. The operator sees this in the run report
-  and remediates before retrying.
+  that the bridge already exists on the target node by calling
+  `GET /nodes/{node}/network` and looking for `iface == <bridge>`.
+  If the bridge is missing, the call raises `ProxmoxAPIError`
+  with an actionable message: the operator must re-run the
+  wizard's Step 0 (or `pvesh create /cluster/sdn/vnets -vnet
+  <name> -zone divide`). The error message names both paths
+  and points at `docs/PROXMOX-SETUP.md §4` for the full
+  SDN flow.
 
-- **Runner surface:** `RealProxmoxAdapter.remove_bridge(bridge)` is a
-  no-op. Bridges are operator-owned; we never delete them
-  automatically. They persist across runs and get reused (the
-  adapter's idempotency makes retries safe).
+- **Runner surface:** `RealProxmoxAdapter.remove_bridge(bridge)`
+  issues `DELETE /cluster/sdn/vnets/{bridge}` as best-effort
+  cleanup so a failed drill doesn't leave orphan Vnets
+  accumulating on the cluster. Errors are logged and swallowed --
+  a transient PVE failure during teardown should never break an
+  otherwise-successful drill. The adapter's idempotency makes
+  retries safe.
 
 - **Mock surface:** the in-memory mock calls `create_bridge` /
   `remove_bridge` faithfully; tests assert that bridges are created
@@ -186,7 +193,7 @@ in the drill's got `vmbrN+offset` for every declared network.
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| Drill fails with `bridge vmbr100 not configured on PVE node pve` | Bridge missing in /etc/network/interfaces | Add the stanza, run `ifreload -a`, retry |
+| Drill fails with `bridge vmbr100 not configured on PVE node pve` | SDN VNet for `vmbr100` missing on the target node | Re-run the wizard's Step 0 (or `pvesh create /cluster/sdn/vnets -vnet vmbr100 -zone divide`). See `docs/PROXMOX-SETUP.md §4`. |
 | Bridges exist but cloned VMs have no IP | `bridge-ports none` is wrong (the bridge has no slave) | That's the correct setting if no physical NIC is attached; verify cloud-init is reaching the metadata server |
 | Bridges exist; cloned VMs can't reach the gateway | `iptables -A FORWARD -i vmbr100 -j DROP` blocks inter-vm traffic that the topology needs | Add `-A FORWARD -i vmbr100 -o vmbr101 -j ACCEPT` for the router bridge pair; or remove the rule entirely (operator-managed ranges shouldn't have it) |
 | /api/v1/drills returns 500 with `Network ...` error | Runner sees the YAML but loses network metadata | Validate the YAML against the scenario schema (`validate-scenarios` Make target); ensure the JSON parses without additionalProperties: false violations |

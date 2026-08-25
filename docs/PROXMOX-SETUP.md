@@ -129,7 +129,20 @@ The wizard does **not** create any `/etc/network/interfaces` content
 of its own — there is nothing to roll back from a `divide.conf`
 drop-in file because no such file is written.
 
-To roll back: SSH into PVE, `rm /etc/network/interfaces.d/divide.conf`, then `ifreload -a`.
+To roll back, drop the SDN zone (which also removes all its Vnets):
+
+```bash
+pvesh delete /cluster/sdn/zones/divide -zone divide
+# Or via the web UI: Datacenter → SDN → Zones → divide → delete.
+```
+
+If a single VNet needs to go away (e.g. a torn-down drill left
+an orphan), drop it individually:
+
+```bash
+pvesh delete /cluster/sdn/vnets/vmbr100 -vnet vmbr100
+# Or via the web UI: Datacenter → SDN → Vnets → vmbr100 → delete.
+```
 
 ## 5. PVE connection: web setup (preferred)
 
