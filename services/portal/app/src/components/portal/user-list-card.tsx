@@ -2,10 +2,12 @@
  * UserListCard — admin view of every div:ide user.
  *
  * Backs onto `GET /api/v1/auth/users` (F3-prep) +
- * `POST /api/v1/auth/users/{sub}/toggle-disabled` (F9.4). Both
- * endpoints are admin-only; this card is therefore only mounted
- * for the admin role. If a non-admin somehow renders it, the
- * API call fails 403 and the card shows an error banner.
+ * `POST /api/v1/auth/users/{sub}/toggle-disabled` (F9.4) +
+ * `POST /api/v1/auth/users/{sub}/issue-reset` (F-reset-ux).
+ * All three endpoints are admin-only; this card is therefore
+ * only mounted for the admin role. If a non-admin somehow
+ * renders it, the API calls fail 403 and the card shows an
+ * error banner.
  *
  * Actions:
  *   * View: sub, role, disabled, last_login_at, created_at.
@@ -13,6 +15,10 @@
  *     `/api/v1/auth/users/{sub}/toggle-disabled`; the server
  *     returns the refreshed row and we patch it in place so
  *     the badge updates without a full reload.
+ *   * Reset link: click to mint a one-time password-reset link
+ *     for the user. The response includes a magic_link the admin
+ *     copies to clipboard and sends to the locked-out user via
+ *     whatever channel exists (Slack / email / carrier pigeon).
  *
  * F9.4 history: prior to F9.4 the toggle was a stub that
  * surfaced a 404-style "not wired up yet" message. The
@@ -21,7 +27,7 @@
  */
 
 import { useEffect, useState } from "react";
-import { Loader2, RefreshCw, UserCog } from "lucide-react";
+import { Loader2, Mail, RefreshCw, UserCog } from "lucide-react";
 import {
   Card,
   CardContent,
@@ -31,7 +37,13 @@ import {
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "./empty-state";
-import { api, ApiError } from "@/lib/api";
+import { useToasts } from "./toast";
+import {
+  api,
+  ApiError,
+  issuePasswordResetLink,
+  type IssueResetLinkResponse,
+} from "@/lib/api";
 
 export interface UserRow {
   sub: string;
@@ -46,6 +58,8 @@ export function UserListCard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [togglePending, setTogglePending] = useState<string | null>(null);
+  const [resetPending, setResetPending] = useState<string | null>(null);
+  const toasts = useToasts();
 
   async function load() {
     setLoading(true);
@@ -89,6 +103,68 @@ export function UserListCard() {
       );
     } finally {
       setTogglePending(null);
+    }
+  }
+
+  // F-reset-ux: mint a reset link for a user and copy the magic
+  // URL to clipboard. The admin pastes it into Slack / email /
+  // whatever channel they have. We surface the link as a toast
+  // so the admin can confirm the copy happened, and log the raw
+  // token to the console for headless debugging.
+  async function copyToClipboard(text: string): Promise<boolean> {
+    try {
+      if (
+        typeof navigator !== "undefined" &&
+        navigator.clipboard &&
+        typeof navigator.clipboard.writeText === "function"
+      ) {
+        await navigator.clipboard.writeText(text);
+        return true;
+      }
+    } catch {
+      // fall through to the legacy prompt
+    }
+    return false;
+  }
+
+  async function onIssueReset(sub: string) {
+    setResetPending(sub);
+    setError(null);
+    try {
+      const resp: IssueResetLinkResponse = await issuePasswordResetLink(sub);
+      const copied = await copyToClipboard(resp.magic_link);
+      if (copied) {
+        toasts.success(
+          `Reset link copied to clipboard for "${sub}". Paste it into Slack / email.`,
+        );
+      } else {
+        // Clipboard API not available (older browser / non-https).
+        // Show the link in a way the admin can still grab it.
+        toasts.info(
+          `Reset link for "${sub}": ${resp.magic_link} (expires ${resp.expires_at})`,
+          15_000,
+        );
+      }
+      // eslint-disable-next-line no-console
+      console.info(
+        `[F-reset-ux] minted reset link for ${sub}: ${resp.magic_link} (token=${resp.reset_token}, expires=${resp.expires_at})`,
+      );
+    } catch (e: unknown) {
+      const status = e instanceof ApiError ? e.status : 0;
+      const detail =
+        e instanceof ApiError && e.body && typeof e.body === "object"
+          ? (e.body as { detail?: string }).detail
+          : undefined;
+      const msg =
+        status === 404
+          ? `User "${sub}" not found.`
+          : status === 403
+          ? `You need admin to issue a reset link for "${sub}".`
+          : detail || `HTTP ${status || "unknown"}`;
+      setError(msg);
+      toasts.error(msg);
+    } finally {
+      setResetPending(null);
     }
   }
 
@@ -173,6 +249,24 @@ export function UserListCard() {
                     ? new Date(u.last_login_at).toLocaleString()
                     : "never"}
                 </span>
+                {/* F-reset-ux: mint a one-time reset link for the
+                    user. The admin copies it to clipboard and
+                    sends it out-of-band. */}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={resetPending === u.sub}
+                  onClick={() => onIssueReset(u.sub)}
+                  data-testid="user-issue-reset"
+                  title="Generate a one-time password-reset link"
+                >
+                  {resetPending === u.sub ? (
+                    <Loader2 className="h-3 w-3 animate-spin" />
+                  ) : (
+                    <Mail className="h-3 w-3" />
+                  )}
+                  <span className="ml-1.5">Reset link</span>
+                </Button>
                 <Button
                   variant="outline"
                   size="sm"

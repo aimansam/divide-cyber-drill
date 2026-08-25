@@ -1,6 +1,6 @@
-"""Credential login router (F3-prep).
+"""Credential login router (F3-prep + F-reset-ux).
 
-Three endpoints, deliberately tight:
+Three primary endpoints, deliberately tight:
 
   * ``POST /api/v1/auth/login``
       body: ``{"sub": "...", "password": "..."}``
@@ -20,6 +20,27 @@ Three endpoints, deliberately tight:
       last_login_at, created_at}, ...]``. Used by the admin UI to
       show "who can log in" and by tests.
 
+Password-reset flow (F-reset-ux, added 2026-08):
+
+  * ``POST /api/v1/auth/forgot-password``
+      body: ``{"sub": "..."}``
+      returns: 202 always (no enumeration). Mints a one-time
+      reset token if the user exists.
+  * ``POST /api/v1/auth/reset-password``
+      body: ``{"sub": "...", "token": "...", "new_password": "..."}``
+      returns: 204 on success, 401 on bad token (generic).
+  * ``POST /api/v1/auth/users/{sub}/issue-reset``
+      admin-only. Returns ``{"reset_token": "...", "magic_link":
+      "..."}``. The admin copies the magic link and sends it to
+      the locked-out user via whatever channel exists (Slack,
+      carrier pigeon). No SMTP integration.
+
+The reset-link format is ``<portal-origin>/#/?sub=<sub>&token=<token>``.
+The portal renders a ResetPasswordCard when the URL hash includes
+both ``sub`` and ``token`` query params. After the user submits a
+new password, the portal drops the hash and lands on the sign-in
+form.
+
 Security considerations:
     - Failed-login rate limit: 5 attempts per ``sub`` per 15 min
       via the same Redis bucket pattern as ``POST /drills`` (F2.2).
@@ -28,6 +49,14 @@ Security considerations:
     - Generic 401 message regardless of whether the ``sub`` exists,
       password is wrong, or the account is disabled. No
       enumeration oracle.
+    - ``forgot-password`` returns 202 unconditionally -- the
+      admin endpoint is the only path that actually surfaces the
+      token; the public endpoint exists for symmetry with future
+      "send me an email" workflows and to give the UI a place to
+      show "check your admin".
+    - Reset tokens are 32 bytes of ``secrets.token_urlsafe``
+      randomness (~43 base64 chars). 24h TTL. Single-use: cleared
+      on a successful ``POST /reset-password``.
     - The token TTL is configurable via ``DIVIDE_LOGIN_TOKEN_TTL_S``
       (default 8h — covers a working day; longer than a drill).
     - Password is never logged, never echoed in the response, and
@@ -49,12 +78,16 @@ from app.db import models as db_models
 from app.db.session import get_session
 from app.services.users import (
     DuplicateSubError,
+    InvalidResetTokenError,
     UserNotFoundError,
     UserStoreError,
     authenticate,
+    consume_reset_token,
     create_user,
     get_by_sub,
+    issue_reset_token,
     list_users,
+    set_password,
     set_user_disabled,
     touch_last_login,
 )
@@ -546,6 +579,193 @@ async def toggle_disabled_endpoint(
         disabled=user.disabled,
         last_login_at=user.last_login_at.isoformat() if user.last_login_at else None,
         created_at=user.created_at.isoformat(),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Password reset (F-reset-ux)
+# ---------------------------------------------------------------------------
+#
+# Three endpoints. The flow:
+#
+#   1. User clicks "Forgot password" on the sign-in form.
+#   2. Portal POSTs /auth/forgot-password. The endpoint silently
+#      mints a token if the user exists; returns 202 either way.
+#   3. An admin (separately, on the Admin tab) clicks "Reset link"
+#      for the user, which calls /auth/users/{sub}/issue-reset.
+#      The response contains a magic_link the admin copies and
+#      sends to the user.
+#   4. User clicks the link, the portal renders ResetPasswordCard
+#      (parsed from the URL hash). They POST /auth/reset-password
+#      with sub + token + new_password. Single-use: the token is
+#      cleared atomically with the password write.
+
+
+class ForgotPasswordRequest(BaseModel):
+    """Body for ``POST /auth/forgot-password``."""
+
+    sub: str = Field(min_length=1, max_length=64)
+
+
+class ForgotPasswordResponse(BaseModel):
+    """Always returns the same shape -- we never leak whether the
+    user exists."""
+
+    ok: bool = True
+    message: str = (
+        "If the account exists, a reset link has been sent to your "
+        "admin. Ask them to check the Admin tab."
+    )
+
+
+@router.post(
+    "/forgot-password",
+    summary="Request a password reset (public; no enumeration)",
+    status_code=status.HTTP_202_ACCEPTED,
+)
+async def forgot_password(
+    body: ForgotPasswordRequest,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> ForgotPasswordResponse:
+    """Mint a reset token if the user exists; return 202 either way.
+
+    This endpoint does NOT send anything (no SMTP). The token is
+    stored on the user row; the admin endpoint below is what
+    actually surfaces it. The point of having a public
+    ``forgot-password`` at all is to give the sign-in card's "I
+    forgot my password" button something to POST to that returns
+    a consistent response shape.
+
+    Status codes:
+      * 202 -- always (no enumeration).
+      * 422 -- bad body (sub empty or too long).
+    """
+    sub = body.sub.strip()
+    if sub:
+        # Best-effort. If the user doesn't exist, ``issue_reset_token``
+        # returns None and we silently swallow it.
+        await issue_reset_token(session, sub=sub)
+        await session.commit()
+    return ForgotPasswordResponse()
+
+
+class ResetPasswordRequest(BaseModel):
+    """Body for ``POST /auth/reset-password``."""
+
+    sub: str = Field(min_length=1, max_length=64)
+    token: str = Field(min_length=1, max_length=64)
+    new_password: str = Field(min_length=8, max_length=512)
+
+
+@router.post(
+    "/reset-password",
+    summary="Consume a reset token and set a new password",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
+async def reset_password(
+    body: ResetPasswordRequest,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> None:
+    """Validate ``sub`` + ``token``; on success, write the new
+    password hash and clear the token.
+
+    Status codes:
+      * 204 -- password changed. The user can now sign in.
+      * 401 -- any failure (no token, expired, mismatched, user
+                gone). Single generic message; no enumeration.
+      * 422 -- bad body (empty sub, weak password, etc.).
+    """
+    sub = body.sub.strip()
+    try:
+        user = await consume_reset_token(
+            session, sub=sub, token=body.token
+        )
+        await set_password(session, user=user, new_password=body.new_password)
+        await session.commit()
+    except InvalidResetTokenError:
+        # Generic message; the four failure modes collapse into one.
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="invalid or expired reset token",
+        )
+    except ValueError as exc:
+        # ``hash_password`` rejects empty / non-string passwords;
+        # pydantic should catch that before we get here, but be
+        # defensive.
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        )
+
+
+class IssueResetLinkResponse(BaseModel):
+    """Body for ``POST /auth/users/{sub}/issue-reset`` (admin only).
+
+    The ``reset_token`` is the raw token (in case the admin
+    wants to construct their own link); ``magic_link`` is a
+    fully-formed URL the admin can paste into Slack / email /
+    whatever.
+
+    Note: the token is sensitive. The portal's UserListCard
+    immediately copies it to clipboard and never persists it.
+    """
+
+    sub: str
+    reset_token: str
+    magic_link: str
+    expires_at: str  # ISO 8601, UTC
+
+
+@router.post(
+    "/users/{sub}/issue-reset",
+    summary="Admin: mint a reset token + magic link for a user",
+    dependencies=[Depends(require_role(Role.ADMIN))],
+)
+async def issue_reset_link(
+    sub: str,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    _token=Depends(current_token),
+) -> IssueResetLinkResponse:
+    """Mint a fresh reset token and return both the raw token and
+    a fully-formed ``/#/?sub=&token=`` URL the admin can send to
+    the user.
+
+    Overwrites any previous in-flight reset. The portal renders
+    ResetPasswordCard when the URL hash contains both query params.
+
+    Status codes:
+      * 200 -- token minted.
+      * 404 -- no user with that sub.
+      * 401/403 -- admin gate.
+    """
+    user = await get_by_sub(session, sub)
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"user with sub {sub!r} not found",
+        )
+
+    token = await issue_reset_token(session, sub=sub)
+    if token is None:  # pragma: no cover -- guarded above
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"user with sub {sub!r} not found",
+        )
+    await session.commit()
+    await session.refresh(user)
+    assert user.reset_token_expires_at is not None
+
+    # Relative link: keeps the link valid regardless of how the
+    # portal is hosted (docker-compose shares an origin with the
+    # API; reverse-proxied deployments may need to edit the
+    # hostname after pasting).
+    magic_link = f"/portal/app/#/?sub={user.sub}&token={token}"
+
+    return IssueResetLinkResponse(
+        sub=user.sub,
+        reset_token=token,
+        magic_link=magic_link,
+        expires_at=user.reset_token_expires_at.isoformat(),
     )
 
 

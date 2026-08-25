@@ -406,6 +406,26 @@ class User(Base, TimestampMixin):
     wg_peer_id: Mapped[str | None] = mapped_column(
         String(36), nullable=True, unique=True
     )
+    # F-reset-ux: one-time password-reset token. NULL when no reset
+    # is in flight. Random per reset, single-use (cleared on a
+    # successful ``POST /auth/reset-password``). Stored verbatim —
+    # not hashed — because the reset endpoint has to look the
+    # token up by exact string match; hashing it would add no
+    # security (the bearer of the URL has read access to the
+    # token) and would block admin tooling that needs to copy
+    # the URL. If the reset link leaks the only mitigation is
+    # expiry (24h by default) and the reset endpoint's
+    # single-use semantics.
+    reset_token: Mapped[str | None] = mapped_column(
+        String(64), nullable=True
+    )
+    # When ``reset_token`` stops being valid. Stamped at issuance
+    # time; consulted on every ``POST /auth/reset-password`` call.
+    # NULL when no token is pending (the column pair is read
+    # atomically — never set one without the other).
+    reset_token_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     def __repr__(self) -> str:  # pragma: no cover
         return f"<User id={self.id} sub={self.sub!r} role={self.role!r}>"

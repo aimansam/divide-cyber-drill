@@ -80,20 +80,59 @@ full permission matrix (canonical source of truth).
 
 ## Password reset
 
-Today there is no self-service reset. Reset procedure:
+div:ide ships a built-in admin-issued password reset flow
+(F-reset-ux, added 2026-08). End-to-end it takes three steps:
 
-1. Admin opens a DB shell: `psql $DIVIDE_DB_URL`
+1. **The user requests a reset** by clicking "Forgot your password?"
+   on the sign-in form and entering their username. The portal
+   POSTs to `/api/v1/auth/forgot-password`. The endpoint silently
+   mints a one-time token if the user exists; always returns 202.
+   The user is told to contact their admin.
+
+2. **The admin mints a reset link** by signing in, navigating to
+   the **Admin** tab, finding the user in the **Users** list, and
+   clicking **Reset link**. The portal POSTs to
+   `/api/v1/auth/users/{sub}/issue-reset` and copies the resulting
+   magic link to clipboard. The admin pastes the link into Slack /
+   email / whatever channel exists.
+
+3. **The user clicks the link**, which opens the portal with a
+   reset form pre-populated with their username and the token. They
+   enter a new password (≥ 8 chars, two fields to confirm) and hit
+   **Set new password**. The portal POSTs to
+   `/api/v1/auth/reset-password`, which atomically clears the
+   token and writes the new password hash. The user is then
+   dropped on the sign-in form.
+
+### Reset semantics
+
+- **Tokens are single-use.** A successful reset clears the token
+  column; replay attempts return 401 with a generic message.
+- **Tokens expire in 24 hours.** Expired tokens return the same
+  401. The admin can re-issue a fresh link at any time.
+- **No enumeration.** `forgot-password` returns the same 202 +
+  generic message whether or not the user exists. The reset
+  endpoint collapses all four failure modes (no token, expired,
+  mismatched, user gone) into a single 401.
+- **No SMTP.** div:ide runs on LAN. The admin copies the magic
+  link from the Admin tab and sends it out-of-band. A future SMTP
+  integration can hook into `forgot-password` without changing the
+  caller.
+
+### Emergency DB-level reset
+
+If the admin UI is unavailable (e.g. the API is down and you
+can't sign in to reach the Admin tab), the legacy DB-level reset
+still works:
+
+1. `psql $DIVIDE_DB_URL`
 2. `UPDATE users SET password_hash = '<new argon2id PHC>' WHERE sub = 'alice';`
-3. Alice signs in with the new password.
 
 Generating an argon2id PHC for the SQL:
 
 ```bash
 python3 -c "from argon2 import PasswordHasher; print(PasswordHasher().hash('new-password'))"
 ```
-
-This is a friction point — the **admin UI for user management**
-(L3 work) will replace this with a real "reset password" form.
 
 ## Security notes
 
@@ -149,8 +188,11 @@ This plan does NOT include:
 - **Password rotation policy.** LAN demo; the operator chooses.
 - **Account lockout beyond the rate-limit.** A user who forgets
   their password just keeps getting 401s until they reset it.
-- **"Forgot password" email flow.** No SMTP. Password reset is
-  admin-only via the DB.
+- **"Forgot password" email flow.** The forgot-password endpoint
+  exists (F-reset-ux) but doesn't actually send anything. The admin
+  copies the magic link from the Admin tab and sends it out-of-band.
+  An SMTP integration would hook into the same endpoint without
+  changing the caller.
 - **SSO / OIDC / SAML.** L3 3.1.
 - **Session tracking on the server.** Tokens are self-contained.
   The DB has `users.last_login_at` for telemetry; no active
@@ -217,13 +259,16 @@ The `password_hash` field is **never** returned.
 
 ## Future work
 
-- **Admin user-management UI** (L3 3.16 or thereabouts) — replace
-  the DB-shell password reset with a real form.
+- **Admin user-management UI** (L3 3.16 or thereabouts) — bulk
+  create / disable / role-change workflows. The user-management
+  UI today is the existing `UserListCard` + per-row buttons.
 - **Keycloak integration** (L3 3.1) — full SSO + MFA + token
   revocation. The argon2id table is retired in favor of the IdP.
-- **`divide create-user` CLI** — wraps `POST /api/v1/admin/users`
-  (which doesn't exist yet — the admin UI comes first).
-- **Forgot-password email flow** — requires SMTP config; deferred.
+- **`divide create-user` CLI** — wraps `POST /api/v1/auth/users`
+  (which exists; the CLI ergonomics layer is what doesn't).
+- **Forgot-password email flow** — the endpoint exists (see above).
+  An SMTP integration would post the magic link instead of (or in
+  addition to) requiring the admin to copy it from the UI.
 - **Revocation list** — Redis-backed `divide:revoked:<jti>` set,
   consulted on every `verify_token()` call. Required before
   shipping to production with real users.

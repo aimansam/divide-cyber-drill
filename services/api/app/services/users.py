@@ -32,10 +32,16 @@ What this module does NOT do:
       * Disable account permanently. ``User.disabled`` is the kill
         switch; this module just respects it.
       * Self-signup. Admin-only creation.
+      * Email the reset link. The admin copies it from the admin
+        UI and sends it via whatever channel exists (Slack,
+        carrier pigeon). No SMTP integration. The ``forgot-password``
+        endpoint deliberately returns 202 on unknown subs so the
+        caller can't enumerate users.
 """
 from __future__ import annotations
 
-from datetime import UTC
+import secrets
+from datetime import UTC, datetime, timedelta
 
 from argon2 import PasswordHasher
 from argon2.exceptions import (
@@ -47,6 +53,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.auth import Role
 from app.db import models as db_models
+
+
+def _as_utc(dt: datetime) -> datetime:
+    """Normalize a DB-returned datetime to offset-aware UTC.
+
+    SQLite stores datetimes as strings; SQLAlchemy returns them
+    offset-naive. PostgreSQL returns them offset-aware. We compare
+    against ``datetime.now(UTC)`` which is always offset-aware,
+    so we need to coerce naive values into UTC before comparing.
+    Real production (Postgres) is unaffected.
+    """
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=UTC)
+    return dt
 
 # Singleton hasher; library is internally thread-safe.
 # = argon2-cffi defaults: time_cost=2, memory_cost=64 MiB, parallelism=4,
@@ -251,15 +271,139 @@ class UserNotFoundError(Exception):
     """
 
 
+# --- password reset (F-reset-ux) -------------------------------------------
+#
+# One-time password reset flow. Three primitives:
+#
+#   * :func:`issue_reset_token` -- write a fresh random token +
+#     expiry to a user row. Returns ``None`` if the user doesn't
+#     exist (the forgot-password router swallows that to prevent
+#     enumeration).
+#   * :func:`consume_reset_token` -- validate a token + sub pair
+#     against a user row. If valid, clear the token (single-use),
+#     return the user. If invalid (no token, expired, mismatched),
+#     raise :class:`InvalidResetTokenError`. The router turns that
+#     into a 401.
+#   * :func:`set_password` -- replace a user's password hash. Used by
+#     ``consume_reset_token`` and available for any admin path that
+#     wants to change a password directly.
+#
+# Tokens are 32 bytes of ``secrets.token_urlsafe`` randomness (~43
+# base64 chars). That's 256 bits of entropy, well above the "can't
+# brute-force" threshold for any LAN deployment. We store the token
+# verbatim because the reset endpoint has to do an equality lookup;
+# hashing the token would add no security and would block the admin
+# from copying the URL.
+
+_RESET_TOKEN_TTL_S: int = 24 * 3600  # 24 hours
+
+
+class InvalidResetTokenError(Exception):
+    """Raised by :func:`consume_reset_token` on any failure.
+
+    Covers: user not found, no token pending, token expired, token
+    mismatch. The router returns a single generic 401 message so a
+    caller can't tell which axis failed. (Enumeration of "does this
+    user exist" via the reset endpoint is already prevented by
+    :func:`issue_reset_token` returning ``None`` silently on unknown
+    subs.)
+    """
+
+
+def _new_reset_token() -> str:
+    """Cryptographically random URL-safe token, ~43 chars."""
+    return secrets.token_urlsafe(32)
+
+
+async def issue_reset_token(
+    session: AsyncSession,
+    *,
+    sub: str,
+) -> str | None:
+    """Mint a fresh reset token for ``sub``.
+
+    Returns the token string on success, ``None`` if no user with
+    that sub exists (caller should swallow to prevent enumeration).
+    Overwrites any previous token — a user can only have one active
+    reset in flight at a time.
+
+    The TTL is :data:`_RESET_TOKEN_TTL_S` (24h). The token column
+    pair is updated atomically (``reset_token`` AND
+    ``reset_token_expires_at`` in the same ``flush``). Callers
+    should ``commit`` after this returns.
+    """
+    user = await get_by_sub(session, sub)
+    if user is None:
+        return None
+    token = _new_reset_token()
+    user.reset_token = token
+    user.reset_token_expires_at = datetime.now(UTC) + timedelta(
+        seconds=_RESET_TOKEN_TTL_S
+    )
+    await session.flush()
+    return token
+
+
+async def consume_reset_token(
+    session: AsyncSession,
+    *,
+    sub: str,
+    token: str,
+) -> db_models.User:
+    """Validate a (sub, token) pair and clear the token on success.
+
+    Raises :class:`InvalidResetTokenError` on any failure. On
+    success the token columns are cleared (single-use semantics)
+    and the user row is returned so the caller can write the new
+    password hash. The caller is responsible for committing.
+    """
+    user = await get_by_sub(session, sub)
+    if user is None:
+        raise InvalidResetTokenError("user not found")
+    if not user.reset_token or not user.reset_token_expires_at:
+        raise InvalidResetTokenError("no reset in flight")
+    if user.reset_token != token:
+        raise InvalidResetTokenError("token mismatch")
+    if _as_utc(user.reset_token_expires_at) < datetime.now(UTC):
+        # Don't bother clearing — the expiry already invalidates.
+        raise InvalidResetTokenError("token expired")
+    # Single-use: clear before returning.
+    user.reset_token = None
+    user.reset_token_expires_at = None
+    await session.flush()
+    return user
+
+
+async def set_password(
+    session: AsyncSession,
+    *,
+    user: db_models.User,
+    new_password: str,
+) -> None:
+    """Replace ``user.password_hash`` with an argon2id hash of
+    ``new_password``.
+
+    Validation matches :func:`create_user`: non-empty, the rest is
+    on the caller. Flushes; caller commits. Raises ``ValueError``
+    on bad input (matches :func:`hash_password`).
+    """
+    user.password_hash = hash_password(new_password)
+    await session.flush()
+
+
 __all__ = [
     "DuplicateSubError",
+    "InvalidResetTokenError",
     "UserNotFoundError",
     "UserStoreError",
     "authenticate",
+    "consume_reset_token",
     "create_user",
     "get_by_sub",
     "hash_password",
+    "issue_reset_token",
     "list_users",
+    "set_password",
     "set_user_disabled",
     "touch_last_login",
     "verify_password",
