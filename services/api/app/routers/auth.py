@@ -677,11 +677,30 @@ async def reset_password(
       * 422 -- bad body (empty sub, weak password, etc.).
     """
     sub = body.sub.strip()
+    user: db_models.User | None = None
     try:
         user = await consume_reset_token(
             session, sub=sub, token=body.token
         )
         await set_password(session, user=user, new_password=body.new_password)
+        # P8: audit the successful reset. We log target_sub but
+        # deliberately not the new password hash or the consumed
+        # token -- the consume path already cleared the token column
+        # by the time we get here, so the audit row is what tells
+        # "this user reset their password at this time."
+        #
+        # Note: ``actor`` is left as None here because the user
+        # resetting their own password is the same person as
+        # target_sub. The actor field is reserved for admin-
+        # originated actions; we keep the convention consistent
+        # with the rest of the audit log.
+        session.add(
+            db_models.AuditLog(
+                action=db_models.AuditAction.PASSWORD_RESET_USED,
+                actor=None,
+                details={"target_sub": user.sub},
+            )
+        )
         await session.commit()
     except InvalidResetTokenError:
         # Generic message; the four failure modes collapse into one.
@@ -755,6 +774,24 @@ async def issue_reset_link(
     await session.commit()
     await session.refresh(user)
     assert user.reset_token_expires_at is not None
+
+    # P8: audit row records who requested the reset for whom. We
+    # deliberately do NOT stash the raw token in the details JSON --
+    # the admin has it, the link is the operator-facing artifact, and
+    # the user.reset_token column already gets overwritten on the
+    # next issue. The audit row sticks around even after the user
+    # row's token is consumed, so the trail is durable.
+    session.add(
+        db_models.AuditLog(
+            action=db_models.AuditAction.PASSWORD_RESET_ISSUED,
+            actor=_token.sub,
+            details={
+                "target_sub": user.sub,
+                "expires_at": user.reset_token_expires_at.isoformat(),
+            },
+        )
+    )
+    await session.commit()
 
     # Relative link: keeps the link valid regardless of how the
     # portal is hosted (docker-compose shares an origin with the

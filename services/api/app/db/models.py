@@ -67,7 +67,14 @@ class AssetStatus(str, enum.Enum):
 
 
 class AuditAction(str, enum.Enum):
-    """Append-only audit log action codes."""
+    """Append-only audit log action codes.
+
+    Adding a value here requires a migration that ALTERs the PG
+    enum (`services/api/alembic/versions/`); the new value won't
+    be writable at runtime until the enum has been extended on
+    the database. See 0012_audit_reset_events.py for the
+    password-reset additions.
+    """
 
     SCENARIO_CREATED = "scenario.created"
     SCENARIO_UPDATED = "scenario.updated"
@@ -85,6 +92,16 @@ class AuditAction(str, enum.Enum):
     # happens via cloud-init user_data (see docs/F5-SCORING.md);
     # the audit row is the operator-visible record.
     FLAG_PLANTED = "flag.planted"
+    # F-reset-ux (P8): admin-issued reset link + the user-side
+    # consume. Stored verbatim in audit_log so an admin UI can
+    # reconstruct who reset whose password to what, when. The
+    # ``reset_token`` column on users is overwritten on every
+    # issue, so the audit row is the only durable record of the
+    # token that was minted. We deliberately do NOT log the
+    # token itself -- the issuer (admin sub) is enough to
+    # trace the origin of any leaked link.
+    PASSWORD_RESET_ISSUED = "password.reset.issued"
+    PASSWORD_RESET_USED = "password.reset.used"
 
 
 # --- Scenario ---------------------------------------------------------------

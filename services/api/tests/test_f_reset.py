@@ -416,3 +416,97 @@ class TestIssueResetLink:
             json={"sub": sub, "password": "end2end_new"},
         )
         assert login.status_code == 200
+
+    def test_admin_issue_and_user_consume_write_audit_rows(
+        self, client: TestClient
+    ) -> None:
+        """P8: ``password.reset.issued`` and ``password.reset.used``
+        must each write a row to ``audit_log``.
+
+        Admin-issued link carries the issuer's sub as actor.
+        User-side consume leaves actor=None (the user is the
+        target -- not an admin-originated action).
+        """
+        _bootstrap_admin(client, sub="admin", password="adminpass1")
+        admin_tok = _login(client, "admin", "adminpass1")
+        client.post(
+            "/api/v1/auth/users",
+            json={
+                "sub": "alice",
+                "password": "alice_old",
+                "role": "red",
+            },
+            headers={"X-Divide-Token": admin_tok},
+        )
+        # Admin mints a reset for alice.
+        link_resp = client.post(
+            "/api/v1/auth/users/alice/issue-reset",
+            headers={"X-Divide-Token": admin_tok},
+        )
+        assert link_resp.status_code == 200
+        reset_token = link_resp.json()["reset_token"]
+        # Alice consumes the link.
+        r = client.post(
+            "/api/v1/auth/reset-password",
+            json={
+                "sub": "alice",
+                "token": reset_token,
+                "new_password": "alice_new",
+            },
+        )
+        assert r.status_code == 204
+
+        # Query the audit log via the model's SQLAlchemy mapper.
+        # The conftest sets DIVIDE_DB_URL to a sqlite+aiosqlite URL;
+        # we need a plain sync sqlite URL to read with create_engine.
+        from sqlalchemy import create_engine, select  # noqa: F401
+        from app.db import models as db_models  # noqa: F401
+
+        url = os.environ["DIVIDE_DB_URL"].replace(
+            "sqlite+aiosqlite://", "sqlite:///"
+        )
+        engine = create_engine(url)
+        with engine.connect() as conn:
+            # Note: SQLite stores JSON columns as TEXT, so we can't
+            # push the target_sub filter down to SQL via a JSON
+            # subscript. Pull all reset rows and filter in Python.
+            # The reset suite is bounded -- a handful of rows at most.
+            rows = conn.execute(
+                select(db_models.AuditLog).where(
+                    db_models.AuditLog.action.in_(
+                        [
+                            db_models.AuditAction.PASSWORD_RESET_ISSUED,
+                            db_models.AuditAction.PASSWORD_RESET_USED,
+                        ]
+                    )
+                )
+            ).all()
+        rows = [
+            r for r in rows
+            if isinstance(r.details, dict)
+            and r.details.get("target_sub") == "alice"
+        ]
+        # Two rows: one for the issue (admin as actor), one for
+        # the consume (alice as actor -- the row's actor may be
+        # None or "alice" depending on the consume-path's
+        # choice; we only assert at-least-one-used row exists).
+        issued = [
+            r for r in rows
+            if r.action == db_models.AuditAction.PASSWORD_RESET_ISSUED
+        ]
+        used = [
+            r for r in rows
+            if r.action == db_models.AuditAction.PASSWORD_RESET_USED
+        ]
+        assert len(issued) == 1
+        assert issued[0].actor == "admin"
+        assert issued[0].details["target_sub"] == "alice"
+        assert "expires_at" in issued[0].details
+        # Re-read note: the consume path emits actor=None so a
+        # queryable admin UI can tell "user reset their own
+        # password" from "admin reset it for them." That's the
+        # design from the commit message; we just assert the
+        # row exists with the target_sub in details.
+        assert len(used) >= 1
+        latest_used = max(used, key=lambda r: r.at)
+        assert latest_used.details["target_sub"] == "alice"
