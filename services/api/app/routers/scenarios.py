@@ -56,6 +56,12 @@ def _row_to_dict(row: db_models.Scenario) -> dict:
         "duration_min": row.duration_min,
         "tags": row.tags,
         "authors": row.authors,
+        # F10.3: include the spec so the onboarding wizard can
+        # detect multi-team scenarios (red + blue objectives)
+        # without an N+1 fetch per row. The spec is a small JSON
+        # blob (~1-5 KB) and the catalog rarely exceeds a few
+        # dozen entries; the bandwidth cost is negligible.
+        "spec": row.spec,
         "source_path": row.source_path,
         "archived_at": row.archived_at.isoformat() if row.archived_at else None,
         "created_at": row.created_at.isoformat() if row.created_at else None,

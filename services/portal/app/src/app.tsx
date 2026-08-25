@@ -6,6 +6,7 @@ import { RunLifecycleCard } from "@/components/portal/run-lifecycle-card";
 import { PveOpsCard } from "@/components/portal/pve-ops-card";
 import { ScenarioAuthoringCard } from "@/components/portal/scenario-authoring-card";
 import { SignInCard } from "@/components/portal/sign-in-card";
+import { OnboardingWizard } from "@/components/portal/onboarding-wizard";
 import { TopNav } from "@/components/portal/top-nav";
 import { DashboardCard } from "@/components/portal/dashboard-card";
 import { DrillConsole } from "@/components/portal/drill-console";
@@ -56,6 +57,10 @@ export default function App() {
   const [pickedRun, setPickedRun] = useState<RunRow | null>(null);
   const { me, loading } = useMe();
   const [activeView, setActiveView] = useHashRoute(VALID_VIEWS, "dashboard");
+  // F10.4: when the wizard is showing, suppress the SignInCard so
+  // the operator only sees the wizard. Toggled to true when the
+  // operator hits "Sign in instead" on step 1 (admin already exists).
+  const [wizardSignInFallback, setWizardSignInFallback] = useState(false);
 
   function onPickRunFromDashboard(runId: number) {
     // The Dashboard's "Recent runs" list jumps the operator
@@ -79,7 +84,25 @@ export default function App() {
             Identifying…
           </p>
         )}
-        {!me && !loading && (
+        {!me && !loading && !wizardSignInFallback && (
+          // F10.3 / F10.4: anonymous user, no token. Show the
+          // onboarding wizard so first-time operators can create
+          // the initial admin + run their first drill without
+          // leaving the portal. The wizard self-routes to step 2
+          // if the operator hits "Sign in instead" because the
+          // admin already exists.
+          <OnboardingWizard
+            onLaunched={(runId) => {
+              setPickedRun({
+                id: runId,
+                status: "unknown",
+              });
+              setActiveView("observe");
+            }}
+            onSignInInstead={() => setWizardSignInFallback(true)}
+          />
+        )}
+        {!me && !loading && wizardSignInFallback && (
           <div className="space-y-4">
             <p className="text-sm text-muted-foreground">
               Sign in to operate drills, observe live exercises, and
