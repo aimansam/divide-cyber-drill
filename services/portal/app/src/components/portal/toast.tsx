@@ -23,6 +23,7 @@ import {
 import type { ReactNode } from "react";
 import { CheckCircle2, Info, XCircle, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { subscribeSessionExpired } from "@/lib/auth";
 
 export type ToastKind = "info" | "success" | "error";
 
@@ -118,6 +119,19 @@ export function ToastHost({ children }: { children: ReactNode }) {
       timersRef.current.clear();
     };
   }, []);
+
+  // F-auth-ux (Plan A2): when /api/v1/me returns 401, lib/auth fires
+  // a one-shot sessionExpired event. We surface it as an error toast
+  // so the operator knows WHY they got bounced to the sign-in page.
+  useEffect(() => {
+    return subscribeSessionExpired(() => {
+      push(
+        "error",
+        "Your session expired — please sign in again.",
+        6000,
+      );
+    });
+  }, [push]);
 
   return (
     <ToastContext.Provider value={value}>

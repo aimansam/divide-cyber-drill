@@ -34,9 +34,17 @@ interface SignInCardProps {
   /** Called when the user clicks "First time? Set up div:ide →".
    *  Parent (app.tsx) swaps in the OnboardingWizard. */
   onNeedsSetup?: () => void;
+  /** Called after a successful sign-in. The argument is the active
+   *  hash view the operator was trying to reach (e.g. "operate"),
+   *  or null if they came in cold. The parent uses it to switch
+   *  tabs after auth state propagates. */
+  onSignedIn?: (nextView: string | null) => void;
 }
 
-export function SignInCard({ onNeedsSetup }: SignInCardProps = {}) {
+export function SignInCard({
+  onNeedsSetup,
+  onSignedIn,
+}: SignInCardProps = {}) {
   const [sub, setSub] = useState("");
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -54,9 +62,12 @@ export function SignInCard({ onNeedsSetup }: SignInCardProps = {}) {
       const resp = await login(sub.trim(), password);
       setToken(resp.token);
       emitTokenChange(resp.token);
-      // The parent re-renders because useMe() re-fetches on the
-      // token-change event. No explicit callback needed.
       setPassword(""); // best-effort: clear the password field
+      // F-auth-ux (Plan A4): preserve the operator's intended
+      // destination across the sign-in flow. If they came in via
+      // #operate (e.g. from a stale email link), tell the parent so
+      // it doesn't dump them on Dashboard.
+      onSignedIn?.(_readNextViewFromHash());
     } catch (e: unknown) {
       if (e instanceof ApiError) {
         if (e.status === 401) {
@@ -179,5 +190,27 @@ function extractDetail(body: unknown): string | null {
   ) {
     return (body as { detail: string }).detail;
   }
+  return null;
+}
+
+/**
+ * Read a `?next=<view>` query string OR a `#<view>` hash from the
+ * current URL. Returns the view key if it matches a known portal
+ * tab, else null. Used by F-auth-ux (Plan A4) to round-trip a deep
+ * link through sign-out → sign-in.
+ */
+const KNOWN_VIEWS = new Set([
+  "dashboard", "operate", "observe", "admin", "history", "profile",
+]);
+
+function _readNextViewFromHash(): string | null {
+  if (typeof window === "undefined") return null;
+  // Prefer ?next=… (preserved across sign-in round trips).
+  const params = new URLSearchParams(window.location.search);
+  const next = params.get("next");
+  if (next && KNOWN_VIEWS.has(next)) return next;
+  // Fall back to #… (current hash).
+  const h = window.location.hash.replace(/^#\/?/, "");
+  if (KNOWN_VIEWS.has(h)) return h;
   return null;
 }

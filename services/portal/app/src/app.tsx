@@ -1,13 +1,12 @@
 import { useEffect, useState } from "react";
 import { ScenariosCard, type Scenario } from "@/components/portal/scenarios-card";
-import { TokenBar } from "@/components/portal/token-bar";
 import { MyRunsCard, type RunRow } from "@/components/portal/my-runs-card";
 import { RunLifecycleCard } from "@/components/portal/run-lifecycle-card";
 import { PveOpsCard } from "@/components/portal/pve-ops-card";
 import { ScenarioAuthoringCard } from "@/components/portal/scenario-authoring-card";
 import { SignInCard } from "@/components/portal/sign-in-card";
 import { OnboardingWizard } from "@/components/portal/onboarding-wizard";
-import { TopNav } from "@/components/portal/top-nav";
+import { TopNav, type ViewKey } from "@/components/portal/top-nav";
 import { DashboardCard } from "@/components/portal/dashboard-card";
 import { DrillConsole } from "@/components/portal/drill-console";
 import { OperatorConsoleCard } from "@/components/portal/operator-console-card";
@@ -126,6 +125,14 @@ export default function App() {
           // the sign-in form directly, no wizard in the way.
           <SignInCard
             onNeedsSetup={() => setAnonView("wizard")}
+            onSignedIn={(nextView) => {
+              // F-auth-ux (Plan A4): preserve deep-link across
+              // sign-out → sign-in. setActiveView calls the hash-
+              // router, which writes window.location.hash.
+              if (nextView && VALID_VIEWS.includes(nextView as ViewKey)) {
+                setActiveView(nextView as ViewKey);
+              }
+            }}
           />
         )}
         {!me && !loading && anonView === "wizard" && (
@@ -207,7 +214,6 @@ export default function App() {
             }
           })()}
       </main>
-      <TokenBar />
     </div>
     </ToastHost>
   );

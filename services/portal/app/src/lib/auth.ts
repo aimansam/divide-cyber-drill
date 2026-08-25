@@ -143,9 +143,13 @@ export function useMe(): UseMeState {
         if (e instanceof ApiError && e.status === 401) {
           // The token in localStorage is no longer valid. Clear it
           // so we don't loop on /me forever, then render anon.
+          // F-auth-ux (Plan A2): also emit a sessionExpired event
+          // so the app can show a toast and direct the operator to
+          // the sign-in form rather than silently dropping them.
           setToken("");
           setMe(null);
           setError(null);
+          emitSessionExpired();
         } else {
           const msg = e instanceof Error ? e.message : String(e);
           setMe(null);
@@ -187,4 +191,38 @@ export function subscribeTokenChange(fn: (v: string) => void): () => void {
   return () => {
     versionListeners.delete(fn);
   };
+}
+
+/**
+ * sessionExpired — fired once when a previously-valid token returns 401
+ * from /api/v1/me. Components (ToastHost, app.tsx) listen for this to
+ * show a one-shot "your session expired" toast instead of silently
+ * dropping the operator back to the sign-in page.
+ *
+ * Fire-and-forget; listeners may register/unregister freely.
+ */
+let sessionExpiredListeners = new Set<() => void>();
+
+export function emitSessionExpired(): void {
+  for (const fn of sessionExpiredListeners) fn();
+}
+
+export function subscribeSessionExpired(fn: () => void): () => void {
+  sessionExpiredListeners.add(fn);
+  return () => {
+    sessionExpiredListeners.delete(fn);
+  };
+}
+
+/**
+ * Helper: format seconds-until-expiry as "4h 12m" / "15m" / "expired".
+ * Used by TopNav to surface the session-expiry pill.
+ */
+export function formatTtl(seconds: number): string {
+  if (seconds <= 0) return "expired";
+  if (seconds < 60) return `${Math.round(seconds)}s`;
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m}m`;
 }

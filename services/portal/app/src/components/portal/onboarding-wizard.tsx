@@ -463,21 +463,27 @@ function Step1({
         data-testid="wizard-admin-exists"
         className="space-y-4 rounded-md border border-amber-700 bg-amber-950/30 p-4"
       >
+        {/* F-auth-ux (Plan A5): drop the env-var name soup — those
+            vars are only meaningful to whoever provisioned the
+            server. Normal users don't have them. Point them at
+            the right human (another admin) instead. */}
         <p className="text-sm">
           An admin already exists on this deployment. Step 1 is a
-          one-shot -- you can't create a second first-admin.
+          one-shot — only the first admin can be created here, and
+          that admin already exists.
         </p>
         <p className="text-sm">
-          Sign in instead with the credentials from your operator
-          handoff (typically{" "}
-          <code className="rounded bg-muted px-1 py-0.5 text-xs">
-            DIVIDE_BOOTSTRAP_ADMIN_SUB
-          </code>{" "}
-          +{" "}
-          <code className="rounded bg-muted px-1 py-0.5 text-xs">
-            DIVIDE_BOOTSTRAP_ADMIN_PASSWORD
-          </code>
-          , or whatever the previous admin set).
+          If you don't know your password, ask another admin to
+          reset it for you.{" "}
+          <a
+            href="https://github.com/divide/divide-cyber-drill/blob/main/docs/USERS.md"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline"
+          >
+            See docs/USERS.md
+          </a>{" "}
+          for the password reset flow.
         </p>
         <div className="flex justify-end">
           <Button

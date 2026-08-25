@@ -20,6 +20,7 @@
 
 import {
   Activity,
+  Clock,
   Compass,
   Gauge,
   History,
@@ -29,10 +30,10 @@ import {
   Shield,
   User as UserIcon,
 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { api, setToken } from "@/lib/api";
-import { emitTokenChange, useMe } from "@/lib/auth";
+import { emitTokenChange, formatTtl, useMe } from "@/lib/auth";
 import { ROLE_LABELS, type Role } from "@/lib/roles";
 import { cn } from "@/lib/utils";
 
@@ -194,6 +195,10 @@ export function TopNav({
                 Signed in as{" "}
                 <span className="font-mono text-foreground">{me.sub}</span>
               </div>
+              {/* F-auth-ux (Plan A3): session-expiry pill so the
+                  operator isn't blindsided when the token expires.
+                  Amber when <1h, red when <15min. */}
+              <SessionExpiryPill ttl={me.ttl_remaining_s} />
               <Button
                 variant="ghost"
                 size="sm"
@@ -209,5 +214,43 @@ export function TopNav({
         </div>
       </div>
     </header>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// SessionExpiryPill — shows "expires in 4h 12m" under the user menu.
+// Plain when >1h, amber when <1h, red when <15min. Self-ticks every 30s
+// so the countdown stays accurate without a full useMe() re-fetch.
+// ---------------------------------------------------------------------------
+
+function SessionExpiryPill({ ttl: initialTtl }: { ttl: number }) {
+  const [ttl, setTtl] = useState(initialTtl);
+
+  useEffect(() => {
+    setTtl(initialTtl);
+  }, [initialTtl]);
+
+  // Tick every 30s so the countdown stays roughly accurate.
+  useEffect(() => {
+    const h = window.setInterval(() => {
+      setTtl((t) => Math.max(0, t - 30));
+    }, 30_000);
+    return () => window.clearInterval(h);
+  }, []);
+
+  let colorClass = "text-muted-foreground";
+  if (ttl > 0 && ttl < 900) colorClass = "text-red-400";
+  else if (ttl > 0 && ttl < 3600) colorClass = "text-amber-400";
+
+  return (
+    <div
+      data-testid="session-expiry-pill"
+      className={`flex items-center gap-1 px-2 py-1 text-xs ${colorClass}`}
+    >
+      <Clock className="h-3 w-3 shrink-0" />
+      <span>
+        {ttl > 0 ? `expires in ${formatTtl(ttl)}` : "session expired"}
+      </span>
+    </div>
   );
 }
