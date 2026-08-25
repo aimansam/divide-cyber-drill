@@ -38,6 +38,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "./empty-state";
 import { StatusPill } from "./status-pill";
+import { InjectEventModal } from "./inject-event-modal";
 import { api, ApiError } from "@/lib/api";
 
 interface LiveRun {
@@ -56,7 +57,11 @@ export function OperatorConsoleCard() {
   const [runs, setRuns] = useState<LiveRun[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
   const [pending, setPending] = useState<number | null>(null);
+  // The Inject button opens a modal focused on one run. We
+  // store the target runId (or null when closed).
+  const [injectForRun, setInjectForRun] = useState<number | null>(null);
 
   async function load() {
     setLoading(true);
@@ -121,8 +126,8 @@ export function OperatorConsoleCard() {
     }
   }
 
-  function deferred(feature: string) {
-    setError(`${feature} — ships with the F7 / F8 plans.`);
+  function onInjected(runId: number) {
+    setSuccess(`event injected into run #${runId}`);
   }
 
   return (
@@ -218,7 +223,7 @@ export function OperatorConsoleCard() {
                   <Button
                     variant="ghost"
                     size="sm"
-                    onClick={() => deferred("Event injection")}
+                    onClick={() => setInjectForRun(r.id)}
                     data-testid="operator-inject"
                   >
                     <Siren className="mr-1 h-3 w-3" />
@@ -230,6 +235,27 @@ export function OperatorConsoleCard() {
           </ul>
         )}
       </CardContent>
+      {/* F9.4: success + error banners above the modal so the
+          operator gets confirmation feedback when the modal
+          closes on a successful inject. */}
+      {success !== null && (
+        <div
+          role="status"
+          className="mx-6 mb-4 rounded-md border border-emerald-700 bg-emerald-950/30 px-3 py-2 text-sm text-emerald-200"
+          data-testid="operator-success"
+        >
+          {success}
+        </div>
+      )}
+      {/* F9.4: Inject modal -- mounts only while a target run is
+          selected. Closes on backdrop click + Escape key. */}
+      {injectForRun !== null && (
+        <InjectEventModal
+          runId={injectForRun}
+          onClose={() => setInjectForRun(null)}
+          onInjected={() => onInjected(injectForRun)}
+        />
+      )}
     </Card>
   );
 }
