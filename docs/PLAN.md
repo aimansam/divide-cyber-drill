@@ -6,7 +6,7 @@
 > **Phase 1 — One-VM drill end-to-end ✅ CLOSED** (run #11, status=`succeeded`, VMID 109 cloned from `tpl-debian-cloudinit`, audit populated, asset teardown to `stopped`).
 > **Phase 2 — LAN-grade cyber drill platform ✅ CLOSED** — L1 ledger 9/9 ✅, L2 ledger 18/18 ✅ (closed by F2). L3 ledger 3/11 partially; cyber-range gaps documented in §15.
 > **§15 — Cyber-range plans ✅ ALL CLOSED** — F3 (multi-VM asset spawning), F4 (noVNC console), F5 (flags + scoring), F6 (multi-team exercises + leaderboard), F7 (range templates + reset), F8 (SOC view + SSE telemetry).
-> **§17 — Roadmap (post-§15) ✅ REVISED** — five final-product pillars (R1 Redis multi-worker, F9 DrillConsole consolidation, F10 onboarding wizard, F11 debrief artifact, F12 product packaging). Detail in §18.
+> **§17 — Roadmap (post-§15) ✅ CLOSED** — five final-product pillars (R1 Redis multi-worker, F9 DrillConsole consolidation, F10 onboarding wizard, F11 debrief artifact, F12 product packaging). **5 of 5 SHIPPED** (commits listed in §18).
 > **§7 — Drill Lifecycle** ✅ UPDATED — replaced aspirational `DRAFT→SCHEDULED→PROVISIONING→LIVE` flow with the actual shipped state machines (Run: pending→running→terminal; Exercise: idle→live→ended→archived).
 > `make preflight` 9/9 READY. **431 root + 428 API = 859 tests passing** (3 pre-existing unrelated CLI auth failures).
 > See **[docs/TEST-PRODUCT.md](TEST-PRODUCT.md)** for L1/L2/L3 "test product" criteria and ETA per level; **§15 (below)** for the cyber-range roadmap that sits on top of L3.
@@ -939,7 +939,7 @@ uvicorn workers.
 | **F9** | **DrillConsole consolidation** — embed LeaderboardCard + SocViewCard inside the live-drill view | UX | ~3 h, 3 commits | Today the operator flips between Observe (DrillConsole) and Admin (Leaderboard) tabs during a live drill. Consolidating both into the DrillConsole turns the Observe tab into the single live-drill screen. Biggest demo-quality win. |
 | **F10** | **Onboarding wizard** — 4-step first-time UX (bootstrap admin → pick scenario → form team → launch drill) | UX | ~4 h, 3 commits ✅ SHIPPED | `tools/issue_token.py` is fine for ops but ugly for first impressions. An in-portal wizard delegates to the existing API but presents a guided flow. Makes `make demo` a real product experience. |
 | **F11** | **Drill debrief artifact** — `GET /runs/{id}/debrief.md` returns a markdown play-by-play (per-team score, per-flag timing, pivot timeline, detection timeline, lessons-learned placeholder) | UX | ~3 h, 2 commits ✅ SHIPPED | Closes the "what just happened?" loop for leadership. The JSON after-action report is already there; F11 adds a human-readable sibling for hand-off. |
-| **F12** | **Product packaging** — `README.md` with architecture diagram + screenshot of DrillConsole + 5-min walkthrough; `tools/demo.sh --record` produces a captured walkthrough; production-grade `docker-compose.production.yaml` (TLS termination, Authentik prod config); versioned release notes | UX | ~5 h, 3 commits | The outer shell. The platform is functional; this turns it into something you can hand to a customer. |
+| **F12** | **Product packaging** — `README.md` with architecture diagram + screenshot of DrillConsole + 5-min walkthrough; `tools/demo.sh --record` produces a captured walkthrough; production-grade `docker-compose.production.yaml` (TLS termination, Authentik prod config); versioned release notes | UX | ~5 h, 3 commits ✅ SHIPPED | The outer shell. The platform is functional; this turns it into something you can hand to a customer. |
 
 **Priority order (operator impact ÷ effort):**
 
@@ -951,10 +951,10 @@ uvicorn workers.
 4. **F10** — onboarding UX (closes the "first-time user" gap).
 5. **F12** — packaging (the demo outer shell).
 
-**Total effort to shippable product:** ~18 h, ~13 commits. **4
-of 5 pillars shipped: F9 (DrillConsole consolidation), R1 (Redis
-multi-worker), F11 (drill debrief), F10 (onboarding wizard).**
-Remaining: F12 (product packaging).
+**Total effort to shippable product:** ~18 h, ~13 commits. **5
+of 5 pillars shipped:** F9 (DrillConsole consolidation), R1 (Redis
+multi-worker), F11 (drill debrief), F10 (onboarding wizard),
+F12 (product packaging). **§18 closed.**
 
 **Deprecation:** the previously-planned R2 (light theme + mobile
 + keyboard shortcuts) and R3-R7 (coaching / replay / bookings /
@@ -963,11 +963,11 @@ backlog). The 5 pillars above are the ones that turn div:ide
 into a final product; everything else is operator quality-of-life
 that can ship in any order afterward.
 
-**My pick (next plan): F12 — Product packaging.** F9 + R1 + F11
-+ F10 shipped (F9 commits `cbd181e` + `aeba832` + `2004e83`; R1
-commits `19d5cce` + `86020ef`; F11 commits `3683480` + `64256e1`;
-F10 commits `2ab897a` + `a8db813`). F12 closes the loop with
-README + demo walkthrough + production docker-compose.
+**My pick (next plan):** **§18 closed.** All five final-product
+pillars shipped. The next move is §19 backlog items (light
+theme / coaching / bookings / multi-tenant / marketplace /
+replay UI) or "versioned release notes" (F12.3 had that on
+the to-do list). Operator chooses.
 
 ---
 
@@ -1131,33 +1131,66 @@ under the 280 KB budget). `make verify-bundle` passes.
 
 ### 18.5 F12 — Product packaging
 
-Status: planned.
+Status: SHIPPED (F12.1 + F12.2 + F12.3, commits `f59abb5` +
+`4f7b9fd` + `eaeb2ba`). All five final-product pillars closed.
 
-Commits (3):
+What landed:
 
-  1. **F12.1** — `README.md` rewrite: architecture diagram,
-     feature list, "5-minute first drill" walkthrough, link
-     to `docs/SECTION-9-INTEGRATION.md` + `DEMO.md`.
-  2. **F12.2** — `tools/demo.sh --record` produces a markdown
-     walkthrough by hitting the API in sequence and capturing
-     curl output + JSDOM render snippets. Writes
-     `examples/demo-output.md`.
-  3. **F12.3** — `docker-compose.production.yaml` (Traefik with
-     Let's Encrypt, Authentik in prod mode, Redis required,
-     production logging). `docs/SECTION-12-PRODUCTION.md`.
+  1. **F12.1** (`f59abb5`) — `README.md` rewrite. The previous
+     README referenced "Phase 0/1/2" and "L1 9/9 ✅" as future
+     work while in reality every plan had shipped. New README
+     has: status banner, feature list, **5-minute "first drill"
+     walkthrough** (mirrors the F10 wizard), "What's in the
+     box" tree, production-deployment section, 23-entry
+     documentation index, ASCII architecture diagram.
+  2. **F12.2** (`4f7b9fd`) — `tools/demo.sh --record` captures
+     a markdown walkthrough (curl /healthz + /scenarios +
+     /auth/login + /drills + /drills/{id}/report + /debrief.md)
+     to `examples/demo-output.md`. The captured file is a
+     product artifact -- the operator can paste snippets into
+     leadership emails or `pandoc` to PDF.
+  3. **F12.3** (`eaeb2ba`) — `deploy/docker-compose.production.yaml`
+     (332 lines). Production-grade Compose with multi-worker
+     uvicorn (4 workers), Traefik + Let's Encrypt, Authentik
+     prod mode, Redis AOF, JSON logging, resource limits,
+     tight healthchecks, all secrets via env (no defaults).
+     Runbook in `docs/SECTION-12-PRODUCTION.md`.
 
-### 18.6 §18 closure (target)
+Net: -241 / +286 lines (README); +193 (demo.sh + sample
+output); +567 (production compose + runbook).
 
-After all five pillars ship:
+Bundle unchanged (F12 is docs + deploy, no portal code). Test
+count unchanged (F12 is docs + deploy, no new code paths).
+Full F8 + F9 + R1 + F10 + F11 regression: 158 passed, 1
+skipped, 0 failed.
 
-  * ~900 tests passing (current 891 + ~10 for F12).
-  * Portal bundle ~270 KB (currently 275.76 KB after F10;
-    4.24 KB headroom under the 280 KB budget).
-  * `make verify` includes the bundle-budget gate (F9.3 done)
-    + the multi-worker SSE test (R1).
-  * `README.md` walkthrough reproducible from a clean clone
-    on a fresh Proxmox host.
-  * div:ide ships as a self-contained cyber-range product.
+**5 of 5 final-product pillars shipped:** F9 + R1 + F11 + F10 +
+F12. div:ide is now a self-contained cyber-range product --
+installable via `make up`, operable through the in-portal
+wizard, demonstrable via `tools/demo.sh --record`, and
+production-deployable via `docker-compose.production.yaml`.
+
+### 18.6 §18 closure (DONE)
+
+All five pillars shipped (commits listed in §17 / §18.5).
+Final state:
+
+  * 891 tests passing (F12 was docs-only; no test delta).
+  * Portal bundle 275.76 KB (4.24 KB under the 280 KB ceiling;
+    enforced by `make verify-bundle`).
+  * `make verify` runs the 5-step gate: lint + test +
+    preflight + smoke + bundle-budget.
+  * `README.md` walkthrough reproducible from a clean clone.
+  * `tools/demo.sh --record` captures a leadership-ready
+    markdown artifact.
+  * `deploy/docker-compose.production.yaml` brings up a
+    production-grade stack with TLS + multi-worker + Redis +
+    Authentik prod.
+
+**div:ide ships as a self-contained cyber-range product.**
+All five §17 final-product pillars (F9 + R1 + F11 + F10 + F12)
+landed. §18 is closed. Next move is §19 backlog items or
+release-note versioning.
 
 ---
 
