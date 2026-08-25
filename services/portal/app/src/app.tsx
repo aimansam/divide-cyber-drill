@@ -5,6 +5,7 @@ import { RunLifecycleCard } from "@/components/portal/run-lifecycle-card";
 import { PveOpsCard } from "@/components/portal/pve-ops-card";
 import { ScenarioAuthoringCard } from "@/components/portal/scenario-authoring-card";
 import { SignInCard } from "@/components/portal/sign-in-card";
+import { ResetPasswordCard } from "@/components/portal/reset-password-card";
 import { OnboardingWizard } from "@/components/portal/onboarding-wizard";
 import { TopNav, type ViewKey } from "@/components/portal/top-nav";
 import { DashboardCard } from "@/components/portal/dashboard-card";
@@ -30,6 +31,9 @@ import { probeSetup } from "@/lib/api";
  * Tab visibility is derived from the role via the same matrix
  * the card composition used:
  *
+ *   * anonymous + URL has ?sub=&token= → ResetPasswordCard
+ *                                           (F-reset-ux: clicked
+ *                                           a magic link)
  *   * anonymous → SignInCard (returning deployment) or
  *                 OnboardingWizard (empty deployment). Determined
  *                 on mount by GET /api/v1/auth/setup probe.
@@ -47,6 +51,14 @@ import { probeSetup } from "@/lib/api";
  *   - probe error       → SignInCard (safe fallback; wizard link at bottom)
  *   This mirrors TryHackMe / HackTheBox: sign-in is the default landing
  *   page. First-time setup is discovered only when the DB is empty.
+ *
+ * Password reset UX (F-reset-ux):
+ *   Magic links arrive as /portal/app/#/?sub=<sub>&token=<token>.
+ *   On render we read the URL hash; if both sub + token are
+ *   present, we mount ResetPasswordCard instead of SignInCard
+ *   (the sign-in card's normal flow takes a back seat). On a
+ *   successful reset the card clears the hash and lands on the
+ *   regular sign-in form.
  */
 
 const VALID_VIEWS = [
@@ -64,6 +76,23 @@ const VALID_VIEWS = [
 //   "wizard"   — show OnboardingWizard (needs_setup=true)
 type AnonView = "probing" | "signin" | "wizard";
 
+// F-reset-ux: parse a magic-link URL into the (sub, token) pair.
+// The URL format is ``/portal/app/#/?sub=<sub>&token=<token>`` --
+// the query string lives in the URL fragment because we use a
+// hash-based router. Returning ``null`` if either is missing.
+function readResetParamsFromHash(): { sub: string; token: string } | null {
+  if (typeof window === "undefined") return null;
+  const hash = window.location.hash;
+  // ``/#/...?sub=foo&token=bar`` -> fragment is ``/?sub=foo&token=bar``.
+  const qIndex = hash.indexOf("?");
+  if (qIndex === -1) return null;
+  const params = new URLSearchParams(hash.slice(qIndex + 1));
+  const sub = params.get("sub");
+  const token = params.get("token");
+  if (!sub || !token) return null;
+  return { sub, token };
+}
+
 export default function App() {
   const [pickedScenario, setPickedScenario] = useState<Scenario | null>(null);
   const [pickedRun, setPickedRun] = useState<RunRow | null>(null);
@@ -73,6 +102,14 @@ export default function App() {
   // F-signin-ux: probe on mount so returning operators land on the
   // sign-in form immediately instead of digging through the wizard.
   const [anonView, setAnonView] = useState<AnonView>("probing");
+
+  // F-reset-ux: read magic-link params from the URL hash on mount
+  // and on hashchange. If present, the app renders ResetPasswordCard
+  // regardless of probe state -- the user clicked a reset link,
+  // so we want them to land on the reset form immediately.
+  const [resetParams, setResetParams] = useState(() =>
+    readResetParamsFromHash(),
+  );
 
   useEffect(() => {
     // Only probe when there's no token (me===null after useMe settles).
@@ -90,6 +127,27 @@ export default function App() {
       });
     return () => { cancelled = true; };
   }, []);
+
+  // F-reset-ux: re-read magic-link params on hashchange. The hash
+  // can be mutated externally (e.g. by another script clearing it
+  // after a successful reset) so we keep state in sync with the URL.
+  useEffect(() => {
+    function onHashChange() {
+      setResetParams(readResetParamsFromHash());
+    }
+    window.addEventListener("hashchange", onHashChange);
+    return () => window.removeEventListener("hashchange", onHashChange);
+  }, []);
+
+  // F-reset-ux: clear the hash after a successful reset. We keep
+  // the SignInCard mount path the same so the user lands on the
+  // sign-in form to type their new password.
+  function onResetComplete() {
+    // Strip the query string but keep the hash router happy
+    // (a bare ``#/`` keeps the active view at "dashboard").
+    window.location.hash = "#/";
+    setResetParams(null);
+  }
 
   function onPickRunFromDashboard(runId: number) {
     // The Dashboard's "Recent runs" list jumps the operator
@@ -115,12 +173,23 @@ export default function App() {
              "wizard"  → OnboardingWizard (empty deployment, needs setup)
              me===null && loading  → useMe still resolving (/me in-flight)
         ─────────────────────────────────────────────────────────────── */}
-        {!me && (loading || anonView === "probing") && (
+        {!me && (loading || anonView === "probing") && !resetParams && (
           <p className="text-sm italic text-muted-foreground">
             Identifying…
           </p>
         )}
-        {!me && !loading && anonView === "signin" && (
+        {!me && !loading && resetParams && (
+          // F-reset-ux: user clicked a magic link. Render the reset
+          // card regardless of probe state -- they came in via a
+          // direct URL, not the normal landing path. ``anonView``
+          // is irrelevant here.
+          <ResetPasswordCard
+            sub={resetParams.sub}
+            token={resetParams.token}
+            onReset={onResetComplete}
+          />
+        )}
+        {!me && !loading && anonView === "signin" && !resetParams && (
           // F-signin-ux: returning deployment. Admin exists — show
           // the sign-in form directly, no wizard in the way.
           <SignInCard
@@ -135,7 +204,7 @@ export default function App() {
             }}
           />
         )}
-        {!me && !loading && anonView === "wizard" && (
+        {!me && !loading && anonView === "wizard" && !resetParams && (
           // F10.3: empty deployment. Guide the operator through
           // creating the first admin + launching their first drill.
           <OnboardingWizard
@@ -146,7 +215,6 @@ export default function App() {
               });
               setActiveView("observe");
             }}
-            onSignInInstead={() => setAnonView("signin")}
           />
         )}
         {me &&

@@ -6,6 +6,16 @@ explicit user sign-off (see docs/PLAN.md §13 and the staging plan).
 
 Read-only endpoints land first (Stage 2). Write endpoints (clone/start/stop)
 require token promotion to PVEVMAdmin and are scheduled for Stage 3+.
+
+Resolution order (day-1 web setup, see ``services/pve_config.py``):
+
+    1. ``pve_config`` row in DB    (set by ``POST /api/v1/admin/pve-config``)
+    2. ``PROXMOX_*`` env vars      (bootstrap / dev fallback)
+
+The DB layer is hydrated at app startup by ``hydrate_proxmox_from_db``
+(see ``main.py:lifespan``); writes via ``POST /admin/pve-config`` call
+``reload_proxmox_from_db`` to invalidate the local cache so the next
+PVE call picks up the new credentials without a container restart.
 """
 from __future__ import annotations
 
@@ -26,7 +36,45 @@ class ProxmoxAPIError(RuntimeError):
     """Raised when a Proxmox API call fails (network, auth, parse, etc.)."""
 
 
+# In-process overlay for the PVE config. Hydrated from the ``pve_config``
+# DB row at startup and on every successful ``POST /admin/pve-config``.
+# Stored as a dict (not the ORM object) so callers can use it without an
+# open session. ``None`` means "no overlay, use env vars".
+#
+# This is intentionally simple. We don't need an LRU -- one row, one
+# cache entry, refreshed at known points. Stale-cache risk is bounded
+# by the explicit ``reload_proxmox_from_db`` call in the admin router.
+_DB_OVERLAY: dict[str, Any] | None = None
+
+
 def _validate_config() -> tuple[str, str, str]:
+    """Resolve PVE creds from the DB overlay if present, else env.
+
+    The DB overlay takes precedence: once an admin POSTs
+    ``/api/v1/admin/pve-config``, the env-var fallback is dead until
+    the operator DELETEs the row. This is intentional -- the wizard
+    is the canonical setup path; env is only for the bootstrap case
+    where the wizard hasn't been reached yet.
+    """
+    if _DB_OVERLAY is not None:
+        host = (_DB_OVERLAY.get("host") or "").strip()
+        if "://" in host:
+            host = host.split("://", 1)[1]
+        host = host.rstrip("/")
+        token_full = (_DB_OVERLAY.get("token_id") or "").strip()
+        token_name = token_full.split("!", 1)[1] if "!" in token_full else token_full
+        user = (_DB_OVERLAY.get("user") or "").strip()
+        secret = _DB_OVERLAY.get("token_secret") or ""
+        if not host:
+            raise ProxmoxNotConfiguredError("pve_config.host is empty")
+        if not user or not token_name or not secret:
+            raise ProxmoxNotConfiguredError(
+                "pve_config.user, token_id, and token_secret are all required"
+            )
+        return host, user, token_name, secret
+
+    # Fall back to env-var driven config. Kept exactly as before so
+    # deployments that never adopted the wizard keep working.
     cfg = settings.proxmox
     raw_host = (cfg.host or "").strip()
     if not raw_host:
@@ -52,14 +100,97 @@ def _validate_config() -> tuple[str, str, str]:
 def get_proxmox_client() -> ProxmoxAPI:
     """Return a cached ProxmoxAPI instance. Lazy — only validates on first call."""
     host, user, token_name, token_secret = _validate_config()
+    # Resolve verify_ssl + port + node from the same source as the
+    # host/user/token (DB overlay first, env fallback). Previously this
+    # hard-coded ``settings.proxmox`` -- now we honor the overlay so
+    # ``POST /admin/pve-config`` actually changes runtime behavior.
+    if _DB_OVERLAY is not None:
+        port = _DB_OVERLAY.get("port") or 8006
+        verify_ssl = bool(_DB_OVERLAY.get("verify_ssl", False))
+    else:
+        port = settings.proxmox.port
+        verify_ssl = settings.proxmox.verify_ssl
     return ProxmoxAPI(
         host=host,
-        port=settings.proxmox.port,
+        port=port,
         user=user,
         token_name=token_name,
         token_value=token_secret,
-        verify_ssl=settings.proxmox.verify_ssl,
+        verify_ssl=verify_ssl,
         backend="https",
+    )
+
+
+def get_configured_node() -> str | None:
+    """Return the node name from the active source, or None.
+
+    Used by runners when they can't auto-detect the node (e.g. when
+    the API is configured for a single-node cluster). Same precedence
+    rule as the rest of the file: DB overlay first, env fallback.
+    """
+    if _DB_OVERLAY is not None:
+        return _DB_OVERLAY.get("node")
+    return settings.proxmox.node
+
+
+# ---------------------------------------------------------------------------
+# Overlay lifecycle (called from main.py lifespan and admin router).
+# ---------------------------------------------------------------------------
+
+
+def set_db_overlay(overlay: dict[str, Any] | None) -> None:
+    """Install (or clear) the in-memory PVE config overlay.
+
+    Pass a dict like ``{"host": ..., "port": ..., "user": ..., ...}`` to
+    activate DB-driven resolution. Pass ``None`` to revert to env vars.
+
+    Also clears the ``get_proxmox_client`` LRU cache and the TTL cache
+    so the next PVE call rebuilds from the new overlay. This is the
+    single source of truth for "force a fresh connect" -- every code
+    path that mutates the DB overlay goes through here.
+    """
+    global _DB_OVERLAY
+    _DB_OVERLAY = overlay
+    get_proxmox_client.cache_clear()  # type: ignore[attr-defined]
+    clear_cache()
+
+
+async def hydrate_proxmox_from_db() -> None:
+    """Read the ``pve_config`` row and install it as the overlay.
+
+    Called once at API startup. If the table doesn't exist yet (fresh
+    install, pre-migration) or the row is missing (operator hasn't
+    completed the wizard), this is a no-op -- env vars are the
+    bootstrap fallback.
+
+    We import the DB layer lazily to keep ``services/proxmox.py``
+    import-safe (Phase 0 -- the API boots before Postgres is up).
+    """
+    try:
+        from app.db.session import session_scope
+        from app.services.pve_config import get_config
+    except ImportError:
+        return
+    try:
+        async with session_scope() as db:
+            row = await get_config(db)
+    except Exception:
+        # Best-effort. If the DB is unreachable at boot, we still
+        # want the API to come up; the wizard will retry on POST.
+        return
+    if row is None:
+        set_db_overlay(None)
+        return
+    set_db_overlay(
+        {
+            "host": row.host,
+            "port": row.port,
+            "user": row.user,
+            "token_id": row.token_id,
+            "token_secret": row.token_secret,
+            "verify_ssl": row.verify_ssl,
+            "node": row.node,
+        }
     )
 
 

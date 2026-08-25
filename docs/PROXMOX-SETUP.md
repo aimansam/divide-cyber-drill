@@ -24,19 +24,39 @@ In the Proxmox web UI:
 3. Do **not** set a password — we'll use API token auth only.
 4. Click **Add**.
 
-## 2. Grant read-only permissions
+## 2. Grant permissions
 
-1. **Datacenter → Permissions → Add → User Permission**
-2. Fill in:
-   - **User / Group:** `divide@pam`
-   - **Path:** `/`
-   - **Role:** `PVEAuditor`  ← built-in read-only role
-   - **Propagate:** Yes
-3. Click **Add**.
+F-pve-bridge-wizard (SDN variant) needs the PVE token to **create** Linux
+bridges via the SDN API. That requires the **`SDN.Allocate`**
+privilege, which is **not** included in PVE's built-in `PVEAuditor`
+role. We therefore grant two roles: the read-only `PVEAuditor` (for
+probes, health checks, etc.) plus a custom role that bundles the
+minimum writes the wizard needs.
 
-`PVEAuditor` grants access to read-only APIs (version, nodes, storage, VM
-config). It does **not** allow creating, modifying, or deleting VMs — exactly
-what we want at this stage.
+**Datacenter → Permissions → Add → User Permission** — grant twice
+(each entry needs its own line; PVE does not have a multi-role
+selector in the GUI):
+
+| # | User / Group | Path | Role | Propagate |
+|---|---|---|---|---|
+| 1 | `divide@pam` | `/` | `PVEAuditor` | Yes |
+| 2 | `divide@pam` | `/sdn` | `SDN.Allocate` | No |
+
+Or, equivalently, via `pveum` on the PVE host:
+
+```bash
+pveum aclmod divide@pam -role PVEAuditor -path / -propagate 1
+pveum aclmod divide@pam -role SDN.Allocate -path /sdn
+```
+
+`PVEAuditor` alone is **insufficient** for the wizard's Step 0 — it lets
+the API probe PVE and list existing Vnets, but it returns 403 when
+the wizard tries to `POST /cluster/sdn/{zones,vnets}`. The wizard
+detects this and renders the exact `pveum aclmod` line you need.
+
+If you want to skip the wizard entirely and use the env-var
+fallback path (§6), only the first row is required — the env-var path
+never writes to PVE.
 
 ## 3. Create the API token
 
@@ -52,7 +72,141 @@ what we want at this stage.
 The token secret is a UUID like `4ea3414f-d3a4-47b5-a2ed-19018f416cc0`. It is
 **not recoverable** — if you lose it, delete the token and create a new one.
 
-## 4. Fill in `deploy/.env`
+## 4. Day-1 setup: PVE bridge provisioning
+
+The div:ide runner allocates one Linux bridge per
+`spec.networks[]` declaration, starting at `vmbr100`. As of
+F-pve-bridge-wizard (SDN variant), the wizard creates these
+purely via PVE's SDN API — no SSH, no editing
+`/etc/network/interfaces`, no `ifreload`.
+
+The wizard's Step 0:
+
+1. **Probe PVE** (`GET /cluster/sdn/{zones,vnets}`) to see what's
+   already configured.
+2. **Create the `divide` zone** (`POST /cluster/sdn/zones`) if it's
+   not already there. A Simple zone that rides on `vmbr0` and
+   creates one Linux bridge per VNet on each node.
+3. **Create one VNet per bridge** (`POST /cluster/sdn/vnets`). The
+   VNet name becomes the iface name on every node (so VNet
+   `vmbr100` shows up as `vmbr100` in `ip link` output, identical
+   to a hand-crafted bridge).
+4. **Wait for propagation** (~1–3s) by polling
+   `GET /nodes/{n}/network`. Once every expected bridge is in
+   `UP` state, the wizard advances.
+
+The wizard auto-skips Step 0 when all expected bridges already
+exist on PVE, so it's safe to refresh the page.
+
+### PVE 8.1 / PVE 9
+
+PVE 8.1+ ships the SDN controller by default; PVE 9 always has it.
+No additional package install is needed.
+
+### Cluster-wide propagation
+
+A Simple zone's VNet shows up as a Linux bridge on **every node in
+the cluster**. div:ide's runner is pinned to one node per drill
+(configurable), but creating the bridge cluster-wide is harmless
+and matches PVE's recommended layout.
+
+### Rollback
+
+To remove a VNet the wizard created, run on the PVE host:
+
+```bash
+pvesh delete /cluster/sdn/vnets/vmbr100 -vnet vmbr100
+# or via the web UI: Datacenter → SDN → Vnets → delete
+```
+
+To remove the entire zone (and all its Vnets at once):
+
+```bash
+pvesh delete /cluster/sdn/zones/divide -zone divide
+```
+
+The wizard does **not** create any `/etc/network/interfaces` content
+of its own — there is nothing to roll back from a `divide.conf`
+drop-in file because no such file is written.
+
+To roll back: SSH into PVE, `rm /etc/network/interfaces.d/divide.conf`, then `ifreload -a`.
+
+## 5. PVE connection: web setup (preferred)
+
+**F-pve-config-ui + F-pve-bridge-wizard (SDN variant)**: as of these
+releases, PVE host + token AND the Linux bridges can all be set up
+from the browser. The API probes PVE with the supplied credentials
+before persisting (so typos surface immediately), then creates the
+Linux bridges via PVE's Software-Defined Networking API. No SSH
+session to PVE, no editing `/etc/network/interfaces`, no
+container restart.
+
+Flow:
+
+1. Open the portal: `http://localhost:8000/portal/app/`.
+2. The wizard's **first** step asks for PVE host + user + token. Pre-fills
+   the user + token ID with the values you created in §1-3.
+3. Click **Save + connect**. The API calls `GET /api2/json/version`
+   on PVE; if it returns, the credentials are written to the `pve_config`
+   table. If it returns 401/403, the wizard shows the actual PVE error.
+4. The wizard advances to **Step 0: PVE bridges**. It pre-flights PVE
+   via `GET /api/v1/admin/pve-sdn-status` to confirm the token has
+   `SDN.Allocate`. If it doesn't, the wizard renders the literal PVE
+   error + a copy-pasteable `pveum aclmod` line (you granted this in §2).
+5. Click **Set up PVE bridges**. The API calls
+   `POST /cluster/sdn/zones` (one Simple zone named `divide`) and
+   `POST /cluster/sdn/vnets` (one VNet per F3 bridge: `vmbr100`,
+   `vmbr101`, ...). PVE auto-propagates each VNet as a Linux bridge
+   on every node in the cluster. No reload command needed.
+6. The wizard advances to admin bootstrap, scenario pick, team form,
+   launch.
+
+The endpoint is also exposed for the admin UI / curl:
+
+```bash
+TOKEN=$(curl -s -X POST http://localhost:8000/api/v1/auth/login \
+    -H 'Content-Type: application/json' \
+    -d '{"sub":"admin","password":"..."}' | jq -r .token)
+
+# GET shows the active config (DB row if set, else env-var fallback)
+curl -s http://localhost:8000/api/v1/admin/pve-config \
+    -H "X-Divide-Token: $TOKEN" | jq
+
+# POST a new config (probes PVE first; commits only on success)
+curl -s -X POST http://localhost:8000/api/v1/admin/pve-config \
+    -H "X-Divide-Token: $TOKEN" -H 'Content-Type: application/json' \
+    -d '{
+        "host":"https://192.168.0.10",
+        "user":"divide@pve@pam",
+        "token_id":"divide@pve@pam!drill-token",
+        "token_secret":"<uuid-from-§3>",
+        "verify_ssl":false,
+        "node":"pve"
+    }'
+
+# DELETE to revert to the deploy/.env fallback (escape hatch)
+curl -s -X DELETE http://localhost:8000/api/v1/admin/pve-config \
+    -H "X-Divide-Token: $TOKEN"
+```
+
+`POST /admin/pve-config` **probes PVE before persisting** — a wrong
+host, token, or user permission surfaces as a 502 with the actual PVE
+error message. No DB write happens on failure, so a typo costs
+nothing.
+
+The token secret is stored plain-text in the `pve_config` row
+(same risk profile as `users.password_hash`). It is **never returned**
+from the API; the GET endpoint masks it as `"***"`.
+
+Resolution order: `pve_config` row in DB (set via wizard or curl) >
+`PROXMOX_*` env vars (see §6 below). Once a DB row exists, the
+env-var fallback is dead until `DELETE /admin/pve-config` is called.
+
+## 6. PVE connection: env-var fallback (alternative)
+
+If you can't or don't want to use the web setup (e.g. provisioning is
+done by automation that already has the env-var contract), edit
+`deploy/.env` and the API will pick up the values on startup:
 
 ```env
 PROXMOX_HOST=https://192.168.0.10    # your PVE host (no trailing slash)
@@ -93,7 +247,7 @@ curl -sk -w "\nHTTP %{http_code}\n" \
 # {"data":{"version":"9.1.7",...}} → HTTP 200
 ```
 
-## 5. Validate
+## 7. Validate
 
 Restart the stack and call the API:
 
@@ -131,7 +285,7 @@ curl -sk \
 
 If curl returns `401` but the header looks right, regenerate the token.
 
-## 6. Promote later (Stage 3+)
+## 8. Promote later (Stage 3+)
 
 When we add write endpoints (clone/start/stop/delete VMs):
 
@@ -143,7 +297,7 @@ When we add write endpoints (clone/start/stop/delete VMs):
 This way the token can write VMs but cannot manage storage pools, users, or
 cluster config.
 
-## 7. Runner adapter selection (Stage 5)
+## 9. Runner adapter selection (Stage 5)
 
 `RealProxmoxAdapter` is shipped in `services/api/app/runners/real_adapter.py`
 and the runner factory (`build_runner()` in `services/api/app/runners/runner.py`)
@@ -168,7 +322,7 @@ docker compose -f deploy/docker-compose.yml --env-file deploy/.env run --rm api 
     python -c "from app.core.config import settings; print(repr(settings.proxmox))"
 ```
 
-## 8. Promote for write operations (Stage 6+)
+## 10. Promote for write operations (Stage 6+)
 
 Read-only endpoints (Stage 2) work with `PVEAuditor`. Write operations
 (clone, start, stop, destroy) need a stronger role. Run on the PVE host:

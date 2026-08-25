@@ -48,9 +48,12 @@ The platform ships with four reference scenarios:
 
 ## Five-minute "first drill" walkthrough
 
-The platform ships with a 4-step onboarding wizard. A brand-new
+The platform ships with a 6-step onboarding wizard. A brand-new
 operator with a fresh deployment goes from "empty database" to
-"live drill running" in ~2 minutes, all in the browser.
+"live drill running" entirely in the browser — no SSH, no editing
+`deploy/.env`, no editing `/etc/network/interfaces`. PVE host +
+token and the Linux bridges the runner needs are all set up via
+the wizard.
 
 ### 1. Install
 
@@ -70,9 +73,23 @@ make up             # starts the stack (waits for /healthz)
 
 Browse to `http://localhost:8000/portal/app/`.
 
-The first time you visit, you see the **Onboarding Wizard**
-(4 steps). No token, no users yet — the wizard walks you
+The first time you visit, you see the **Onboarding Wizard**.
+No token, no users, no PVE bridges yet — the wizard walks you
 through:
+
+```
+Step -1: PVE credentials  POST /api/v1/admin/pve-config
+Step  0: PVE bridges       POST /api/v1/admin/pve-setup-bridges (PVE SDN)
+Step  1: Bootstrap admin   POST /api/v1/auth/setup
+Step  2: Pick scenario     GET  /api/v1/scenarios
+Step  3: Form team         POST /exercises + POST /auth/users
+Step  4: Launch drill      POST /api/v1/drills (single-team)
+```
+
+Steps -1 and 0 use PVE's Software-Defined Networking API
+(`/cluster/sdn/{zones,vnets}`) — no SSH, no editing
+`/etc/network/interfaces`, no `ifreload`. The wizard needs a PVE
+token with `SDN.Allocate` permission (see `docs/PROXMOX-SETUP.md §2`).
 
 ```
 Step 1: Bootstrap admin      POST /api/v1/auth/setup

@@ -38,6 +38,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.auth import Role, TokenData, require_role
 from app.db.session import get_session
 from app.services import admin as admin_svc
+from app.services import pve_config as pve_config_svc
 from app.services.proxmox import ProxmoxAPIError, ProxmoxNotConfiguredError, list_storage
 
 log = structlog.get_logger()
@@ -688,3 +689,173 @@ async def post_pve_setup_bridges(
             f"after {sdn.propagation_wait_s:.1f}s"
         ),
     )
+# ---------------------------------------------------------------------------
+# PVE runtime config (day-1 web setup; precedes Step0 in the wizard)
+# ---------------------------------------------------------------------------
+#
+# These three endpoints let the onboarding wizard collect the PVE host /
+# user / token from the browser instead of requiring ``deploy/.env``
+# edits + container restart. ``POST`` probes PVE first (so a typo is
+# surfaced before commit), then writes the singleton row in
+# ``pve_config``. The very next PVE call (admin probe, run start,
+# template upload, etc.) honors the new credentials because the
+# admin router calls ``set_db_overlay`` after the commit, which
+# drops both ``get_proxmox_client``'s LRU cache and the TTL cache.
+#
+# ``GET`` returns either the DB row (token_secret masked) or the env-var
+# fallback if no row exists, with ``source`` set accordingly so the
+# wizard can render a banner.
+#
+# ``DELETE`` drops the DB row and reverts to env-var resolution. Useful
+# as an escape hatch: an operator who wants to "go back to .env" can do
+# it from the admin UI without touching the host.
+
+
+class PveConfigPayload(BaseModel):
+    """Request body for ``POST /api/v1/admin/pve-config``.
+
+    The token_secret is in the clear because we need to hand it to
+    proxmoxer; the response always masks it. We never log it.
+    """
+
+    host: str = Field(..., min_length=1, max_length=255, description="e.g. https://192.168.0.10")
+    port: int = Field(default=8006, ge=1, le=65535)
+    user: str = Field(..., min_length=1, max_length=255, description="e.g. divide@pve@pam")
+    token_id: str = Field(..., min_length=1, max_length=255, description="e.g. divide@pve@pam!drill-token")
+    token_secret: str = Field(..., min_length=1, max_length=255)
+    verify_ssl: bool = Field(default=False, description="False for self-signed certs (default for home/lab PVE)")
+    node: str | None = Field(default=None, max_length=64, description="Optional node name; auto-detected when omitted")
+
+
+@router.get(
+    "/pve-config",
+    summary="Get the active PVE connection config (DB or env).",
+    description=(
+        "Returns the singleton PVE config the API is currently using. "
+        "If a row exists in `pve_config`, that's returned with "
+        "`source=db` and `token_secret` masked as `***`. If no row "
+        "exists, the env-var fallback is returned with `source=env` "
+        "and `token_secret=***` (we don't have the env value here)."
+    ),
+)
+async def get_pve_config(
+    db: Annotated[AsyncSession, Depends(get_session)],
+) -> dict[str, Any]:
+    row = await pve_config_svc.get_config(db)
+    if row is not None:
+        return row.to_public_dict()
+    return pve_config_svc.env_source_dict()
+
+
+@router.post(
+    "/pve-config",
+    summary="Write (or replace) the PVE runtime config.",
+    description=(
+        "Probes PVE with the supplied credentials first; commits only "
+        "if the probe succeeds. After commit, the in-process overlay "
+        "is refreshed so the next PVE call picks up the new creds -- "
+        "no container restart required. Use `DELETE` to revert to the "
+        "env-var fallback."
+    ),
+)
+async def post_pve_config(
+    body: PveConfigPayload,
+    db: Annotated[AsyncSession, Depends(get_session)],
+    token: Annotated[TokenData, Depends(require_role(Role.ADMIN))],
+) -> dict[str, Any]:
+    """Validate, probe, persist, hydrate.
+
+    Status codes:
+      * 200 -- creds accepted, row written
+      * 400 -- validation failed (Pydantic or service-level)
+      * 502 -- PVE rejected the creds (probe-before-commit caught it)
+    """
+    # Write the new creds into the overlay so the probe uses them
+    # (without committing to the DB yet). If the probe fails the
+    # operator sees the actual PVE error and we abort -- no DB churn.
+    from app.services.proxmox import set_db_overlay
+
+    set_db_overlay(
+        {
+            "host": body.host,
+            "port": body.port,
+            "user": body.user,
+            "token_id": body.token_id,
+            "token_secret": body.token_secret,
+            "verify_ssl": body.verify_ssl,
+            "node": body.node,
+        }
+    )
+    from app.services.proxmox import ProxmoxAPIError, ProxmoxNotConfiguredError, get_version
+
+    try:
+        get_version()
+    except (ProxmoxNotConfiguredError, ProxmoxAPIError) as exc:
+        # Probe failed. Roll overlay back to None so the next call
+        # goes to env vars (whichever was active before). Better than
+        # leaving a partial overlay hanging around.
+        set_db_overlay(None)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"PVE rejected the supplied credentials: {exc}",
+        ) from exc
+    # Probe ok. Persist.
+    try:
+        row = await pve_config_svc.upsert_config(
+            db,
+            host=body.host,
+            port=body.port,
+            user=body.user,
+            token_id=body.token_id,
+            token_secret=body.token_secret,
+            verify_ssl=body.verify_ssl,
+            node=body.node,
+            updated_by=token.sub,
+        )
+    except pve_config_svc.PveConfigError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        ) from exc
+    log.info(
+        "pve_config.upsert",
+        host=body.host,
+        user=body.user,
+        token_id=body.token_id,
+        updated_by=token.sub,
+    )
+    return {
+        **row.to_public_dict(),
+        "probed": True,
+        "message": "PVE accepted the credentials. Wizard can advance.",
+    }
+
+
+@router.delete(
+    "/pve-config",
+    summary="Drop the PVE config row; revert to env-var resolution.",
+    description=(
+        "Useful for operators who want to 'go back to deploy/.env' "
+        "without touching the host. After delete, the API falls back "
+        "to the `PROXMOX_*` env vars on the next PVE call. No-op if "
+        "no row exists."
+    ),
+)
+async def delete_pve_config(
+    db: Annotated[AsyncSession, Depends(get_session)],
+) -> dict[str, Any]:
+    deleted = await pve_config_svc.delete_config(db)
+    # Refresh overlay so the next PVE call goes back to env.
+    from app.services.proxmox import set_db_overlay
+
+    set_db_overlay(None)
+    log.info("pve_config.delete", deleted=deleted)
+    return {
+        "deleted": deleted,
+        "message": (
+            "DB row deleted; API now resolves PVE creds from "
+            "PROXMOX_* env vars."
+            if deleted
+            else "No DB row to delete; API is already on env-var fallback."
+        ),
+    }

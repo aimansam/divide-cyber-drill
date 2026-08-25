@@ -61,10 +61,25 @@ import { EmptyState } from "./empty-state";
 import { ApiError, api, setToken } from "@/lib/api";
 import { emitTokenChange } from "@/lib/auth";
 import type { Scenario } from "./scenarios-card";
+import { Step0PveSetup } from "./step0-pve-setup";
+import { PveCredentialsStep } from "./pve-credentials-step";
 
 // ---------------------------------------------------------------- types
 
-type Step = 1 | 2 | 3 | 4;
+// F-pve-bridge-wizard: Step 0 is the new PVE bridge setup. The
+// existing 4 steps renumber to 1..4 (admin / scenario / team /
+// launch). Step 0 auto-skips when no bridges are needed (e.g.
+// when running against the mock adapter) or when they're all
+// already present on PVE.
+//
+// F-pve-config-ui: Step -1 is the very first step -- the PVE
+// credentials form (host + token). It runs BEFORE Step 0 and
+// auto-skips when the API already has a config row. The 5-step
+// indicator (PVE bridges / Bootstrap admin / Pick scenario /
+// Form team / Launch drill) stays the same; the credentials
+// step is a silent pre-flight that the operator only sees when
+// they haven't yet configured PVE.
+type Step = -1 | 0 | 1 | 2 | 3 | 4;
 
 interface ScenarioWithMeta extends Scenario {
   // F10.3 only renders the multi-team step for scenarios that
@@ -89,10 +104,6 @@ interface OnboardingWizardProps {
   /** Callback fired when the wizard launches the exercise.
    *  Parent (app.tsx) uses this to switch to the live view. */
   onLaunched: (exerciseId: number) => void;
-  /** Callback fired when the operator hits "admin exists,
-   *  sign in instead" on step 1. The parent (app.tsx) then
-   *  mounts SignInCard so the operator can paste credentials. */
-  onSignInInstead?: () => void;
 }
 
 // ---------------------------------------------------------------- helpers
@@ -128,9 +139,21 @@ async function setupFirstAdmin(
 }
 
 // ---------------------------------------------------------------- component
+//
+// F-signin-ux: app.tsx only mounts this wizard when the setup probe
+// returns needs_setup=true (i.e. the users table is empty). The
+// previous "admin already exists" amber callout inside step 1 was
+// dead code -- it could only ever fire if the wizard mounted AFTER
+// a different tab created an admin, which the probe catches. We
+// removed the adminExists state entirely in the F-auth-ux cleanup
+// so the wizard now strictly handles the empty-deployment path.
 
-export function OnboardingWizard({ onLaunched, onSignInInstead }: OnboardingWizardProps) {
-  const [step, setStep] = useState<Step>(1);
+export function OnboardingWizard({ onLaunched }: OnboardingWizardProps) {
+  // F-pve-config-ui: start at -1 (the PVE credentials pre-step). The
+  // component for that step calls onContinue() which advances to 0.
+  // If the API already has a config, the pre-step auto-advances via
+  // its own onMount effect, so the operator never sees a flicker.
+  const [step, setStep] = useState<Step>(-1);
   const [error, setError] = useState<string | null>(null);
 
   // Step 1 state: admin credentials.
@@ -139,9 +162,6 @@ export function OnboardingWizard({ onLaunched, onSignInInstead }: OnboardingWiza
   const [adminSubmitting, setAdminSubmitting] = useState(false);
   // When true, step 1 short-circuits to step 2 on render.
   const [setupDone, setSetupDone] = useState(false);
-  // When true, step 1 surfaces "admin already exists -- sign in
-  // instead" with a callback to the parent.
-  const [adminExists, setAdminExists] = useState(false);
 
   // Step 2 state: scenario catalog.
   const [scenarios, setScenarios] = useState<ScenarioWithMeta[]>([]);
@@ -192,13 +212,12 @@ export function OnboardingWizard({ onLaunched, onSignInInstead }: OnboardingWiza
       setStep(2);
       void loadScenarios();
     } catch (e: unknown) {
-      if (e instanceof ApiError && e.status === 409) {
-        // Admin already exists. Don't advance -- the operator
-        // needs to sign in instead. Show a callout with a
-        // callback that lets the parent mount SignInCard.
-        setAdminExists(true);
-        return;
-      }
+      // F-signin-ux: if POST /auth/setup returns 409 it means an
+      // admin was created between the probe and the form submit
+      // (rare race). The right UX is to surface the server's
+      // message and let the operator decide what to do; we don't
+      // try to be clever here because the wizard itself isn't
+      // supposed to render for non-empty deployments.
       const msg = e instanceof ApiError ? `HTTP ${e.status}` : String(e);
       setError(`setup failed: ${msg}`);
     } finally {
@@ -313,8 +332,10 @@ export function OnboardingWizard({ onLaunched, onSignInInstead }: OnboardingWiza
           Set up your cyber range
         </CardTitle>
         <CardDescription>
-          Four quick steps to your first drill. You can always come back
-          and run individual steps from the Admin tab later.
+          Five quick steps to your first drill. Step 0 sets up the
+          PVE bridges your scenarios will use; the rest pick a
+          scenario, form a team, and launch. You can always come
+          back and run individual steps from the Admin tab later.
         </CardDescription>
         <StepIndicator current={step} done={setupDone ? 1 : 0} />
       </CardHeader>
@@ -328,6 +349,26 @@ export function OnboardingWizard({ onLaunched, onSignInInstead }: OnboardingWiza
           </div>
         )}
 
+        {step === -1 && (
+          // F-pve-config-ui: collect PVE host + token before Step 0
+          // (bridges). Auto-skips to 0 once the credentials are saved
+          // or when the API already has a config row.
+          <PveCredentialsStep
+            onContinue={() => setStep(0)}
+            onSkip={() => setStep(0)}
+          />
+        )}
+
+        {step === 0 && (
+          // F-pve-bridge-wizard: probe + SSH bridge setup.
+          // Auto-advances to step 1 when everything's already
+          // present on PVE.
+          <Step0PveSetup
+            onContinue={() => setStep(1)}
+            onSkip={() => setStep(1)}
+          />
+        )}
+
         {step === 1 && (
           <Step1
             sub={adminSub}
@@ -335,8 +376,6 @@ export function OnboardingWizard({ onLaunched, onSignInInstead }: OnboardingWiza
             password={adminPw}
             setPassword={setAdminPw}
             submitting={adminSubmitting}
-            adminExists={adminExists}
-            onSignInInstead={onSignInInstead}
             onSubmit={handleStep1}
           />
         )}
@@ -388,18 +427,32 @@ function StepIndicator({
   current: Step;
   done: number;
 }) {
+  // F-pve-config-ui: step -1 is a silent pre-flight (PVE creds).
+  // It doesn't appear in the visible step list; we map it to the
+  // "PVE bridges" indicator so the operator still sees forward
+  // progress while the credentials step is doing its work.
+  const visibleCurrent: Step = current < 0 ? 0 : current;
   const labels: Record<Step, string> = {
+    "-1": "PVE creds",
+    0: "PVE bridges",
     1: "Bootstrap admin",
     2: "Pick scenario",
     3: "Form team",
     4: "Launch drill",
   };
-  const steps: Step[] = [1, 2, 3, 4];
+  // The visible step list excludes -1 (it's not numbered in the
+  // operator's mental model). current < 0 is mapped to 0 so the
+  // indicator's first circle lights up.
+  const steps: Step[] = [0, 1, 2, 3, 4];
   return (
     <ol className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
       {steps.map((s, i) => {
-        const isDone = s < current || (s === 1 && done >= 1);
-        const isCurrent = s === current;
+        // ``done`` only tracks the admin-step explicitly;
+        // everything else is "done if strictly before current".
+        // Pre-step -1 maps to step 0 so the first circle is
+        // highlighted while the operator is filling creds.
+        const isDone = s < visibleCurrent || (s === 1 && done >= 1);
+        const isCurrent = s === visibleCurrent;
         return (
           <li key={s} className="flex items-center gap-1">
             <span
@@ -442,8 +495,6 @@ interface Step1Props {
   password: string;
   setPassword: (s: string) => void;
   submitting: boolean;
-  adminExists: boolean;
-  onSignInInstead?: () => void;
   onSubmit: (e: React.FormEvent) => void;
 }
 
@@ -453,52 +504,8 @@ function Step1({
   password,
   setPassword,
   submitting,
-  adminExists,
-  onSignInInstead,
   onSubmit,
 }: Step1Props) {
-  if (adminExists) {
-    return (
-      <div
-        data-testid="wizard-admin-exists"
-        className="space-y-4 rounded-md border border-amber-700 bg-amber-950/30 p-4"
-      >
-        {/* F-auth-ux (Plan A5): drop the env-var name soup — those
-            vars are only meaningful to whoever provisioned the
-            server. Normal users don't have them. Point them at
-            the right human (another admin) instead. */}
-        <p className="text-sm">
-          An admin already exists on this deployment. Step 1 is a
-          one-shot — only the first admin can be created here, and
-          that admin already exists.
-        </p>
-        <p className="text-sm">
-          If you don't know your password, ask another admin to
-          reset it for you.{" "}
-          <a
-            href="https://github.com/divide/divide-cyber-drill/blob/main/docs/USERS.md"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="underline"
-          >
-            See docs/USERS.md
-          </a>{" "}
-          for the password reset flow.
-        </p>
-        <div className="flex justify-end">
-          <Button
-            type="button"
-            onClick={onSignInInstead}
-            data-testid="wizard-go-signin"
-          >
-            Sign in instead
-            <ArrowRight className="ml-1 h-3 w-3" />
-          </Button>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <form onSubmit={onSubmit} className="space-y-4">
       <div className="flex items-start gap-3 rounded-md border border-border bg-muted/40 p-3 text-sm">

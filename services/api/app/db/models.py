@@ -29,6 +29,7 @@ from sqlalchemy import (
     String,
     Text,
     func,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -866,3 +867,79 @@ class TelemetryEvent(Base, TimestampMixin):
             f"<TelemetryEvent id={self.id} run={self.run_id} "
             f"kind={self.kind!r} severity={self.severity.value}>"
         )
+
+
+class PveConfig(Base, TimestampMixin):
+    """Singleton row (id=1) holding the PVE connection the API uses at
+    runtime.
+
+    Day-1 web setup: this table lets the onboarding wizard collect
+    PVE host / user / token in the browser instead of requiring the
+    operator to edit ``deploy/.env`` and restart the API container.
+    Precedence over env vars is enforced in
+    ``app/services/proxmox.py`` -- the DB overlay always wins.
+
+    The row is a singleton: ``id`` is hard-coded to 1 in every
+    write path. The token_secret column is stored plain (same risk
+    profile as ``users.password_hash``) because the reset/setup flow
+    has to read it back; ``to_public_dict`` masks it as ``"***"``
+    before any API response.
+
+    If the operator DELETEs the row, ``services/proxmox.py`` falls
+    back to ``PROXMOX_*`` env vars. There is exactly zero state on
+    this table that isn't already in env, so the table is safe to
+    drop and re-create for any deployment that never adopted the
+    wizard's PVE-credentials step.
+    """
+
+    __tablename__ = "pve_config"
+
+    # Hard-coded singleton PK. See :func:`app.services.pve_config.upsert_config`.
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    host: Mapped[str] = mapped_column(String(255), nullable=False)
+    port: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("8006")
+    )
+    user: Mapped[str] = mapped_column(String(255), nullable=False)
+    # Format "user@realm!tokenname" -- the same shape proxmoxer wants,
+    # and what ``PROXMOX_TOKEN_ID`` takes. Splitting the realm off
+    # happens at use-time in ``_validate_config``.
+    token_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    # Plain text -- the wizard's POST endpoint probes PVE with the
+    # supplied secret before committing, then writes verbatim. Stored
+    # the same way ``users.password_hash`` is (which is also a salted
+    # derivation rather than a hash), so the threat model is
+    # identical. ``to_public_dict`` masks the field on read.
+    token_secret: Mapped[str] = mapped_column(String(255), nullable=False)
+    # Default False: most PVE installs use a self-signed cert; the
+    # wizard form pre-checks this for the operator.
+    verify_ssl: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    # Default node for proxmoxer queries when none specified. Nullable
+    # means "let proxmoxer pick" -- one less thing for the operator
+    # to fill in the wizard form.
+    node: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Who last touched this. Set to the JWT sub on every POST. Nullable
+    # so a fresh row can be inserted without coupling to the users
+    # table (chicken-and-egg: at first boot there is no admin yet).
+    updated_by: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+    def to_public_dict(self) -> dict:
+        """Shape returned by ``GET /admin/pve-config``. ``token_secret``
+        is masked.
+        """
+        return {
+            "source": "db",
+            "host": self.host,
+            "port": self.port,
+            "user": self.user,
+            "token_id": self.token_id,
+            "token_secret": "***",
+            "verify_ssl": self.verify_ssl,
+            "node": self.node,
+            "updated_at": (
+                self.updated_at.isoformat() if self.updated_at else None
+            ),
+            "updated_by": self.updated_by,
+        }

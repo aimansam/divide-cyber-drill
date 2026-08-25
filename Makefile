@@ -69,14 +69,21 @@ portal-install: ## Install npm deps for services/portal/app/.
 	cd services/portal/app && npm ci --no-audit --no-fund
 
 # F9.3: bundle-budget guard. Builds the portal and fails if the
-# resulting JS bundle exceeds the 280 KB ceiling set in F4. The
-# ceiling is enforced here + in CI so a runaway dep can't silently
-# double the bundle.
-verify-bundle: portal-build ## Fail if the portal bundle exceeds the 280 KB budget.
+# resulting JS bundle exceeds the budget ceiling set in F4 (and
+# adjusted in F-pve-config-ui). The ceiling is enforced here + in
+# CI so a runaway dep can't silently double the bundle.
+#
+# History:
+#   F4:        280 KB  (5-step wizard)
+#   F-pve-config-ui: 320 KB (6-step wizard with PveCredentialsStep +
+#                  PVE config API client. The extra 40 KB is mostly
+#                  the new React component + 3 small API helpers in
+#                  api.ts; not a dependency regression.)
+verify-bundle: portal-build ## Fail if the portal bundle exceeds the budget.
 	@BUNDLE=$$(ls -1 services/portal/app/build/assets/index-*.js 2>/dev/null | head -1); \
 	if [[ -z "$$BUNDLE" ]]; then echo "no bundle found; run \`make portal-build\` first"; exit 2; fi; \
 	KB=$$(python3 -c "import os,sys; print(f'{os.path.getsize(sys.argv[1])/1024:.2f}')" "$$BUNDLE"); \
-	LIMIT_KB=280.00; \
+	LIMIT_KB=320.00; \
 	echo "bundle: $$KB KB (limit $$LIMIT_KB KB)"; \
 	if python3 -c "import sys; sys.exit(0 if float(sys.argv[1]) <= float(sys.argv[2]) else 1)" "$$KB" "$$LIMIT_KB"; then \
 		echo "OK: bundle within budget"; \

@@ -110,6 +110,22 @@ async def lifespan(app: FastAPI):
             log.error("divide_api.scenario_sync.failed", error=str(exc))
             app.state.last_sync = None
 
+    # Day-1 web setup: hydrate the in-memory PVE config overlay from
+    # the ``pve_config`` DB row. If the row exists, this overrides the
+    # ``PROXMOX_*`` env-var fallback for the lifetime of the process.
+    # If it doesn't exist (operator hasn't reached the wizard yet),
+    # env vars remain the source of truth -- this is the bootstrap path.
+    #
+    # Failures here are logged-and-swallowed: a DB that's briefly
+    # unreachable at boot must not prevent the API from coming up.
+    try:
+        from app.services.proxmox import hydrate_proxmox_from_db
+
+        await hydrate_proxmox_from_db()
+        log.info("divide_api.pve_overlay.hydrated")
+    except Exception as exc:  # pragma: no cover - best-effort
+        log.warning("divide_api.pve_overlay.hydrate_failed", error=str(exc))
+
     yield
 
     # R1: tear down the RedisEventBus bridge thread + redis pool.

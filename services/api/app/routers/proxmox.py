@@ -41,6 +41,7 @@ from app.core.config import settings
 from app.services.proxmox import (
     ProxmoxAPIError,
     ProxmoxNotConfiguredError,
+    _DB_OVERLAY,
     get_version,
     list_acl,
     list_nodes,
@@ -53,7 +54,19 @@ router = APIRouter()
 
 
 def _is_configured() -> bool:
-    """Treat empty env values as 'not configured'."""
+    """True iff PVE creds are present in DB overlay OR env.
+
+    The DB overlay takes precedence (see ``services/proxmox.py``); if
+    the overlay is set, the env vars are dead. We check both anyway
+    because a fresh ``POST /admin/pve-config`` might leave a partial
+    env-var config that the overlay never replaced.
+    """
+    if _DB_OVERLAY is not None:
+        return bool(
+            (_DB_OVERLAY.get("host") or "").strip()
+            and (_DB_OVERLAY.get("token_id") or "").strip()
+            and _DB_OVERLAY.get("token_secret")
+        )
     cfg = settings.proxmox
     return bool((cfg.host or "").strip() and (cfg.token_id or "").strip() and cfg.token_secret)
 
@@ -88,7 +101,11 @@ async def proxmox_health() -> dict[str, Any]:
         "version": v.get("version"),
         "release": v.get("release"),
         "repoid": v.get("repoid"),
-        "host": settings.proxmox.host,
+        "host": (
+            _DB_OVERLAY.get("host")
+            if _DB_OVERLAY is not None
+            else settings.proxmox.host
+        ),
     }
 
 

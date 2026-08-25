@@ -160,3 +160,126 @@ export async function logout(): Promise<void> {
   }
   setToken("");
 }
+
+// ---------- password reset (F-reset-ux) ------------------------------------
+//
+// Three endpoints backing the password-reset flow:
+//   * POST /auth/forgot-password        -- public; always 202.
+//   * POST /auth/reset-password         -- public; consumes the token.
+//   * POST /auth/users/{sub}/issue-reset -- admin-only; mints a link.
+//
+// The portal wires these up like this:
+//
+//   SignInCard shows a "Forgot password?" link. Clicking it opens
+//     the ForgotPasswordCard, which POSTs /forgot-password and
+//     tells the user to contact their admin.
+//   Admin clicks "Reset link" on a row in UserListCard. The response
+//     contains a magic_link the admin copies and sends to the user
+//     out-of-band (Slack / email / etc.).
+//   The user clicks the link, lands on the portal with ?sub=&token=
+//     in the hash, and the app.tsx router renders ResetPasswordCard.
+//     They submit a new password; the card POSTs /reset-password,
+//     on success lands on the sign-in form.
+//
+// The functions below are intentionally tiny — they're thin wrappers
+// over the api.post() / fetch() helpers so the components don't have
+// to know about endpoint paths or response shapes.
+
+export async function requestPasswordReset(sub: string): Promise<void> {
+  // 202 always; body is generic. We don't read it -- the UI shows a
+  // canned "ask your admin" message.
+  await api.post("/api/v1/auth/forgot-password", { sub });
+}
+
+export interface IssueResetLinkResponse {
+  sub: string;
+  reset_token: string;
+  magic_link: string;
+  expires_at: string;
+}
+
+export async function issuePasswordResetLink(
+  sub: string,
+): Promise<IssueResetLinkResponse> {
+  return api.post<IssueResetLinkResponse>(
+    `/api/v1/auth/users/${encodeURIComponent(sub)}/issue-reset`,
+  );
+}
+
+export async function submitPasswordReset(
+  sub: string,
+  token: string,
+  newPassword: string,
+): Promise<void> {
+  await api.post("/api/v1/auth/reset-password", {
+    sub,
+    token,
+    new_password: newPassword,
+  });
+}
+
+// ----------------------------------------------------------------------
+// PVE runtime config (day-1 web setup; used by the onboarding wizard's
+// PveCredentialsStep before Step0/Step1).
+//
+// These three helpers wrap the GET / POST / DELETE on
+// /api/v1/admin/pve-config. The wizard's PveCredentialsStep calls
+// ``getPveConfig`` on mount to discover whether the operator already
+// configured PVE (in which case it auto-skips the form). If not, it
+// calls ``postPveConfig`` with the form values; on success the wizard
+// advances to Step0 (PVE bridges). ``deletePveConfig`` is exposed for
+// the admin UI's "reset to env-vars" escape hatch -- not used by the
+// wizard itself, but included here for consistency.
+//
+// These are admin-only endpoints; the caller must already hold a
+// valid admin token (the wizard mints one in Step 1 -- but this step
+// runs BEFORE Step 1, so the wizard's mount path has to use the
+// token from /auth/setup or similar; see OnboardingWizard).
+
+export interface PveConfigPublic {
+  source: "db" | "env";
+  host: string | null;
+  port: number;
+  user: string;
+  token_id: string | null;
+  /** Always "***" -- the real secret is never returned from the API. */
+  token_secret: string;
+  verify_ssl: boolean;
+  node: string | null;
+  updated_at: string | null;
+  updated_by: string | null;
+}
+
+export async function getPveConfig(): Promise<PveConfigPublic> {
+  return api.get<PveConfigPublic>("/api/v1/admin/pve-config");
+}
+
+export interface PostPveConfigInput {
+  host: string;
+  port?: number;
+  user: string;
+  token_id: string;
+  token_secret: string;
+  verify_ssl?: boolean;
+  node?: string | null;
+}
+
+export interface PostPveConfigResponse extends PveConfigPublic {
+  probed: boolean;
+  message: string;
+}
+
+export async function postPveConfig(
+  body: PostPveConfigInput,
+): Promise<PostPveConfigResponse> {
+  return api.post<PostPveConfigResponse>(
+    "/api/v1/admin/pve-config",
+    body,
+  );
+}
+
+export async function deletePveConfig(): Promise<{ deleted: boolean; message: string }> {
+  return api.delete<{ deleted: boolean; message: string }>(
+    "/api/v1/admin/pve-config",
+  );
+}
