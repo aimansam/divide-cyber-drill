@@ -97,9 +97,9 @@ export function ForgotPasswordCard({ onCancel }: ForgotPasswordCardProps) {
               <p>
                 If{" "}
                 <span className="font-mono">{sub.trim()}</span>{" "}
-                exists, a reset link has been sent to your admin.
-                Ask them to check the Admin tab and forward the
-                link to you.
+                matches an account, an administrator has been notified
+                and will send you a reset link. Contact your admin if
+                you don't hear back.
               </p>
             </div>
             <Button

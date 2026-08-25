@@ -613,8 +613,9 @@ class ForgotPasswordResponse(BaseModel):
 
     ok: bool = True
     message: str = (
-        "If the account exists, a reset link has been sent to your "
-        "admin. Ask them to check the Admin tab."
+        "If an account matches that username, an administrator has "
+        "been notified and will send you a reset link. Contact your "
+        "admin if you don't hear back."
     )
 
 
