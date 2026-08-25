@@ -222,14 +222,45 @@ async def touch_last_login(session: AsyncSession, user: db_models.User) -> None:
     await session.flush()
 
 
+async def set_user_disabled(
+    session: AsyncSession,
+    *,
+    sub: str,
+    disabled: bool,
+) -> db_models.User:
+    """Flip a user's ``disabled`` flag.
+
+    Used by the admin user-management UI (UserListCard's
+    toggle-disabled button). Returns the refreshed user row
+    after the flip. Raises:
+      * ``UserNotFoundError`` if no user with that ``sub`` exists.
+    """
+    user = await get_by_sub(session, sub)
+    if user is None:
+        raise UserNotFoundError(f"user with sub {sub!r} not found")
+    user.disabled = disabled
+    await session.flush()
+    await session.refresh(user)
+    return user
+
+
+class UserNotFoundError(Exception):
+    """Raised by :func:`set_user_disabled` when the sub is unknown.
+
+    The router turns this into a 404.
+    """
+
+
 __all__ = [
     "DuplicateSubError",
+    "UserNotFoundError",
     "UserStoreError",
     "authenticate",
     "create_user",
     "get_by_sub",
     "hash_password",
     "list_users",
+    "set_user_disabled",
     "touch_last_login",
     "verify_password",
 ]

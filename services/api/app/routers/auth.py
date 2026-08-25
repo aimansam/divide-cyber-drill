@@ -49,10 +49,13 @@ from app.db import models as db_models
 from app.db.session import get_session
 from app.services.users import (
     DuplicateSubError,
+    UserNotFoundError,
     UserStoreError,
     authenticate,
     create_user,
+    get_by_sub,
     list_users,
+    set_user_disabled,
     touch_last_login,
 )
 
@@ -452,6 +455,66 @@ async def create_user_endpoint(
         )
 
     await session.refresh(user)
+    return UserPublic(
+        sub=user.sub,
+        role=user.role,
+        disabled=user.disabled,
+        last_login_at=user.last_login_at.isoformat() if user.last_login_at else None,
+        created_at=user.created_at.isoformat(),
+    )
+
+
+@router.post(
+    "/users/{sub}/toggle-disabled",
+    summary="F9.4: flip a user's disabled flag (admin only)",
+    dependencies=[Depends(require_role(Role.ADMIN))],
+)
+async def toggle_disabled_endpoint(
+    sub: str,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    _token=Depends(current_token),
+) -> UserPublic:
+    """Toggle the ``disabled`` flag on a user row.
+
+    Backs the UserListCard's toggle button in the portal. The
+    endpoint reads the current value and flips it -- the
+    portal doesn't need to know the current state.
+
+    Status codes:
+      * 200 -- toggled; returns the refreshed row.
+      * 404 -- no user with that ``sub``.
+      * 401/403 -- admin gate (handled by require_role).
+
+    Note: the endpoint is a true toggle (read + flip), not a
+    set. This is intentional -- the portal's button is a
+    switch-style toggle, not a "set disabled = true" form.
+    Set semantics can be added later if the admin UI grows
+    checkbox-style controls.
+    """
+    from app.services.users import (
+        UserNotFoundError,
+        set_user_disabled,
+    )
+
+    current = await get_by_sub(session, sub)
+    if current is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"user with sub {sub!r} not found",
+        )
+
+    try:
+        user = await set_user_disabled(
+            session, sub=sub, disabled=not current.disabled
+        )
+        await session.commit()
+    except UserNotFoundError:
+        # Lost a race with another delete.
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"user with sub {sub!r} not found",
+        )
+
     return UserPublic(
         sub=user.sub,
         role=user.role,

@@ -1,24 +1,23 @@
 /**
  * UserListCard — admin view of every div:ide user.
  *
- * Backs onto `GET /api/v1/auth/users` (F3-prep). The endpoint is
- * admin-only; this card is therefore only mounted for the admin
- * role. If a non-admin somehow renders it, the API call fails
- * 403 and the card shows an error banner.
+ * Backs onto `GET /api/v1/auth/users` (F3-prep) +
+ * `POST /api/v1/auth/users/{sub}/toggle-disabled` (F9.4). Both
+ * endpoints are admin-only; this card is therefore only mounted
+ * for the admin role. If a non-admin somehow renders it, the
+ * API call fails 403 and the card shows an error banner.
  *
  * Actions:
  *   * View: sub, role, disabled, last_login_at, created_at.
  *   * Toggle: click the disabled badge to flip it. Posts to
- *     /api/v1/auth/users/{sub}/disabled (deferred to L3 — see
- *     docs/PLAN.md §15.5; for now the toggle is a no-op stub
- *     that surfaces a 'Coming with admin user-management UI'
- *     toast).
+ *     `/api/v1/auth/users/{sub}/toggle-disabled`; the server
+ *     returns the refreshed row and we patch it in place so
+ *     the badge updates without a full reload.
  *
- * The toggle is a stub because the underlying mutation endpoint
- * isn't built yet; the UI surface ships so the operator can see
- * the user roster now, and the admin CRUD plan (L3.16) fills in
- * the mutations later. Catching the absence of the toggle endpoint
- * here keeps the test surface honest.
+ * F9.4 history: prior to F9.4 the toggle was a stub that
+ * surfaced a 404-style "not wired up yet" message. The
+ * endpoint + UI wiring landed together so the click now does
+ * what the badge claims it does.
  */
 
 import { useEffect, useState } from "react";
@@ -69,19 +68,24 @@ export function UserListCard() {
   }, []);
 
   async function onToggle(sub: string) {
-    // The toggle endpoint ships with the L3 admin user-management
-    // UI. For now we surface a 501-style error to the operator
-    // so they don't think the click did something it didn't.
+    // F9.4: the toggle endpoint exists now (POST /auth/users/
+    // {sub}/toggle-disabled, admin-only). On success the
+    // server returns the refreshed user row; we replace the
+    // local copy so the badge updates without a full reload.
     setTogglePending(sub);
     try {
-      const r = await api.post(`/api/v1/auth/users/${sub}/toggle-disabled`);
-      void r;
+      const updated = await api.post<UserRow>(
+        `/api/v1/auth/users/${sub}/toggle-disabled`,
+      );
+      setUsers((prev) => prev.map((u) => (u.sub === sub ? updated : u)));
     } catch (e: unknown) {
       const status = e instanceof ApiError ? e.status : 0;
       setError(
-        status === 404 || status === 501
-          ? "Disable/enable is not wired up yet (L3 admin-user-management plan)."
-          : `toggle failed: ${status || "unknown"}`,
+        status === 404
+          ? `User "${sub}" not found (deleted between list + click?).`
+          : status === 403
+          ? `You need admin to toggle "${sub}".`
+          : `toggle failed: HTTP ${status || "unknown"}`,
       );
     } finally {
       setTogglePending(null);
@@ -101,7 +105,7 @@ export function UserListCard() {
           <CardDescription>
             {users.length === 0
               ? "No users have signed in yet."
-              : `${users.length} user${users.length === 1 ? "" : "s"} — admins can view, future L3 work adds CRUD.`}
+              : `${users.length} user${users.length === 1 ? "" : "s"} — click the badge to enable / disable an account.`}
           </CardDescription>
         </div>
         <Button
