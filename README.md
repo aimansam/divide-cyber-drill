@@ -1,288 +1,333 @@
-# div:ide cyber drill
+# div:ide cyber drill platform
 
-> **Status:** Phase 0 ✅ + Phase 1 ✅ + Phase 2 ✅ (L1 9/9, L2 18/18).
-> **§15 cyber-range plans F3-F8 ALL CLOSED** — multi-VM scenarios
-> (F3), noVNC console (F4), flag scoring (F5), multi-team exercises
-> (F6), range templates (F7), SOC view + SSE telemetry (F8).
-> **859 tests passing** (431 root + 428 API).
-> See [`docs/PLAN.md`](docs/PLAN.md) §15 for the cyber-range roadmap
-> and §17 for the post-§15 follow-ons.
-> See [`docs/TEST-PRODUCT.md`](docs/TEST-PRODUCT.md) for the L1/L2/L3 ship criteria.
-> Browser tools ship in the API container: setup wizard at `/portal/`,
-full cyber-range portal at `/portal/app/`.
+> **A self-hosted, Proxmox-backed cyber range** that spins up
+> isolated, reproducible attack/defense scenarios as VMs,
+> streams live telemetry to a SOC view, scores flags with
+> time-decay, and produces leadership-ready markdown debriefs.
+>
+> **Status (F12 shipped):** all five final-product pillars
+> closed — F9 (DrillConsole consolidation), R1 (multi-worker
+> SSE via Redis pub/sub), F11 (drill debrief artifact),
+> F10 (4-step onboarding wizard), F12 (this packaging).
+> **891 tests passing** (431 root + 460 API), portal bundle
+> 275.76 KB (4.24 KB under the 280 KB ceiling).
+>
+> See [`docs/PLAN.md`](docs/PLAN.md) §17-§19 for the full
+> roadmap + closure summary.
 
-**div:ide** is a Proxmox-backed cyber drill platform for blue teams, red teams, and
-training cohorts. It spins up isolated, reproducible attack/defense scenarios as VMs,
-streams telemetry to Wazuh, and produces after-action reports.
+## What it does
 
-This repository currently contains the **Phase 0 skeleton**: a Docker Compose control
-plane (API + Postgres + Redis + MinIO + Traefik) and a FastAPI service with stub
-endpoints. **No Proxmox calls happen yet.**
+`div:ide` is a cyber-range orchestrator for blue teams, red teams,
+and training cohorts. An operator with a Proxmox host can:
 
----
+1. **Describe a scenario as YAML.** Multi-VM, multi-network,
+   with planted flags and win conditions. Schema-validated.
+2. **Run the scenario on demand.** Clones VMs from cloud-init
+   templates, attaches them to per-scenario networks, plants
+   flags, watches assets boot.
+3. **Watch the live drill in one screen.** The Observe tab
+   shows status / topology / assets / VNC console / audit
+   feed / leaderboard (live) / SOC stream (live). No tab
+   flipping during a multi-team exercise.
+4. **Hand leadership a markdown debrief.** One-click "View
+   debrief" opens a 7-section play-by-play (summary / per-team
+   score / per-flag timing / pivot timeline / detection
+   timeline / asset table / lessons learned).
+5. **Reset to clean state for the next cohort.** Snapshot the
+   current state as a template, clone it for the next run.
 
-## Scenarios
+The platform ships with four reference scenarios:
 
-Cyber drills are described declaratively as **Scenario** YAML files. Two
-reference examples ship in [`examples/scenarios/`](examples/scenarios/):
+| Scenario | Side | Difficulty | Duration |
+|---|---|---|---|
+| [`first-live-drill`](examples/scenarios/first-live-drill.scenario.yaml) | single-team | beginner | 30 min |
+| [`red-vs-blue-baseline`](examples/scenarios/red-vs-blue-baseline.scenario.yaml) | multi-team (red + blue) | beginner | 30 min |
+| [`phish-to-ransom`](examples/scenarios/phish-to-ransom.scenario.yaml) | single-team | intermediate | 90 min |
+| [`lateral-movement-baseline`](examples/scenarios/lateral-movement-baseline.scenario.yaml) | single-team | beginner | 45 min |
 
-- `phish-to-ransom.scenario.yaml` — phishing → AD compromise → ransomware (intermediate, 90 min)
-- `lateral-movement-baseline.scenario.yaml` — SMB/WinRM pivot, blue-team focus (beginner, 45 min)
+## Five-minute "first drill" walkthrough
 
-Files validate against [`schemas/scenario.schema.json`](schemas/scenario.schema.json)
-(JSON Schema 2020-12). The validator runs in CI and on every commit via
-pre-commit.
+The platform ships with a 4-step onboarding wizard. A brand-new
+operator with a fresh deployment goes from "empty database" to
+"live drill running" in ~2 minutes, all in the browser.
 
-```bash
-# Validate a single file
-make validate-scenarios
-
-# Or directly:
-python tools/validate_scenario.py examples/scenarios/phish-to-ransom.scenario.yaml
-```
-
-Full spec (every field, every enum): [`docs/SCENARIO-SPEC.md`](docs/SCENARIO-SPEC.md).
-
-## What's in here
-
-```
-divide-cyber-drill/
-├── docs/
-│   ├── PLAN.md                  # full design + architecture (now §14 says "read TEST-PRODUCT for current state")
-│   ├── LIVE-DRILL-RUNBOOK.md    # operator runbook for the first live drill
-│   ├── PROXMOX-SETUP.md         # PVE host setup (ACLs, tokens, ISO)
-│   ├── OBSERVABILITY.md         # Prometheus + Grafana wiring
-│   ├── SCENARIO-SPEC.md         # full scenario YAML spec
-│   ├── SCENARIO-SYNC.md         # YAML → DB catalog sync
-│   ├── TEST-PRODUCT.md          # **canonical**: L1/L2/L3 ship criteria + ETAs + next plan
-│   ├── USER-REQUIREMENTS.md     # persona view: who needs what, what's wired, what's missing
-│   ├── SETUP-UI.md              # docs for the browser-based setup wizard at /portal/
-│   ├── PORTAL-APP.md            # docs for the React/Vite user portal at /portal/app/
-│   └── images/                  # 6 architecture diagrams (auto-generated)
-├── deploy/
-│   ├── docker-compose.yml       # control-plane stack
-│   ├── .env.example             # template for .env
-│   └── traefik/                 # static traefik config
-├── services/
-│   ├── api/                     # FastAPI app
-│   │   ├── app/                 # code
-│   │   │   ├── routers/         # drills, scenarios, proxmox, admin (setup wizard), health
-│   │   │   ├── services/        # proxmox client, runner adapters, admin (template builder), scen_sync
-│   │   │   └── main.py          # mounts /portal via StaticFiles
-│   │   ├── tests/               # pytest (276 tests)
-│   │   ├── scripts/             # proxmox-smoke.py
-│   │   └── Dockerfile
-│   └── portal/                  # static HTML+JS pages served by the API
-│       ├── index.html           # → /portal/  (setup wizard, 4 steps)
-
-├── tools/                       # CLI entry points used by Makefile targets
-│   ├── gen_diagrams.py          # regenerates docs/images/*.png
-│   ├── preflight.py             # `make preflight` — 9 PVE/stack health checks
-│   ├── upload_cloudinit_template.py  # `make upload-template` — create tpl-debian-cloudinit
-│   ├── live_drill.py            # `make live-drill` — POST /api/v1/drills + poll
-│   ├── verify_drill.py          # `make verify-drill` — assertions on run outcome (4 checks)
-│   ├── watch_drill.py           # `make watch-drill` — Prometheus-driven outcome watcher
-│   ├── sync_scenarios.py        # `make sync-scenarios` — YAML → DB
-│   └── validate_scenario.py     # `tools/validate_scenario.py` — JSON-Schema check
-├── scripts/
-│   ├── dev-shell.sh             # `make shell`-style helper
-│   └── lint-all.sh              # `make lint`-style helper
-├── tests/                       # top-level pytest (preflight, scenarios, smoke, etc.)
-├── Makefile
-├── pyproject.toml               # ruff + mypy config
-└── .pre-commit-config.yaml
-```
-
----
-
-## Quickstart (Phase 0 → L1)
-
-Requirements: Docker 24+, Docker Compose v2, Python 3.12 (only for lint/test).
+### 1. Install
 
 ```bash
 git clone <this-repo> divide-cyber-drill
 cd divide-cyber-drill
 
 cp deploy/.env.example deploy/.env
-# edit deploy/.env — at minimum change POSTGRES_PASSWORD and MINIO_ROOT_PASSWORD,
-# and fill in PROXMOX_HOST/PROXMOX_USER/PROXMOX_TOKEN_ID/PROXMOX_TOKEN_SECRET
-# from your PVE token (see docs/PROXMOX-SETUP.md §5).
+# edit deploy/.env -- at minimum change POSTGRES_PASSWORD
+# and MINIO_ROOT_PASSWORD. Proxmox creds are set later by the
+# setup wizard; no need to fill them in here.
 
-make build          # build the API container
-make up             # start the stack (waits for /healthz)
-make preflight      # confirm 9/9 PVE + stack health checks pass
-make smoke          # curl the health, ready, and stub endpoints
-make logs           # tail logs
+make up             # starts the stack (waits for /healthz)
 ```
 
-### Three browser tools ship with the API
+### 2. Open the portal
 
-After `make up` (and `make portal-build` once, for the React one), browse to:
+Browse to `http://localhost:8000/portal/app/`.
 
-| URL | Audience | Purpose | Doc |
-|---|---|---|---|
-| `http://localhost:8000/portal/`       | Operator (first run)   | Setup wizard — stand up a fresh PVE-backed deployment without SSH-ing into Proxmox | [`docs/SETUP-UI.md`](docs/SETUP-UI.md) |
+The first time you visit, you see the **Onboarding Wizard**
+(4 steps). No token, no users yet — the wizard walks you
+through:
 
-| `http://localhost:8000/portal/app/`   | Trainee + lead         | User portal — sign in, pick a scenario, run a drill, download a debrief (React + Vite) | [`docs/PORTAL-APP.md`](docs/PORTAL-APP.md) |
+```
+Step 1: Bootstrap admin      POST /api/v1/auth/setup
+Step 2: Pick scenario        GET /api/v1/scenarios
+Step 3: Form team (multi)    POST /exercises + POST /auth/users
+Step 4: Launch drill         POST /api/v1/drills (single-team)
+```
 
-The first two are vanilla HTML + JS — no build step. The third is a
-Vite-built React app; `make portal-build` produces the bundle that
-the API container serves (the bind mount in `deploy/docker-compose.yml`
-means a rebuild propagates without rebuilding the API image).
-All three share FastAPI's `StaticFiles` mount under `/portal/`.
-No new containers, no new runtime — just open the URL.
+### 3. Fill in the wizard
 
-### Running a live drill (L1)
+  * **Step 1** — type an admin username (e.g. `alice`) + a
+    password (min 8 chars). Click **Create admin**. The wizard
+    stashes the token; you're now authenticated as admin.
+  * **Step 2** — pick a scenario from the list. Single-team
+    scenarios (e.g. `first-live-drill`) skip step 3.
+    Multi-team scenarios (e.g. `red-vs-blue-baseline`) advance
+    to step 3.
+  * **Step 3** — name the red + blue teams (defaults are
+    `red` / `blue`). Optionally bulk-add member usernames in
+    the textarea (one per line; blank lines skipped). Click
+    **Create + launch exercise**.
+  * **Step 4** (single-team only) — click **Launch drill**.
 
-L1 is closed. Run #11 ended `succeeded` (`pve_vmid=109`, audit log
-populated, asset teardown to `stopped`). The drill command:
+### 4. Watch the live drill
+
+The wizard lands you on the **DrillConsole** in the Observe
+tab. As the run progresses you'll see:
+
+  * Status header with LIVE pulse badge.
+  * Topology graph (SVG, no dep).
+  * Asset table with live IPs.
+  * VNC console button → opens the asset's console in a new
+    tab.
+  * Audit feed (live).
+  * For multi-team exercises: leaderboard (live, 5 s polling)
+    + SOC stream (live, SSE).
+  * Duration timer ticking every second.
+
+### 5. Hand off the debrief
+
+When the run is terminal (`succeeded` / `failed` / `timeout` /
+`cancelled`), the **View debrief** button appears in the header.
+Click it to open the markdown play-by-play in a new browser
+tab. Use **Download report** for the JSON sibling (full run
+metadata + asset list + audit timeline + Prometheus metrics).
+
+## What's in the box
+
+```
+divide-cyber-drill/
+├── services/
+│   ├── api/                          FastAPI control plane
+│   │   ├── app/
+│   │   │   ├── routers/              /api/v1/* endpoints (27 routers)
+│   │   │   ├── db/models.py          11 tables, 6 migrations
+│   │   │   ├── runners/              RealProxmoxAdapter + MockProxmoxAdapter
+│   │   │   ├── services/             auth, scenario_sync, event_bus (Redis + in-process)
+│   │   │   └── observability/        Prometheus metrics
+│   │   ├── tests/                    460 API tests
+│   │   └── pyproject.toml
+│   └── portal/app/                   React + Vite portal (CDN-style)
+│       ├── src/components/portal/    20+ components (cards)
+│       └── build/                    vite bundle (275.76 KB)
+├── deploy/
+│   ├── docker-compose.yml            Dev stack (single-worker)
+│   ├── docker-compose.production.yaml  F12.3 production stack (multi-worker + Redis)
+│   ├── traefik/                      TLS termination in prod
+│   ├── prometheus/                   metrics scrape config
+│   └── grafana/                      dashboards
+├── examples/
+│   ├── scenarios/                    4 reference scenarios
+│   └── demo-output.md                F12.2 captured walkthrough
+├── schemas/
+│   └── scenario.schema.json          JSON Schema for /api/v1/scenarios
+├── tools/                            Operator CLI (issue_token, demo, verify_drill, ...)
+├── docs/
+│   ├── PLAN.md                       Canonical roadmap + closure summaries
+│   ├── TEST-PRODUCT.md               L1/L2/L3 ship criteria
+│   ├── SECTION-9-INTEGRATION.md      F9 DrillConsole consolidation
+│   ├── SECTION-10-ONBOARDING.md      F10 onboarding wizard
+│   ├── R1-MULTIWORKER.md             R1 Redis multi-worker SSE
+│   ├── F8-SOC.md                     F8 SOC view + SSE
+│   ├── ...                           (15+ runbooks)
+│   └── images/                       Architecture diagrams
+└── Makefile                          `make up`, `make verify`, `make demo`, ...
+```
+
+## Features at a glance
+
+  * **5 final-product pillars** shipped (F9, R1, F10, F11, F12)
+    + 8 cyber-range plans (F3-F8) + 18 L2 ledger items + 9 L1
+    ledger items. See [`docs/PLAN.md`](docs/PLAN.md) §15.6 +
+    §17 + §18.
+  * **Multi-team exercises** (F6): per-team parallel runs on
+    a shared scenario topology, live leaderboard.
+  * **Live SOC view** (F8): SSE event stream, kill-chain
+    timeline, severity filter, pause/resume.
+  * **Range templates** (F7): snapshot a finished run as a
+    template; clone + reset for the next cohort.
+  * **Drill console** (F4-UI): single-screen live-drill view
+    with leaderboard + SOC stream inline (F9).
+  * **Multi-worker SSE** (R1): Redis pub/sub fan-out so SSE
+    events cross uvicorn workers.
+  * **Drill debrief** (F11): 7-section markdown play-by-play
+    for leadership hand-off.
+  * **Onboarding wizard** (F10): 4-step first-time UX in the
+    browser. No `tools/issue_token.py` required for first-time
+    operators.
+  * **Bundle budget** (F9.3): `make verify-bundle` enforces
+    the 280 KB ceiling; current bundle is 275.76 KB.
+  * **Secure by default**: argon2id password hashes, HMAC
+    tokens with TTL, RBAC on every endpoint, rate-limit on
+    `POST /drills`, audit log on every state transition,
+    polymorphic audit FKs that survive cascade deletes.
+
+## Production deployment
+
+For a single-tenant production deployment with TLS + multi-worker
++ Redis pub/sub + Authentik in production mode, see
+[`deploy/docker-compose.production.yaml`](deploy/docker-compose.production.yaml)
+and [`docs/SECTION-12-PRODUCTION.md`](docs/SECTION-12-PRODUCTION.md).
+
+Required env vars for multi-worker:
+
+```yaml
+environment:
+  DIVIDE_EVENT_BUS: redis            # R1: SSE across workers
+  DIVIDE_REDIS_URL: redis://redis:6379/0
+  DIVIDE_BOOTSTRAP_ADMIN_SUB: ...    # first admin (idempotent)
+  DIVIDE_BOOTSTRAP_ADMIN_PASSWORD: ...
+```
+
+
+## Running tests
 
 ```bash
-make live-drill SCENARIO=first-live-drill TIMEOUT=300   # run the drill
-make verify-drill                                          # 4/4 checks pass on success
+make test           # 891 tests across api/ + root
+make lint           # ruff + mypy
+make verify         # 5-step gate: lint + test + preflight + smoke + bundle-budget
+make verify-bundle  # F9.3: portal bundle under 280 KB
 ```
 
-For a fresh deploy on a new PVE host, the wizard at `/portal/` walks
-through everything (probe, ACL grant, template upload, first drill) in
-~10 minutes — no SSH into PVE required except for one `pveum acl modify`
-line.
-
-The full runbook is at [`docs/LIVE-DRILL-RUNBOOK.md`](docs/LIVE-DRILL-RUNBOOK.md).
-
-### Current state
-
-- **276 tests passing**, **`make preflight` 9/9**, **L1 ledger: 9 ✅ / 0 ❌ / 0 ⚠️** as of run #11.
-- L1 ledger: **9 ✅ / 0 ❌ / 0 ⚠️**. Run #11 (`first-live-drill`) ended
-  `succeeded`. See [`docs/TEST-PRODUCT.md`](docs/TEST-PRODUCT.md) for the
-  per-criterion progress and the next-5-items plan.
-- Phase 0 → L1 complete in code; L1 closures require one live
-  drill, which is documented in the runbook above.
-
-Once `make up` succeeds, open:
-
-- API:        http://localhost:8000
-- API docs:   http://localhost:8000/docs
-- MinIO UI:   http://localhost:9001  (user/pass from .env)
-- Traefik:    http://localhost:8080  (if you expose the dashboard port)
-
----
-
-## Endpoints (Phase 0)
-
-| Method | Path                        | Status        | Purpose |
-|--------|-----------------------------|---------------|---------|
-| GET    | `/healthz`                  | live          | Liveness probe |
-| GET    | `/readyz`                   | live          | Readiness probe (checks Postgres + Redis) |
-| GET    | `/api/v1/scenarios`         | live          | Lists scenarios from DB; auto-synced from `examples/scenarios/` |
-| POST   | `/api/v1/scenarios`         | live          | Import YAML body or path; validates + upserts |
-| GET    | `/api/v1/scenarios/{name}`  | live          | Get one scenario by name |
-| DELETE | `/api/v1/scenarios/{name}`  | live          | Soft-archive (sets `archived_at`) |
-| POST   | `/api/v1/scenarios/{name}/restore` | live   | Un-archive a previously archived scenario |
-| GET    | `/api/v1/drills`            | live          | Lists all runs in DB |
-| POST   | `/api/v1/drills`            | live          | Start a drill (`{"scenario_id": N, "started_by": "..."}`) |
-| POST   | `/api/v1/drills/{id}/stop`  | live          | Stop + destroy a drill's assets |
-| GET    | `/api/v1/proxmox/health`    | gated         | 503 unless `PROXMOX_HOST` + token are set |
-| GET    | `/api/v1/proxmox/nodes`     | gated         | Same |
-
----
-
-## Proxmox integration
-
-**Read-only integration is live in Stage 2.** div:ide can query your Proxmox
-for version, nodes, storage pools, and templates — but cannot create, modify,
-or delete anything. Token role: `PVEAuditor`.
-
-Setup: see [`docs/PROXMOX-SETUP.md`](docs/PROXMOX-SETUP.md).
-
-### Endpoints
-
-| Method | Path                                       | Returns |
-|--------|--------------------------------------------|---------|
-| GET    | `/api/v1/proxmox/health`                   | PVE version + release + repoid |
-| GET    | `/api/v1/proxmox/nodes`                    | List of cluster nodes |
-| GET    | `/api/v1/proxmox/storage`                  | List of storage pools |
-| GET    | `/api/v1/proxmox/templates?node=<name>`    | List of VM templates (all nodes by default) |
-
-### Status codes
-
-- `200` — data returned
-- `502` — PVE reachable but call failed (auth error, network blip, parse error)
-- `503` — Proxmox not configured (env vars missing)
-
-### Quick test
+The default `make test` runs against SQLite. For Postgres:
 
 ```bash
-make restart
-curl -s http://localhost:8000/api/v1/proxmox/health
-# {"status":"ok","version":"8.x.y","release":"...","repoid":"...","host":"https://..."}
+make test-live-pg   # requires DIVIDE_TEST_LIVE_PG=1 + a reachable DB
 ```
 
-### Runner adapter (Stage 5)
+## Documentation index
 
-The runner uses an internal `ProxmoxAdapter` interface with two implementations:
-
-- `MockProxmoxAdapter` — in-memory fake used by tests and when `PROXMOX_*` env
-  vars are missing. Default in dev / CI.
-- `RealProxmoxAdapter` — wraps `proxmoxer.ProxmoxAPI` to talk to your live
-  PVE (clone / start / stop / destroy). Selected automatically by
-  `build_runner()` once `PROXMOX_HOST` + `PROXMOX_TOKEN_ID` +
-  `PROXMOX_TOKEN_SECRET` are all set.
-
-No code change is needed to flip mock ↔ real — set the env vars and restart.
-
-## Development
-
-```bash
-make test        # run pytest
-make lint        # ruff + mypy
-make format      # auto-fix + ruff format
-```
-
-Regenerate architecture diagrams (requires `matplotlib`):
-
-```bash
-pip install matplotlib
-python tools/gen_diagrams.py
-```
-
-CI runs on every PR — see `.github/workflows/ci.yml`.
-
----
+| Doc | Audience | Topic |
+|---|---|---|
+| [`docs/PLAN.md`](docs/PLAN.md) | Everyone | Canonical roadmap + closure summaries |
+| [`docs/TEST-PRODUCT.md`](docs/TEST-PRODUCT.md) | Devs | L1/L2/L3 ship criteria |
+| [`docs/SECTION-9-INTEGRATION.md`](docs/SECTION-9-INTEGRATION.md) | Operators | F9 DrillConsole consolidation (single live-drill screen) |
+| [`docs/SECTION-10-ONBOARDING.md`](docs/SECTION-10-ONBOARDING.md) | Operators | F10 onboarding wizard (4-step first-time UX) |
+| [`docs/SECTION-11-DEBRIEF.md`](docs/SECTION-11-DEBRIEF.md) | Operators | F11 drill debrief (markdown play-by-play) |
+| [`docs/SECTION-12-PRODUCTION.md`](docs/SECTION-12-PRODUCTION.md) | Operators | F12 production deployment (TLS + multi-worker) |
+| [`docs/R1-MULTIWORKER.md`](docs/R1-MULTIWORKER.md) | Devs | R1 Redis multi-worker SSE |
+| [`docs/F3-RUNBOOK.md`](docs/F3-RUNBOOK.md) | Devs | F3 multi-VM scenarios |
+| [`docs/F4-NOVNC.md`](docs/F4-NOVNC.md) | Devs | F4 noVNC console |
+| [`docs/F5-SCORING.md`](docs/F5-SCORING.md) | Devs | F5 flag scoring |
+| [`docs/F6-MULTITEAM.md`](docs/F6-MULTITEAM.md) | Devs | F6 multi-team exercises |
+| [`docs/F7-TEMPLATES.md`](docs/F7-TEMPLATES.md) | Devs | F7 range templates |
+| [`docs/F8-SOC.md`](docs/F8-SOC.md) | Devs | F8 SOC view + SSE |
+| [`docs/PORTAL-APP.md`](docs/PORTAL-APP.md) | Frontend devs | Portal component inventory |
+| [`docs/PORTAL-UI.md`](docs/PORTAL-UI.md) | Designers | Visual layout + tab nav |
+| [`docs/LIVE-DRILL-RUNBOOK.md`](docs/LIVE-DRILL-RUNBOOK.md) | Operators | Live drill command reference |
+| [`docs/DEMO.md`](docs/DEMO.md) | Operators | Demo flow notes |
+| [`docs/PROXMOX-SETUP.md`](docs/PROXMOX-SETUP.md) | Operators | Proxmox token + ACL setup |
+| [`docs/USERS.md`](docs/USERS.md) | Operators | Credential auth model |
+| [`docs/SCENARIO-SPEC.md`](docs/SCENARIO-SPEC.md) | Scenario authors | YAML schema reference |
+| [`docs/SCENARIO-SYNC.md`](docs/SCENARIO-SYNC.md) | Devs | YAML -> DB sync |
+| [`docs/SETUP-UI.md`](docs/SETUP-UI.md) | Operators | Setup wizard at `/portal/` |
+| [`docs/OBSERVABILITY.md`](docs/OBSERVABILITY.md) | Operators | Prometheus + Grafana setup |
 
 ## Roadmap
 
-| Phase | What | Status |
-|------:|------|:------:|
-| 0     | Control-plane skeleton + Proxmox client wrapper                       | ✅ done |
-| 1     | One-VM drill end-to-end (vsftpd → first-live-drill scenario)          | ✅ code ✅ — needs one live drill run to flip all L1 ✅ |
-| 2     | Multi-VM drills in isolated VxLAN zones                              | ❌ not started |
-| 3     | Wazuh correlation + MISP publishing + PDF after-action reports      | ❌ not started |
-| 4     | RBAC via Keycloak + scheduled drills + scenarios marketplace         | ❌ not started |
+All five final-product pillars (PLAN.md §17) shipped in 2026:
 
-**Where we actually are**: between Phase 1 and Phase 2. The L1
-acceptance bar from [`docs/TEST-PRODUCT.md`](docs/TEST-PRODUCT.md) is
-met end-to-end — all 276 tests pass, `make preflight` reports 9/9, run
-#11 succeeded against real PVE (clone → boot → stop → destroy on a
-single `drill_vm` asset), and the wizard at `/portal/` covers the
-one-shot fresh-deploy path (probe → `pveum` grant → template upload →
-first drill).
+| # | Pillar | Commits |
+|---|---|---|
+| **F9** | DrillConsole consolidation — leaderboard + SOC inline | `cbd181e`, `aeba832`, `2004e83` |
+| **R1** | Multi-worker SSE via Redis pub/sub | `19d5cce`, `86020ef` |
+| **F11** | Drill debrief artifact (markdown) | `3683480`, `64256e1`, `b0b3cea` |
+| **F10** | Onboarding wizard (4-step) | `2ab897a`, `a8db813`, `68d7f15` |
+| **F12** | Product packaging (this commit) | `...` |
 
-**Next move** (~2.5 h, no PVE required): close the remaining L2 work
-listed in [`docs/TEST-PRODUCT.md` §L2](docs/TEST-PRODUCT.md#l2--trusted-colleague-lan-demo)
-— rate-limit on `POST /drills`, drill auto-timeout, MinIO telemetry
-sink, after-action JSON report. Once those land: L2 ledger to 15/18
-✅, tag `v0.2.0-l2`.
+Backlog (PLAN.md §19): R2 (light theme + mobile + keyboard shortcuts),
+R3 (coaching / replay mode), R4 (range bookings calendar), R5
+(multi-tenant isolation), R6 (scenario marketplace), R7 (replay UI
+with playhead). Total ~34 h. No committed delivery date.
 
-**Optional polish** (~1 h, no PVE required): next-plan item #5
-(SSH-key wizard step) so the wizard flips `PVEDatastoreAdmin` itself
-and a fresh deploy needs zero SSH into PVE at all. See
-[`docs/TEST-PRODUCT.md` §Next plan](docs/TEST-PRODUCT.md#next-plan-post-l1-ordered).
+## Architecture
 
-Full design: [`docs/PLAN.md`](docs/PLAN.md). Canonical status ledger:
-[`docs/TEST-PRODUCT.md`](docs/TEST-PRODUCT.md).
+```
++------------------+       +-------------------+       +------------------+
+| Proxmox VE host  |       | Traefik (TLS)     |       | div:ide portal   |
+| (PVE 9.x)        | <---> | (prod only)       | <---> | /portal/app/     |
+|                  |       |                   |       | (React + Vite)   |
+| +--------------+ |       +-------------------+       +------------------+
+| | tpl-debian   | |                  |                          ^
+| | tpl-kali     | |                  |                          |
+| | tpl-pfsense  | |                  v                          |
+| +--------------+ |       +-------------------+                  |
+| | cloned VMs   | |       | div:ide API       |                  |
+| | (drill)      | | <---> | (FastAPI +        | <----------------+
+| +--------------+ |       |  uvicorn workers) |
++------------------+       |                   |
+                            +---------+---------+
+                                      |
+                                      v
+                  +-----------+-----------+-----------+
+                  |                       |           |
+                  v                       v           v
+            +----------+           +-----------+   +--------+
+            | Postgres |           | Redis     |   | MinIO  |
+            | (state)  |           | (cache +  |   | (artif-|
+            +----------+           |  pub/sub) |   | acts)  |
+                                   +-----------+   +--------+
+```
 
----
+For full architecture diagrams, see [`docs/images/`](docs/images/).
+
+## Status codes
+
+All API endpoints follow the standard FastAPI conventions:
+
+  * `200` / `201` — success.
+  * `400` — bad request (malformed body).
+  * `401` — no token.
+  * `403` — token can't see the resource.
+  * `404` — not found.
+  * `409` — conflict (e.g., exercise already started, run
+    not terminal for debrief).
+  * `422` — validation error.
+  * `429` — rate-limited.
+  * `503` — upstream unavailable (PVE unreachable).
 
 ## License
 
 MIT — see [`LICENSE`](LICENSE).
+
+## Contributing
+
+Bug reports + PRs welcome. The platform is built on:
+
+  * **Backend**: Python 3.12, FastAPI, SQLAlchemy (async),
+    Pydantic, Alembic, redis-py, websockets.
+  * **Frontend**: React 18, Vite 6, TypeScript, TailwindCSS,
+    Lucide icons. Bundle ceiling: 280 KB.
+  * **Infra**: Docker Compose, Traefik (prod), PostgreSQL,
+    Redis, MinIO.
+
+Before opening a PR:
+
+```bash
+make verify    # lint + test + preflight + smoke + bundle-budget
+```
