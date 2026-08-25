@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ScenariosCard, type Scenario } from "@/components/portal/scenarios-card";
 import { TokenBar } from "@/components/portal/token-bar";
 import { MyRunsCard, type RunRow } from "@/components/portal/my-runs-card";
@@ -16,6 +16,7 @@ import { UserListCard } from "@/components/portal/user-list-card";
 import { ToastHost } from "@/components/portal/toast";
 import { useHashRoute } from "@/hooks/use-hash-route";
 import { useMe } from "@/lib/auth";
+import { probeSetup } from "@/lib/api";
 
 /**
  * Top-level portal layout.
@@ -30,7 +31,9 @@ import { useMe } from "@/lib/auth";
  * Tab visibility is derived from the role via the same matrix
  * the card composition used:
  *
- *   * anonymous → only the SignInCard is shown; no tabs render.
+ *   * anonymous → SignInCard (returning deployment) or
+ *                 OnboardingWizard (empty deployment). Determined
+ *                 on mount by GET /api/v1/auth/setup probe.
  *   * admin/lead → all tabs.
  *   * red/blue/observer → no Admin tab.
  *
@@ -38,9 +41,13 @@ import { useMe } from "@/lib/auth";
  * `window.location.hash = "#/operate"` switches view. The hook
  * subscribes to hashchange so back/forward buttons work.
  *
- * The anonymous / SignInCard path is intentionally below the
- * TopNav so a signed-out user still sees the brand bar — that's
- * the entry point that tells them what they're logging into.
+ * Sign-in UX (F-signin-ux):
+ *   On mount, when no token exists, we probe GET /api/v1/auth/setup.
+ *   - needs_setup=false → SignInCard (returning operator, admin exists)
+ *   - needs_setup=true  → OnboardingWizard (first-time deploy)
+ *   - probe error       → SignInCard (safe fallback; wizard link at bottom)
+ *   This mirrors TryHackMe / HackTheBox: sign-in is the default landing
+ *   page. First-time setup is discovered only when the DB is empty.
  */
 
 const VALID_VIEWS = [
@@ -52,15 +59,38 @@ const VALID_VIEWS = [
   "profile",
 ] as const;
 
+// Three states for the anonymous landing:
+//   "probing"  — waiting for GET /api/v1/auth/setup
+//   "signin"   — show SignInCard  (needs_setup=false or probe error)
+//   "wizard"   — show OnboardingWizard (needs_setup=true)
+type AnonView = "probing" | "signin" | "wizard";
+
 export default function App() {
   const [pickedScenario, setPickedScenario] = useState<Scenario | null>(null);
   const [pickedRun, setPickedRun] = useState<RunRow | null>(null);
   const { me, loading } = useMe();
   const [activeView, setActiveView] = useHashRoute(VALID_VIEWS, "dashboard");
-  // F10.4: when the wizard is showing, suppress the SignInCard so
-  // the operator only sees the wizard. Toggled to true when the
-  // operator hits "Sign in instead" on step 1 (admin already exists).
-  const [wizardSignInFallback, setWizardSignInFallback] = useState(false);
+
+  // F-signin-ux: probe on mount so returning operators land on the
+  // sign-in form immediately instead of digging through the wizard.
+  const [anonView, setAnonView] = useState<AnonView>("probing");
+
+  useEffect(() => {
+    // Only probe when there's no token (me===null after useMe settles).
+    // We can't wait for `loading` to finish before starting the probe —
+    // fire it immediately and let them race; the faster one wins.
+    let cancelled = false;
+    probeSetup()
+      .then(({ needs_setup }) => {
+        if (!cancelled) setAnonView(needs_setup ? "wizard" : "signin");
+      })
+      .catch(() => {
+        // Probe failed (API down, network error). Fall back to SignInCard.
+        // The wizard link at the bottom lets first-timers escape.
+        if (!cancelled) setAnonView("signin");
+      });
+    return () => { cancelled = true; };
+  }, []);
 
   function onPickRunFromDashboard(runId: number) {
     // The Dashboard's "Recent runs" list jumps the operator
@@ -79,18 +109,28 @@ export default function App() {
     <div className="min-h-screen bg-background">
       <TopNav activeView={activeView} onChangeView={setActiveView} />
       <main className="container mx-auto max-w-6xl space-y-6 px-4 py-8">
-        {!me && loading && (
+        {/* ── anonymous user landing ────────────────────────────────────
+             Three states driven by the setup probe result:
+             "probing" → spinner while GET /api/v1/auth/setup is in-flight
+             "signin"  → SignInCard (returning deployment, admin exists)
+             "wizard"  → OnboardingWizard (empty deployment, needs setup)
+             me===null && loading  → useMe still resolving (/me in-flight)
+        ─────────────────────────────────────────────────────────────── */}
+        {!me && (loading || anonView === "probing") && (
           <p className="text-sm italic text-muted-foreground">
             Identifying…
           </p>
         )}
-        {!me && !loading && !wizardSignInFallback && (
-          // F10.3 / F10.4: anonymous user, no token. Show the
-          // onboarding wizard so first-time operators can create
-          // the initial admin + run their first drill without
-          // leaving the portal. The wizard self-routes to step 2
-          // if the operator hits "Sign in instead" because the
-          // admin already exists.
+        {!me && !loading && anonView === "signin" && (
+          // F-signin-ux: returning deployment. Admin exists — show
+          // the sign-in form directly, no wizard in the way.
+          <SignInCard
+            onNeedsSetup={() => setAnonView("wizard")}
+          />
+        )}
+        {!me && !loading && anonView === "wizard" && (
+          // F10.3: empty deployment. Guide the operator through
+          // creating the first admin + launching their first drill.
           <OnboardingWizard
             onLaunched={(runId) => {
               setPickedRun({
@@ -99,17 +139,8 @@ export default function App() {
               });
               setActiveView("observe");
             }}
-            onSignInInstead={() => setWizardSignInFallback(true)}
+            onSignInInstead={() => setAnonView("signin")}
           />
-        )}
-        {!me && !loading && wizardSignInFallback && (
-          <div className="space-y-4">
-            <p className="text-sm text-muted-foreground">
-              Sign in to operate drills, observe live exercises, and
-              download after-action reports.
-            </p>
-            <SignInCard />
-          </div>
         )}
         {me &&
           (() => {

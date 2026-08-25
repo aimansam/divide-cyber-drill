@@ -118,6 +118,37 @@ export async function login(sub: string, password: string): Promise<LoginRespons
   return parsed as LoginResponse;
 }
 
+// ---------- setup probe (F-signin-ux) ---------------------------------------
+//
+// GET /api/v1/auth/setup → { needs_setup: bool }
+// Public endpoint — no token required. Used by app.tsx on mount to decide
+// whether to show the sign-in form (returning deployment, needs_setup=false)
+// or the onboarding wizard (empty deployment, needs_setup=true).
+
+export interface SetupProbeResponse {
+  needs_setup: boolean;
+}
+
+export async function probeSetup(): Promise<SetupProbeResponse> {
+  const res = await fetch("/api/v1/auth/setup");
+  const text = await res.text();
+  let parsed: unknown = text;
+  try {
+    parsed = text ? JSON.parse(text) : null;
+  } catch {
+    /* not JSON */
+  }
+  if (!res.ok) {
+    throw new ApiError(
+      res.status,
+      "/api/v1/auth/setup",
+      `HTTP ${res.status} /api/v1/auth/setup`,
+      parsed,
+    );
+  }
+  return parsed as SetupProbeResponse;
+}
+
 export async function logout(): Promise<void> {
   // Best-effort. The token in localStorage is the actual session;
   // the server logout is stateless today. We still POST so future

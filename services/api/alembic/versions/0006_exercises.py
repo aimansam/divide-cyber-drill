@@ -32,22 +32,10 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # Add Run columns via batch op so SQLite is happy with the FK
-    # on the new column.
-    with op.batch_alter_table("runs") as batch_op:
-        batch_op.add_column(
-            sa.Column(
-                "exercise_id",
-                sa.Integer(),
-                sa.ForeignKey("exercises.id", ondelete="SET NULL"),
-                nullable=True,
-            )
-        )
-        batch_op.add_column(
-            sa.Column("team", sa.String(length=16), nullable=True)
-        )
-
-    # exercises
+    # exercises must be created BEFORE the FK on runs.exercise_id
+    # references it. The batch_alter_table block below emits an
+    # ALTER TABLE … ADD CONSTRAINT … FOREIGN KEY which PostgreSQL
+    # validates immediately against the referenced table.
     op.create_table(
         "exercises",
         sa.Column("id", sa.Integer(), primary_key=True),
@@ -77,6 +65,20 @@ def upgrade() -> None:
     )
     op.create_index("ix_exercises_status", "exercises", ["status"])
     op.create_index("ix_exercises_scenario_id", "exercises", ["scenario_id"])
+
+    # Add Run columns AFTER exercises exists so the FK resolves.
+    with op.batch_alter_table("runs") as batch_op:
+        batch_op.add_column(
+            sa.Column(
+                "exercise_id",
+                sa.Integer(),
+                sa.ForeignKey("exercises.id", ondelete="SET NULL"),
+                nullable=True,
+            )
+        )
+        batch_op.add_column(
+            sa.Column("team", sa.String(length=16), nullable=True)
+        )
 
     # teams
     op.create_table(

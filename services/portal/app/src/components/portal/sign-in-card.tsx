@@ -1,11 +1,16 @@
 /**
- * SignInCard — credential login (F3-prep).
+ * SignInCard — credential login (F3-prep / F-signin-ux).
  *
  * Renders username + password fields + a "Sign in" button. On
  * submit, POSTs to /api/v1/auth/login. On success, stashes the
  * returned HMAC token in localStorage and the parent re-renders
  * the authenticated layout. On failure, shows a banner with the
  * server's detail string.
+ *
+ * F-signin-ux: this card is now the DEFAULT landing page for
+ * returning deployments (probe says needs_setup=false). The
+ * optional `onNeedsSetup` callback lets a first-timer escape to
+ * the OnboardingWizard by clicking "First time? Set up div:ide".
  *
  * Replaces the old "paste your token" UX for non-SSH operators.
  * SSH operators can still paste a token directly into TokenBar;
@@ -19,13 +24,19 @@
  */
 
 import { useState } from "react";
-import { LogIn, ShieldCheck } from "lucide-react";
+import { LogIn, ShieldCheck, Wand2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ApiError, login, setToken } from "@/lib/api";
 import { emitTokenChange } from "@/lib/auth";
 
-export function SignInCard() {
+interface SignInCardProps {
+  /** Called when the user clicks "First time? Set up div:ide →".
+   *  Parent (app.tsx) swaps in the OnboardingWizard. */
+  onNeedsSetup?: () => void;
+}
+
+export function SignInCard({ onNeedsSetup }: SignInCardProps = {}) {
   const [sub, setSub] = useState("");
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -71,7 +82,7 @@ export function SignInCard() {
   }
 
   return (
-    <div className="rounded-md border border-border bg-card p-6 shadow-sm">
+    <div className="mx-auto max-w-sm rounded-md border border-border bg-card p-6 shadow-sm">
       <div className="mb-4 flex items-center gap-2">
         <ShieldCheck className="h-5 w-5 text-primary" />
         <h2 className="text-lg font-semibold tracking-tight">
@@ -79,12 +90,7 @@ export function SignInCard() {
         </h2>
       </div>
       <p className="mb-4 text-sm text-muted-foreground">
-        Enter your div:ide username and password to start a drill session.
-        SSH operators can still{" "}
-        <a className="underline" href="/portal/">
-          paste a token directly
-        </a>{" "}
-        via the setup wizard.
+        Enter your username and password to continue.
       </p>
 
       <form onSubmit={onSubmit} className="space-y-3">
@@ -105,6 +111,8 @@ export function SignInCard() {
             placeholder="alice"
             disabled={submitting}
             className="font-mono"
+            // eslint-disable-next-line jsx-a11y/no-autofocus
+            autoFocus
           />
         </div>
         <div>
@@ -144,6 +152,20 @@ export function SignInCard() {
           {submitting ? "Signing in…" : "Sign in"}
         </Button>
       </form>
+
+      {/* First-time / empty-deployment escape hatch */}
+      {onNeedsSetup && (
+        <div className="mt-4 border-t border-border pt-4">
+          <button
+            type="button"
+            onClick={onNeedsSetup}
+            className="flex w-full items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <Wand2 className="h-3.5 w-3.5 shrink-0" />
+            First time here? Set up div:ide →
+          </button>
+        </div>
+      )}
     </div>
   );
 }

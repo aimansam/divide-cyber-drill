@@ -212,6 +212,31 @@ class UserPublic(BaseModel):
 # --- endpoints ---------------------------------------------------------------
 
 
+@router.get(
+    "/setup",
+    summary="Probe whether first-admin setup is needed (public)",
+    status_code=status.HTTP_200_OK,
+)
+async def setup_probe(
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> dict[str, bool]:
+    """Return ``{"needs_setup": true}`` when no users exist yet, otherwise
+    ``{"needs_setup": false}``.
+
+    This endpoint is intentionally public (no token required). It lets the
+    portal decide on first paint whether to show the sign-in form (returning
+    deployment) or the onboarding wizard (empty deployment).
+
+    The only information leaked is "has any user ever been created?" — the
+    same binary fact a caller learns from getting a 409 on
+    ``POST /auth/setup``. No enumeration risk.
+    """
+    count: int = (
+        await session.execute(select(sql_func.count()).select_from(db_models.User))
+    ).scalar_one()
+    return {"needs_setup": count == 0}
+
+
 @router.post(
     "/login",
     summary="Credential login — username + password → HMAC token",
