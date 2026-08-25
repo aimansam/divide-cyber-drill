@@ -37,7 +37,6 @@ import { useEffect, useState } from "react";
 import { Activity, Download, FileText, Loader2, RefreshCw } from "lucide-react";
 import { api, ApiError, getToken } from "@/lib/api";
 import { AssetsCard } from "./assets-card";
-import { ConsoleCard } from "./console-card";
 import { AuditExplorerCard } from "./audit-explorer-card";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "./empty-state";
@@ -68,10 +67,6 @@ export function DrillConsole({ pickedRunId, scenarioName }: DrillConsoleProps) {
   const [error, setError] = useState<string | null>(null);
   const [reportPending, setReportPending] = useState(false);
   const [tick, setTick] = useState(0); // re-renders the duration timer
-  const [pickedAsset, setPickedAsset] = useState<
-    { asset_id: number; role?: string } | null
-  >(null);
-
   const isLive =
     !!run && (run.status === "running" || run.status === "pending");
 
@@ -331,27 +326,8 @@ export function DrillConsole({ pickedRunId, scenarioName }: DrillConsoleProps) {
         <AssetsCard
           pickedRunId={pickedRunId}
           compact
-          onOpenConsole={(a) =>
-            setPickedAsset({
-              asset_id: a.asset_id ?? 0,
-              role: a.role,
-            })
-          }
         />
       </section>
-
-      {pickedAsset !== null ? (
-        <section aria-label="Console">
-          <h3 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-            VNC console
-          </h3>
-          <ConsoleCard
-            pickedRunId={pickedRunId}
-            pickedAsset={pickedAsset}
-            onClose={() => setPickedAsset(null)}
-          />
-        </section>
-      ) : null}
 
       <section aria-label="Audit feed">
         <h3 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">

@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .adapter import ClonedVM, CloneSpec, NetworkSpec, ProxmoxAdapter, VmState, VncTicket
+from .adapter import ClonedVM, CloneSpec, NetworkSpec, ProxmoxAdapter, VmState
 
 
 @dataclass
@@ -72,9 +72,6 @@ class MockProxmoxAdapter(ProxmoxAdapter):
         self.bridges_created: list[NetworkSpec] = []
         self.bridges_removed: list[str] = []
         self.nic_attached: list[tuple[int, str, int]] = []
-        # F4 noVNC history:
-        self.vnc_tickets: list[tuple[int, str]] = []
-
     # --- inventory -------------------------------------------------------
 
     async def list_nodes(self) -> list[str]:
@@ -149,35 +146,6 @@ class MockProxmoxAdapter(ProxmoxAdapter):
             name=vm.name,
             status=vm.status,
             ip=vm.ip,
-        )
-
-    # --- F4 noVNC --------------------------------------------------
-
-    async def get_vnc_ticket(self, vmid: int, node: str) -> VncTicket:
-        """Issue a deterministic mock ticket for tests.
-
-        The ticket is a hex-ish string built from the VMID so
-        tests can assert exact values; PVE tickets are real hex
-        but the format isn't load-bearing — the browser just
-        posts it back as vncticket in the WS query string.
-
-        The mock also raises KeyError if the VM is missing (so
-        tests catch typos in vmid) and refuses to issue tickets
-        for stopped VMs (matching PVE behaviour — you can't
-        VNC into a powered-off VM).
-        """
-        self.vnc_tickets.append((vmid, node))
-        vm = self._require_vm(vmid, node)
-        if vm.status != "running":
-            raise RuntimeError(
-                f"VM {vmid} on node {node} is not running; "
-                "PVE refuses VNC tickets for stopped VMs"
-            )
-        return VncTicket(
-            ticket=f"mock-ticket-{vmid:04x}",
-            port=5900 + vmid % 1000,  # PVE typical range
-            node=node,
-            vmid=vmid,
         )
 
     # --- helpers for tests ----------------------------------------------

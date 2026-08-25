@@ -165,18 +165,6 @@ def create_app() -> FastAPI:
     app.include_router(templates.router, prefix="/api/v1/templates", tags=["templates"])
     app.include_router(events.router, prefix="/api/v1", tags=["events"])
 
-    # F4 noVNC: register the WS proxy route directly on the app
-    # because FastAPI router.include_router doesn't surface
-    # WebSocket routes. The handler lives in
-    # ``app.services.console_proxy`` and is wired to
-    # ``/api/v1/drills/{run_id}/assets/{asset_id}/console/ws``.
-    from fastapi import WebSocket  # noqa: F401  - used by ws_console
-    from app.services.console_proxy import ws_console  # type: ignore
-    app.add_api_websocket_route(
-        "/api/v1/drills/{run_id}/assets/{asset_id}/console/ws",
-        ws_console,
-    )
-
     # Mount the React-based user portal at /portal/app/ FIRST. Starlette
     # resolves mounts by first match, so the more-specific subpath has
     # to be registered before the catch-all /portal mount below.
