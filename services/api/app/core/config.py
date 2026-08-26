@@ -101,6 +101,14 @@ class Settings(BaseSettings):
     # the live source tree.
     portal_dir: str = "/app/portal"
 
+    # P12: prefix the portal is mounted at. Used to build absolute
+    # magic-link URLs in admin-issued reset links
+    # (POST /api/v1/auth/users/{sub}/issue-reset). Default
+    # ``/portal/app/`` matches the docker-compose mount; reverse-
+    # proxied deployments (subdomain, custom path) override via
+    # DIVIDE_PORTAL_PATH. Trailing slash is required.
+    portal_path: str = "/portal/app/"
+
     # Drill lifecycle (L2 2.8) — auto-timeout runs that stay RUNNING for
     # longer than this many minutes. The watchdog asyncio task is
     # scheduled by ``Runner._maybe_schedule_watchdog`` after a run enters

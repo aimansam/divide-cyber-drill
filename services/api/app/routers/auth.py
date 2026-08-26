@@ -797,7 +797,17 @@ async def issue_reset_link(
     # portal is hosted (docker-compose shares an origin with the
     # API; reverse-proxied deployments may need to edit the
     # hostname after pasting).
-    magic_link = f"/portal/app/#/?sub={user.sub}&token={token}"
+    #
+    # P12: the path is now configurable via settings.portal_path so
+    # reverse-proxied / subdomain deployments don't have to paste
+    # the path back into the link. Default stays "/portal/app/"
+    # so docker-compose keeps working unchanged.
+    from app.core.config import settings
+
+    portal_base = settings.portal_path.rstrip("/") + "/"
+    magic_link = (
+        f"{portal_base}#/?sub={user.sub}&token={token}"
+    )
 
     return IssueResetLinkResponse(
         sub=user.sub,

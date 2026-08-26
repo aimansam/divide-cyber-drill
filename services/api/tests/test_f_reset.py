@@ -389,6 +389,46 @@ class TestIssueResetLink:
         )
         assert body["expires_at"]
 
+    def test_magic_link_respects_divide_portal_path_env(
+        self, client: TestClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """P12: setting ``DIVIDE_PORTAL_PATH`` to a custom prefix
+        makes the magic_link use that prefix instead of the
+        docker-compose default. Reverse-proxied deployments need
+        this so the operator can paste the link directly into
+        Slack/email without hand-editing the path.
+        """
+        from app.core.config import get_settings
+
+        monkeypatch.setenv("DIVIDE_PORTAL_PATH", "/my-portal/")
+        get_settings.cache_clear()
+        try:
+            _bootstrap_admin(client, sub="admin", password="adminpass1")
+            admin_tok = _login(client, "admin", "adminpass1")
+            # Create the victim user this test will issue for.
+            r0 = client.post(
+                "/api/v1/auth/users",
+                json={
+                    "sub": "victim",
+                    "password": "victimpass1",
+                    "role": "red",
+                },
+                headers={"X-Divide-Token": admin_tok},
+            )
+            assert r0.status_code == 201, r0.text
+            r = client.post(
+                "/api/v1/auth/users/victim/issue-reset",
+                headers={"X-Divide-Token": admin_tok},
+            )
+            assert r.status_code == 200
+            assert r.json()["magic_link"].startswith(
+                "/my-portal/#/?sub=victim&token="
+            )
+            # And the default path is NOT used.
+            assert not r.json()["magic_link"].startswith("/portal/app/")
+        finally:
+            get_settings.cache_clear()
+
     def test_non_admin_cannot_issue_reset_link(
         self, client: TestClient
     ) -> None:
