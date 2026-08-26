@@ -109,7 +109,16 @@ interface OnboardingWizardProps {
 // ---------------------------------------------------------------- helpers
 
 async function listScenariosWithMeta(): Promise<ScenarioWithMeta[]> {
-  const items = await api.get<Scenario[]>("/api/v1/scenarios");
+  // GET /api/v1/scenarios returns { items: Scenario[], total: number },
+  // not a bare array. The same payload shape is consumed correctly
+  // elsewhere in the portal (scenarios-card.tsx, scenario-authoring-card.tsx)
+  // via the `data.items ?? []` pattern. Match that here; otherwise
+  // the immediate .map() below throws "TypeError: (intermediate
+  // value).map is not a function" on wizard mount.
+  const data = await api.get<{ items?: Scenario[]; total?: number }>(
+    "/api/v1/scenarios",
+  );
+  const items = data.items ?? [];
   return items.map((s) => ({
     ...s,
     is_multi_team: _scenarioIsMultiTeam(s),
