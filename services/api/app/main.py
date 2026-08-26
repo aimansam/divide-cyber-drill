@@ -76,6 +76,40 @@ async def lifespan(app: FastAPI):
                         )
             else:
                 log.info("divide_api.bootstrap_admin.skipped_no_env")
+                # Q2 fix: warn loudly if no users exist and the operator
+                # has not configured the bootstrap env vars. Without this
+                # warning, a fresh install will silently come up with
+                # zero users, the wizard will hang at the login screen,
+                # and the operator has no signal that they need to set
+                # DIVIDE_BOOTSTRAP_ADMIN_SUB + DIVIDE_BOOTSTRAP_ADMIN_PASSWORD.
+                try:
+                    from sqlalchemy import func, select
+
+                    from app.db.models import User
+
+                    sm_check = get_sessionmaker()
+                    async with sm_check() as check_session:
+                        user_count = (
+                            await check_session.execute(
+                                select(func.count()).select_from(User)
+                            )
+                        ).scalar_one()
+                    if user_count == 0:
+                        log.warning(
+                            "divide_api.bootstrap_admin.missing_admin",
+                            hint=(
+                                "No users exist and DIVIDE_BOOTSTRAP_ADMIN_SUB "
+                                "/ DIVIDE_BOOTSTRAP_ADMIN_PASSWORD are not set. "
+                                "The wizard will render but no one can sign in. "
+                                "Set both env vars in deploy/.env and restart the "
+                                "API container to bootstrap the first admin."
+                            ),
+                        )
+                except Exception as exc:  # pragma: no cover - best-effort
+                    log.warning(
+                        "divide_api.bootstrap_admin.missing_admin_check_failed",
+                        error=str(exc),
+                    )
         except Exception as exc:  # pragma: no cover - best-effort
             log.error("divide_api.bootstrap_admin.crashed", error=str(exc))
 
