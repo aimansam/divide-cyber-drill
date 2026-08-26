@@ -19,7 +19,7 @@ build: ## Build all container images.
 pull: ## Pull external base images.
 	$(COMPOSE) pull
 
-up: ## Start the control-plane stack in the background.
+up: portal-build ## Start the control-plane stack in the background.
 	$(COMPOSE) up -d
 	@echo "Waiting for /healthz ..."
 	@for i in $$(seq 1 30); do \
@@ -41,6 +41,46 @@ ps: ## Show running services.
 
 restart: ## Restart the API container only.
 	$(COMPOSE) restart api
+
+# --- fresh-clone: wipe non-source state and re-run the day-1 path -----
+# Drops docker volumes, removes node_modules + portal/build, removes the
+# API image so it picks up code edits. Source tree is preserved.
+#
+# Designed to reproduce what a fresh ``git clone`` operator would
+# experience, then walk them through the day-1 setup. Pair with the
+# `verify-bundle` + `test` targets to confirm everything is green.
+#
+# SAFETY: this is destructive. Requires an explicit YES.
+fresh-clone: ## Wipe non-source state to simulate a fresh git clone (destructive).
+	@if [[ "$(FORCE)" != "1" ]]; then \
+		echo "fresh-clone is destructive. Re-run with FORCE=1 to proceed."; \
+		exit 1; \
+	fi
+	@echo "--- 1. Stop containers + drop state volumes ---"
+	$(COMPOSE) down --remove-orphans || true
+	docker volume rm divide-cyber-drill_postgres-data \
+	                   divide-cyber-drill_grafana-data \
+	                   divide-cyber-drill_minio-data \
+	                   divide-cyber-drill_prometheus-data \
+	                   divide-cyber-drill_redis-data \
+	                   divide-cyber-drill_traefik-letsencrypt \
+	                   divide-cyber-drill_wg-easy-data 2>/dev/null || true
+	@echo "--- 2. Remove API image (forces rebuild from source) ---"
+	docker rmi divide/api:dev 2>/dev/null || true
+	@echo "--- 3. Delete node_modules + portal/build ---"
+	rm -rf services/portal/app/node_modules
+	rm -rf services/portal/app/build
+	@echo "--- 4. Wipe __pycache__ + dev caches ---"
+	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+	rm -rf .pytest_cache services/api/.pytest_cache .ruff_cache
+	@echo "--- 5. Wipe operator-edited deploy/.env (NOT .env.example) ---"
+	rm -f deploy/.env
+	@echo ""
+	@echo "=== fresh-clone complete ==="
+	@echo "Now configure deploy/.env from deploy/.env.example and run:"
+	@echo "  cp deploy/.env.example deploy/.env"
+	@echo "  # edit deploy/.env: DIVIDE_BOOTSTRAP_ADMIN_*, PROXMOX_*, MINIO_ROOT_PASSWORD, etc."
+	@echo "  make up"
 
 lint: ## Run ruff + mypy.
 	$(PYTHON) -m ruff check .
