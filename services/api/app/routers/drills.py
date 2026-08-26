@@ -39,6 +39,8 @@ from app.db.models import Exercise, ExerciseStatus, Team
 from app.services.flags import FlagError, capture_seconds, resolve_flag, verify_flag_value
 from app.services.scoring import score as score_points, score_breakdown
 from app.services.authorization import can_view_run, visible_runs_query
+from app.services.proxmox import ProxmoxAPIError
+from app.services.pve_sdn import SdnPermissionError
 from app.services.rate_limit import check_drill_start_limit
 
 router = APIRouter()
@@ -247,6 +249,35 @@ async def start_drill(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=str(exc),
         ) from exc
+    except SdnPermissionError as exc:
+        # Q7: a permission-denied response from PVE during bridge
+        # provisioning is actionable -- the operator needs to run
+        # the `pveum` line from ``exc.pveum_hint``. Surface it as
+        # 403 with structured detail (same shape as
+        # ``POST /admin/pve-setup-bridges``).
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "message": str(exc),
+                "required_role": getattr(exc, "required_role", None),
+                "pveum_hint": getattr(exc, "pveum_hint", None),
+                "pve_path": getattr(exc, "pve_path", None),
+            },
+        ) from exc
+    except ProxmoxAPIError as exc:
+        # Q7: any other Proxmox-side failure (network, auth, missing
+        # resources like an unprovisioned bridge) bubbles up as 502
+        # with the actual PVE error text. Before this fix, a missing
+        # bridge on PVE crashed POST /drills as a generic 500 with
+        # "Internal Server Error", making the wizard's red banner
+        # useless to the operator. Now the helpful P1 message
+        # ("bridge 'vmbr100' not configured ... run Step 0 of the
+        # wizard or `pvesh create /cluster/sdn/vnets ...`") reaches
+        # the browser.
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"PVE unreachable: {exc}",
+        ) from exc
     return {
         "run_id": result.run_id,
         "status": result.status.value,
@@ -272,6 +303,13 @@ async def stop_drill(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=str(exc),
+        ) from exc
+    except ProxmoxAPIError as exc:
+        # Q7: surface PVE-side failure rather than letting it crash
+        # as a 500. Same mapping as start_drill.
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"PVE unreachable: {exc}",
         ) from exc
     return {
         "run_id": run.id,
@@ -362,6 +400,17 @@ async def cancel_drill(
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=msg,
+        ) from exc
+    except ProxmoxAPIError as exc:
+        # Q7: a PVE-side failure during teardown (e.g. network
+        # glitch, PVE rebooted mid-cancel) should map to 502 with
+        # the actual error, not crash as a 500. The teardown is
+        # best-effort by design, but the operator deserves to see
+        # what actually happened.
+        record_cancel(result="pve_error")
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"PVE unreachable: {exc}",
         ) from exc
     except Exception:  # noqa: BLE001
         record_cancel(result="error")
