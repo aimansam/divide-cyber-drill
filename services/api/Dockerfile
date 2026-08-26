@@ -56,6 +56,7 @@ RUN pip install --no-index --find-links=/wheels \
 
 COPY services/api/app ./app
 COPY services/api/scripts ./scripts
+RUN chmod +x ./scripts/prestart.py
 COPY services/api/alembic ./alembic
 COPY services/api/alembic.ini ./alembic.ini
 # JSON Schema is shared with the host. We bundle a copy at /app/schemas so
@@ -70,4 +71,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
     CMD curl -fsS http://localhost:8000/healthz || exit 1
 
 ENTRYPOINT ["/usr/bin/tini", "--"]
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Q1 fix: run alembic upgrade head via prestart.py before uvicorn.
+# This way a fresh install (empty DB) gets tables created automatically,
+# and existing installs get new migrations applied on container start.
+CMD ["python", "/app/scripts/prestart.py"]

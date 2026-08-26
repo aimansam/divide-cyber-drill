@@ -60,16 +60,24 @@ def upgrade() -> None:
             )
         )
 
-    # Step 2: migrate the column. We use a USING clause so Postgres
-    # casts existing VARCHAR values into the new enum. If the table
-    # is empty (typical for a fresh install) Postgres still needs the
-    # USING clause -- the cast is unambiguous on empty data, but the
-    # clause documents intent.
+    # Step 2: migrate the column. Three sub-steps because the column
+    # has a server_default (``'idle'::character varying``) that Postgres
+    # cannot auto-cast to the new enum type:
+    #   (a) drop the default so it does not block the type change
+    #   (b) ALTER COLUMN TYPE with USING cast to migrate values
+    #   (c) re-attach the default, this time as the enum literal
+    op.execute(sa.text("ALTER TABLE exercises ALTER COLUMN status DROP DEFAULT"))
     op.execute(
         sa.text(
             "ALTER TABLE exercises "
             "ALTER COLUMN status TYPE exercise_status "
             "USING status::exercise_status"
+        )
+    )
+    op.execute(
+        sa.text(
+            "ALTER TABLE exercises "
+            "ALTER COLUMN status SET DEFAULT 'idle'::exercise_status"
         )
     )
 
@@ -80,12 +88,16 @@ def downgrade() -> None:
     bind = op.get_bind()
     if bind.dialect.name != "postgresql":
         return
+    op.execute(sa.text("ALTER TABLE exercises ALTER COLUMN status DROP DEFAULT"))
     op.execute(
         sa.text(
             "ALTER TABLE exercises "
             "ALTER COLUMN status TYPE VARCHAR(16) "
             "USING status::VARCHAR"
         )
+    )
+    op.execute(
+        sa.text("ALTER TABLE exercises ALTER COLUMN status SET DEFAULT 'idle'")
     )
     # Drop the enum. Note: this will fail if any other column references
     # the type, but the only consumer is exercises.status, so it's safe.
