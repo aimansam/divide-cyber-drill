@@ -40,7 +40,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { api, ApiError } from "@/lib/api";
+import { api, detailFromError } from "@/lib/api";
 
 interface Probe {
   reachable?: boolean;
@@ -95,8 +95,7 @@ export function PveOpsCard() {
       setStorage(s);
       setTmpl(t);
     } catch (e: unknown) {
-      const msg = e instanceof ApiError ? `HTTP ${e.status} ${e.url}` : String(e);
-      setError(msg);
+      setError(detailFromError(e));
     } finally {
       setLoading(false);
     }

@@ -35,7 +35,7 @@
 
 import { useEffect, useState } from "react";
 import { Activity, Download, FileText, Loader2, RefreshCw } from "lucide-react";
-import { api, ApiError, getToken } from "@/lib/api";
+import { api, detailFromError, getToken } from "@/lib/api";
 import { AssetsCard } from "./assets-card";
 import { AuditExplorerCard } from "./audit-explorer-card";
 import { Button } from "@/components/ui/button";
@@ -81,9 +81,7 @@ export function DrillConsole({ pickedRunId, scenarioName }: DrillConsoleProps) {
       const r = await api.get<RunDetail>(`/api/v1/drills/${pickedRunId}`);
       setRun(r);
     } catch (e: unknown) {
-      const msg =
-        e instanceof ApiError ? `HTTP ${e.status} ${e.url}` : String(e);
-      setError(msg);
+      setError(detailFromError(e));
       setRun(null);
     } finally {
       setLoading(false);

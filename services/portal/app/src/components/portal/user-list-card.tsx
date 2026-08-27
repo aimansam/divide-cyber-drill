@@ -41,6 +41,7 @@ import { useToasts } from "./toast";
 import {
   api,
   ApiError,
+  detailFromError,
   issuePasswordResetLink,
   type IssueResetLinkResponse,
 } from "@/lib/api";
@@ -68,9 +69,7 @@ export function UserListCard() {
       const data = await api.get<UserRow[]>("/api/v1/auth/users");
       setUsers(data);
     } catch (e: unknown) {
-      const msg =
-        e instanceof ApiError ? `HTTP ${e.status} ${e.url}` : String(e);
-      setError(msg);
+      setError(detailFromError(e));
       setUsers([]);
     } finally {
       setLoading(false);

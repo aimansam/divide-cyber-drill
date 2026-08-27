@@ -27,7 +27,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { api, ApiError, getToken } from "@/lib/api";
+import { api, detailFromError, getToken } from "@/lib/api";
 import type { RunDetail } from "@/components/portal/run-lifecycle-card";
 
 export function RunInspectorCard({
@@ -93,8 +93,7 @@ export function RunInspectorCard({
       const data = await api.get<RunDetail>(`/api/v1/drills/${pickedRunId}`);
       setRun(data);
     } catch (e: unknown) {
-      const msg = e instanceof ApiError ? `HTTP ${e.status} ${e.url}` : String(e);
-      setError(msg);
+      setError(detailFromError(e));
       setRun(null);
     } finally {
       setLoading(false);

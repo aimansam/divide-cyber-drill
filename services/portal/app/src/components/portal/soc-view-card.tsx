@@ -35,7 +35,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { api, ApiError } from "@/lib/api";
+import { api, detailFromError } from "@/lib/api";
 
 type Severity = "info" | "low" | "medium" | "high";
 
@@ -88,11 +88,7 @@ export function SocViewCard({
         setEvents(r.items || []);
       })
       .catch((e: unknown) => {
-        const msg =
-          e instanceof ApiError
-            ? `HTTP ${e.status} ${e.url}`
-            : String(e);
-        setError(msg);
+        setError(detailFromError(e));
       });
 
     // 2. Open the SSE stream. EventSource is a browser API; the

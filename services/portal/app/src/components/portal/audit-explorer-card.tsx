@@ -28,7 +28,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { api, ApiError } from "@/lib/api";
+import { api, detailFromError } from "@/lib/api";
 
 interface AuditRow {
   id?: number;
@@ -87,8 +87,7 @@ export function AuditExplorerCard({
       );
       setItems(data.items ?? []);
     } catch (e: unknown) {
-      const msg = e instanceof ApiError ? `HTTP ${e.status} ${e.url}` : String(e);
-      setError(msg);
+      setError(detailFromError(e));
       setItems([]);
     } finally {
       setLoading(false);

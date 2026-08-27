@@ -25,7 +25,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 
-import { api, ApiError } from "@/lib/api";
+import { api, detailFromError } from "@/lib/api";
 
 interface LeaderboardTeam {
   rank: number;
@@ -84,11 +84,7 @@ export function LeaderboardCard({
         setError(null);
       } catch (e: unknown) {
         if (cancelled) return;
-        const msg =
-          e instanceof ApiError
-            ? `HTTP ${e.status} ${e.url}`
-            : String(e);
-        setError(msg);
+        setError(detailFromError(e));
         setData(null);
       } finally {
         if (!cancelled) setLoading(false);

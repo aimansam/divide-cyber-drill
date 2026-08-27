@@ -8,7 +8,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { api, ApiError } from "@/lib/api";
+import { api, detailFromError } from "@/lib/api";
 
 export interface Scenario {
   id: number;
@@ -49,8 +49,7 @@ export function ScenariosCard({
       const data = await api.get<ScenariosPayload>("/api/v1/scenarios");
       setItems(data.items ?? []);
     } catch (e: unknown) {
-      const msg = e instanceof ApiError ? `HTTP ${e.status} ${e.url}` : String(e);
-      setError(msg);
+      setError(detailFromError(e));
       setItems([]);
     } finally {
       setLoading(false);

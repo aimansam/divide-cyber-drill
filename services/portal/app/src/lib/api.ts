@@ -33,6 +33,61 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * Extract the most informative error message from an `ApiError` (or any
+ * thrown value).
+ *
+ * Resolution order:
+ *   1. If the server returned a JSON body with a `detail` field, return
+ *      that. `detail` may be:
+ *        - a string (most endpoints — the standard FastAPI shape), or
+ *        - an object with a `message` field (the structured `SdnPermissionError`
+ *          response we surface when the PVE token is missing `SDN.Allocate`),
+ *        - or any other JSON value (we `JSON.stringify` it as a last resort
+ *          so the user at least sees something).
+ *   2. Fall back to `HTTP <status> <url>` (mirrors the historical message).
+ *   3. Fall back to the `Error.message` for non-`ApiError` throws.
+ *   4. Final fallback: `"Network error"`.
+ *
+ * This helper was promoted from a local helper in `step0-pve-setup.tsx`
+ * after the Q7 ProxmoxAPIError→502 fix made `body.detail` carry the
+ * actionable PVE error text. Every portal error toast should now route
+ * through this so the operator sees *why* a request failed, not just
+ * the HTTP status.
+ */
+export function detailFromError(e: unknown): string {
+  if (
+    e &&
+    typeof e === "object" &&
+    "body" in e &&
+    (e as { body?: { detail?: unknown } }).body &&
+    (e as { body: { detail?: unknown } }).body.detail !== undefined
+  ) {
+    const d = (e as { body: { detail: unknown } }).body.detail;
+    if (typeof d === "string") return d;
+    if (typeof d === "object" && d && "message" in d) {
+      return String((d as { message: unknown }).message);
+    }
+    try {
+      return JSON.stringify(d);
+    } catch {
+      return String(d);
+    }
+  }
+  if (
+    e &&
+    typeof e === "object" &&
+    "status" in e &&
+    "url" in e
+  ) {
+    const status = (e as { status: number }).status;
+    const url = (e as { url: string }).url;
+    return `HTTP ${status} ${url}`;
+  }
+  if (e instanceof Error) return e.message;
+  return "Network error";
+}
+
 function authHeaders(extra?: HeadersInit): Headers {
   const h = new Headers(extra);
   const tok = getToken();

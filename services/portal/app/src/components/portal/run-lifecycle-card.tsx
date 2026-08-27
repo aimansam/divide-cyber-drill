@@ -43,7 +43,7 @@ import {
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { api, ApiError } from "@/lib/api";
+import { api, detailFromError } from "@/lib/api";
 import { hasRole, type Role } from "@/lib/roles";
 import type { Scenario } from "@/components/portal/scenarios-card";
 
@@ -127,8 +127,7 @@ export function RunLifecycleCard({
       setRun(data);
       return data;
     } catch (e: unknown) {
-      const msg = e instanceof ApiError ? `HTTP ${e.status} ${e.url}` : String(e);
-      setError(msg);
+      setError(detailFromError(e));
       return null;
     }
   }
@@ -174,8 +173,7 @@ export function RunLifecycleCard({
         startPoll(created.run_id);
       }
     } catch (e: unknown) {
-      const msg = e instanceof ApiError ? `HTTP ${e.status} ${e.url}` : String(e);
-      setError(msg);
+      setError(detailFromError(e));
     } finally {
       setLoading(false);
     }
@@ -193,8 +191,7 @@ export function RunLifecycleCard({
       setRun(updated);
       clearPoll();
     } catch (e: unknown) {
-      const msg = e instanceof ApiError ? `HTTP ${e.status} ${e.url}` : String(e);
-      setError(msg);
+      setError(detailFromError(e));
     } finally {
       setLoading(false);
     }
@@ -393,8 +390,7 @@ function VpnDownloadButton({ runStatus }: { runStatus: string }) {
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
     } catch (e: unknown) {
-      const msg = e instanceof ApiError ? `HTTP ${e.status}` : String(e);
-      setError(`VPN config failed: ${msg}`);
+      setError(`VPN config failed: ${detailFromError(e)}`);
     } finally {
       setDownloading(false);
     }

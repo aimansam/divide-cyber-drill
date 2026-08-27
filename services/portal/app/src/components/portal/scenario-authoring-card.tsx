@@ -36,7 +36,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { api, ApiError, getToken } from "@/lib/api";
+import { api, ApiError, detailFromError, getToken } from "@/lib/api";
 
 interface ScenarioRow {
   id?: number;
@@ -88,9 +88,7 @@ export function ScenarioAuthoringCard() {
       );
       setItems(data.items ?? []);
     } catch (e: unknown) {
-      const msg =
-        e instanceof ApiError ? `HTTP ${e.status} ${e.url}` : String(e);
-      setError(msg);
+      setError(detailFromError(e));
       setItems([]);
     } finally {
       setLoading(false);
@@ -112,9 +110,7 @@ export function ScenarioAuthoringCard() {
       });
       await load();
     } catch (e: unknown) {
-      const msg =
-        e instanceof ApiError ? `HTTP ${e.status} ${e.url}` : String(e);
-      setLastResult({ ok: false, msg });
+      setLastResult({ ok: false, msg: detailFromError(e) });
     } finally {
       setBusy(null);
     }
@@ -128,9 +124,7 @@ export function ScenarioAuthoringCard() {
       setLastResult({ ok: true, msg: `Archived '${name}'` });
       await load();
     } catch (e: unknown) {
-      const msg =
-        e instanceof ApiError ? `HTTP ${e.status} ${e.url}` : String(e);
-      setLastResult({ ok: false, msg });
+      setLastResult({ ok: false, msg: detailFromError(e) });
     } finally {
       setBusy(null);
     }
@@ -144,9 +138,7 @@ export function ScenarioAuthoringCard() {
       setLastResult({ ok: true, msg: `Restored '${name}'` });
       await load();
     } catch (e: unknown) {
-      const msg =
-        e instanceof ApiError ? `HTTP ${e.status} ${e.url}` : String(e);
-      setLastResult({ ok: false, msg });
+      setLastResult({ ok: false, msg: detailFromError(e) });
     } finally {
       setBusy(null);
     }

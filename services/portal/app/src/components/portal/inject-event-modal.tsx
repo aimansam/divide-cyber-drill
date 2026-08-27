@@ -37,7 +37,7 @@ import {
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ApiError, api } from "@/lib/api";
+import { api, detailFromError } from "@/lib/api";
 
 interface InjectEventModalProps {
   runId: number;
@@ -102,11 +102,7 @@ export function InjectEventModal({
       onInjected?.();
       onClose();
     } catch (err) {
-      const msg =
-        err instanceof ApiError
-          ? `HTTP ${err.status} ${err.url}`
-          : String(err);
-      setError(`inject failed: ${msg}`);
+      setError(`inject failed: ${detailFromError(err)}`);
     } finally {
       setSubmitting(false);
     }

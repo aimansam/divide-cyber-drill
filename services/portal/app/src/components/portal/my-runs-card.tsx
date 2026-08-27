@@ -27,7 +27,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { api, ApiError } from "@/lib/api";
+import { api, detailFromError } from "@/lib/api";
 import { StatusPill } from "./status-pill";
 import type { Role } from "@/lib/roles";
 
@@ -81,8 +81,7 @@ export function MyRunsCard({
       const data = await api.get<RunsPayload>("/api/v1/drills");
       setItems(data.items ?? []);
     } catch (e: unknown) {
-      const msg = e instanceof ApiError ? `HTTP ${e.status} ${e.url}` : String(e);
-      setError(msg);
+      setError(detailFromError(e));
       setItems([]);
     } finally {
       setLoading(false);

@@ -58,7 +58,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { EmptyState } from "./empty-state";
-import { ApiError, api, setToken } from "@/lib/api";
+import { ApiError, api, detailFromError, setToken } from "@/lib/api";
 import { emitTokenChange } from "@/lib/auth";
 import type { Scenario } from "./scenarios-card";
 import { Step0PveSetup } from "./step0-pve-setup";
@@ -227,7 +227,7 @@ export function OnboardingWizard({ onLaunched }: OnboardingWizardProps) {
       // message and let the operator decide what to do; we don't
       // try to be clever here because the wizard itself isn't
       // supposed to render for non-empty deployments.
-      const msg = e instanceof ApiError ? `HTTP ${e.status}` : String(e);
+      const msg = detailFromError(e);
       setError(`setup failed: ${msg}`);
     } finally {
       setAdminSubmitting(false);
@@ -241,7 +241,7 @@ export function OnboardingWizard({ onLaunched }: OnboardingWizardProps) {
       const items = await listScenariosWithMeta();
       setScenarios(items);
     } catch (e: unknown) {
-      const msg = e instanceof ApiError ? `HTTP ${e.status}` : String(e);
+      const msg = detailFromError(e);
       setError(`failed to load scenarios: ${msg}`);
     } finally {
       setScenariosLoading(false);
@@ -299,7 +299,7 @@ export function OnboardingWizard({ onLaunched }: OnboardingWizardProps) {
       setStep(4);
       onLaunched(exercise.id);
     } catch (e: unknown) {
-      const msg = e instanceof ApiError ? `HTTP ${e.status}` : String(e);
+      const msg = detailFromError(e);
       setError(`team setup failed: ${msg}`);
     } finally {
       setSubmittingTeams(false);
@@ -319,7 +319,7 @@ export function OnboardingWizard({ onLaunched }: OnboardingWizardProps) {
       });
       onLaunched(run.id);
     } catch (e: unknown) {
-      const msg = e instanceof ApiError ? `HTTP ${e.status}` : String(e);
+      const msg = detailFromError(e);
       setError(`drill launch failed: ${msg}`);
     } finally {
       setLaunching(false);

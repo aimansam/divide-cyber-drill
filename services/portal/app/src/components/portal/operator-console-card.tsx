@@ -39,7 +39,7 @@ import { Button } from "@/components/ui/button";
 import { EmptyState } from "./empty-state";
 import { StatusPill } from "./status-pill";
 import { InjectEventModal } from "./inject-event-modal";
-import { api, ApiError } from "@/lib/api";
+import { api, ApiError, detailFromError } from "@/lib/api";
 
 interface LiveRun {
   id: number;
@@ -70,9 +70,7 @@ export function OperatorConsoleCard() {
       const data = await api.get<RunsPayload>("/api/v1/drills");
       setRuns(data.items ?? []);
     } catch (e: unknown) {
-      const msg =
-        e instanceof ApiError ? `HTTP ${e.status} ${e.url}` : String(e);
-      setError(msg);
+      setError(detailFromError(e));
       setRuns([]);
     } finally {
       setLoading(false);

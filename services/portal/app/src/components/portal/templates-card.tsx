@@ -23,7 +23,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { api, ApiError } from "@/lib/api";
+import { api, detailFromError } from "@/lib/api";
 
 interface TemplateSnapshot {
   scenario_id?: number;
@@ -66,11 +66,7 @@ export function TemplatesCard({
         setError(null);
       })
       .catch((e: unknown) => {
-        const msg =
-          e instanceof ApiError
-            ? `HTTP ${e.status} ${e.url}`
-            : String(e);
-        setError(msg);
+        setError(detailFromError(e));
       })
       .finally(() => setLoading(false));
   };
@@ -84,11 +80,7 @@ export function TemplatesCard({
         setTemplates((prev) => prev.filter((t) => t.id !== id));
       })
       .catch((e: unknown) => {
-        const msg =
-          e instanceof ApiError
-            ? `HTTP ${e.status} ${e.url}`
-            : String(e);
-        setError(msg);
+        setError(detailFromError(e));
       });
   };
 

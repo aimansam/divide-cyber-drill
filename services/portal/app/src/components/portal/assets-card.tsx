@@ -26,7 +26,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { api, ApiError } from "@/lib/api";
+import { api, detailFromError } from "@/lib/api";
 import type { RunAsset } from "@/components/portal/run-lifecycle-card";
 
 interface RunPayload {
@@ -65,8 +65,7 @@ export function AssetsCard({
       })
       .catch((e: unknown) => {
         if (cancelled) return;
-        const msg = e instanceof ApiError ? `HTTP ${e.status} ${e.url}` : String(e);
-        setError(msg);
+        setError(detailFromError(e));
         setAssets([]);
       })
       .finally(() => {

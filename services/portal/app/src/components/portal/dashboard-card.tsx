@@ -30,7 +30,7 @@ import {
   PlayCircle,
   XCircle,
 } from "lucide-react";
-import { api, ApiError } from "@/lib/api";
+import { api, detailFromError } from "@/lib/api";
 import type { Role } from "@/lib/roles";
 import { KpiTile } from "./kpi-tile";
 import { StatusPill } from "./status-pill";
@@ -74,9 +74,7 @@ export function DashboardCard({
       const data = await api.get<RunsPayload>("/api/v1/drills");
       setRuns(data.items ?? []);
     } catch (e: unknown) {
-      const msg =
-        e instanceof ApiError ? `HTTP ${e.status} ${e.url}` : String(e);
-      setError(msg);
+      setError(detailFromError(e));
       setRuns([]);
     } finally {
       setLoading(false);
