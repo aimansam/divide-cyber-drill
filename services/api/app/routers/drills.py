@@ -322,10 +322,16 @@ async def start_drill(
 async def stop_drill(
     run_id: int,
     session: AsyncSession = Depends(get_session),
+    token=Depends(current_token),
 ) -> dict:
+    # Q17: thread the actor sub through so the audit row records
+    # *who* stopped the run. Matches the cancel endpoint, which
+    # already does the same. Without this the RUN_STOPPED audit
+    # entry was being written with actor=None.
+    actor = token.sub if token else None
     runner = _get_runner()
     try:
-        run = await runner.stop_run(run_id, session=session)
+        run = await runner.stop_run(run_id, actor=actor, session=session)
     except RunnerError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

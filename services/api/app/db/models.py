@@ -83,6 +83,9 @@ class AuditAction(str, enum.Enum):
     RUN_COMPLETED = "run.completed"
     RUN_FAILED = "run.failed"
     RUN_CANCELLED = "run.cancelled"
+    RUN_STOPPED = "run.stopped"  # Q17: operator-initiated stop (admin/lead
+        # POST /drills/{id}/stop). Distinct from RUN_CANCELLED
+        # which is trainee-initiated (POST /drills/{id}/cancel).
     RUN_TIMEOUT = "run.timeout"  # auto-cancelled by the watchdog (L2 2.8)
     ASSET_SPAWNED = "asset.spawned"
     ASSET_FAILED = "asset.failed"

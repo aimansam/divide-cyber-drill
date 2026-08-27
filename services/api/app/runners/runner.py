@@ -385,6 +385,14 @@ class Runner:
                     "runner.networks.remove_bridge_failed bridge=%s err=%s",
                     br, exc,
                 )
+        # Q17: tear down the spawned VMs too. The drill is over;
+        # without this loop every successful drill leaves a clone
+        # running on PVE forever (Q14 left 8 such orphans behind).
+        # Best-effort via the same helper the failure path uses:
+        # a flaky destroy here cannot roll back a successful run,
+        # and the per-asset ``status`` flips to ``ORPHANED`` so an
+        # operator + future janitor can clean up.
+        await self._best_effort_teardown(cloned_so_far)
         await session.flush()
         inc_run_terminal(outcome="succeeded", adapter=_adapter_label(self._adapter))
         await self._audit(
@@ -512,6 +520,12 @@ class Runner:
                     asset.error = f"stop failed: {exc}"
                 try:
                     await self._adapter.destroy_vm(asset.pve_vmid, asset.pve_node)
+                    # Q17: explicit success marker. Previously the
+                    # code only set ORPHANED on failure; if the
+                    # destroy succeeded but stop failed earlier,
+                    # the asset could end up FAILED. Be explicit.
+                    if asset.status != AssetStatus.FAILED:
+                        asset.status = AssetStatus.STOPPED
                 except Exception:
                     asset.status = AssetStatus.ORPHANED
             else:
@@ -520,9 +534,14 @@ class Runner:
         run.status = RunStatus.SUCCEEDED
         run.ended_at = datetime.now(timezone.utc)
         inc_run_terminal(outcome="succeeded", adapter=_adapter_label(self._adapter))
+        # Q17: distinguish operator-initiated stop from trainee
+        # cancel. ``/stop`` writes RUN_STOPPED; ``/cancel`` still
+        # writes RUN_CANCELLED. Audit log readers can now answer
+        # "did the operator stop this, or did the trainee cancel?"
+        # without diffing the reason text.
         await self._audit(
             session,
-            action=AuditAction.RUN_CANCELLED,
+            action=AuditAction.RUN_STOPPED,
             actor=actor,
             run_id=run.id,
             details={"reason": reason},
@@ -713,8 +732,16 @@ class Runner:
                 await self._adapter.stop_vm(a.pve_vmid, a.pve_node, force=True)
                 await self._adapter.destroy_vm(a.pve_vmid, a.pve_node)
                 a.status = AssetStatus.STOPPED
-            except Exception:
+            except Exception as exc:  # noqa: BLE001
+                # Q17: surface the failure so the operator can
+                # see why the VM is orphaned (previously the
+                # error was swallowed with no log + no asset.error).
+                log.warning(
+                    "runner.assets.teardown_failed asset_id=%s vmid=%s err=%s",
+                    a.id, a.pve_vmid, exc,
+                )
                 a.status = AssetStatus.ORPHANED
+                a.error = f"teardown failed: {exc}"
 
     async def _audit(
         self,

@@ -100,7 +100,7 @@ def _build_mock_client() -> MagicMock:
       client.nodes(node).qemu(vmid).clone.post(**params)
       client.nodes(node).qemu(vmid).status.start.post()
       client.nodes(node).qemu(vmid).status.stop.post(**kwargs)
-      client.nodes(node).qemu(vmid).delete(purge=1, skiplock=1)
+      client.nodes(node).qemu(vmid).delete(purge=1)
       client.nodes(node).qemu(vmid).status.current.get()
       client.nodes(node).qemu(vmid).config.get()
     """
@@ -304,10 +304,16 @@ def test_stop_vm_default_no_force():
 
     asyncio.run(a.stop_vm(9100, "pve"))
 
-    client.nodes("pve").qemu(9100).status.stop.post.assert_called_once_with()
+    client.nodes("pve").qemu(9100).status.stop.post.assert_called_once_with(
+        timeout=60
+    )
 
 
-def test_stop_vm_force_sets_forceStop():
+def test_stop_vm_force_uses_zero_timeout():
+    """Q17: PVE 9 dropped ``forceStop=1`` -- the documented
+    "force" behaviour is now ``timeout=0`` which skips the ACPI
+    shutdown and powers off immediately.
+    """
     a = RealProxmoxAdapter(
         host="pve", port=8006, user="u",
         token_id="u!t", token_secret="x",
@@ -318,7 +324,7 @@ def test_stop_vm_force_sets_forceStop():
     asyncio.run(a.stop_vm(9100, "pve", force=True))
 
     client.nodes("pve").qemu(9100).status.stop.post.assert_called_once_with(
-        forceStop=1
+        timeout=0
     )
 
 
@@ -336,7 +342,7 @@ def test_destroy_vm_happy_path():
     asyncio.run(a.destroy_vm(9100, "pve"))
 
     client.nodes("pve").qemu(9100).delete.assert_called_once_with(
-        purge=1, skiplock=1
+        purge=1
     )
 
 

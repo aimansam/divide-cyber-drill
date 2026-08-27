@@ -14,8 +14,8 @@ Mapping (ABC -> PVE REST)
 - allocate_vmid()         POST /cluster/nextid
 - clone_vm(spec)          POST /nodes/{n}/qemu/{vmid}/clone
 - start_vm(vmid, node)    POST /nodes/{n}/qemu/{vmid}/status/start
-- stop_vm(vmid, node, ..) POST /nodes/{n}/qemu/{vmid}/status/stop (+ forceStop=1)
-- destroy_vm(vmid, node)  DELETE /nodes/{n}/qemu/{vmid} (+ purge=1&skiplock=1)
+- stop_vm(vmid, node, ..) POST /nodes/{n}/qemu/{vmid}/status/stop (+ timeout=N)
+- destroy_vm(vmid, node)  DELETE /nodes/{n}/qemu/{vmid} (+ purge=1)
 - get_vm_state(vmid, n)   GET /nodes/{n}/qemu/{vmid}/status/current
 
 Concurrency model
@@ -262,11 +262,25 @@ class RealProxmoxAdapter(ProxmoxAdapter):
         await self._call(_do)
 
     async def stop_vm(self, vmid: int, node: str, force: bool = False) -> None:
+        """Stop a VM.
+
+        PVE 9 dropped the legacy ``forceStop=1`` parameter that older
+        proxmoxer versions emitted -- the schema now rejects it with
+        ``property is not defined in schema``. We pass ``timeout=N``
+        which IS supported on PVE 9 (positive int = max wait seconds;
+        0 = skip the ACPI shutdown and power off immediately, which
+        is the documented "force" behaviour).
+
+        ``force=True`` from the caller maps to ``timeout=0`` so we
+        skip the ACPI shutdown. ``force=False`` uses ``timeout=60``
+        to give the guest a chance to flush its disks.
+        """
+        timeout = 0 if force else 60
+
         def _do() -> None:
-            kwargs: dict[str, Any] = {}
-            if force:
-                kwargs["forceStop"] = 1
-            self._get_client().nodes(node).qemu(vmid).status.stop.post(**kwargs)
+            self._get_client().nodes(node).qemu(vmid).status.stop.post(
+                timeout=timeout
+            )
 
         await self._call(_do)
 
@@ -279,15 +293,31 @@ class RealProxmoxAdapter(ProxmoxAdapter):
         """
         def _do() -> None:
             try:
+                # Q17: drop ``skiplock=1`` -- PVE 9 reserves it for
+                # ``root@pam`` and rejects non-superuser tokens with
+                # "Only root may use this option". ``purge=1`` alone
+                # destroys the VM + its disks, which is what the
+                # runner always wants on cleanup. Operators running
+                # the DivideDrill role don't race against PVE's
+                # internal VM locks; they own the VM namespace.
                 self._get_client().nodes(node).qemu(vmid).delete(
-                    purge=1, skiplock=1
+                    purge=1
                 )
             except Exception as exc:  # noqa: BLE001
-                # Be tolerant: PVE returns 404 when VM is gone. proxmoxer
-                # raises ResourceException; anything containing "404" or
-                # "not found" we treat as idempotent success.
+                # Be tolerant: PVE returns 404 when the VM is gone
+                # in older versions, but **PVE 9 returns HTTP 500**
+                # with body ``Configuration file 'nodes/pve/qemu-server/
+                # {vmid}.conf' does not exist`` -- proxmoxer surfaces
+                # this as ``ResourceException`` whose message contains
+                # "does not exist". Treat both as idempotent success
+                # so the runner can re-enter destroy_vm safely.
                 msg = str(exc).lower()
-                if "404" in msg or "not found" in msg or "no such" in msg:
+                if (
+                    "404" in msg
+                    or "not found" in msg
+                    or "no such" in msg
+                    or "does not exist" in msg
+                ):
                     return
                 raise
 
