@@ -50,9 +50,15 @@ import {
   api,
   detailFromError,
   getPveConfig,
+  getServiceStatus,
   type PveConfigPublic,
+  type ServiceStatus,
 } from "@/lib/api";
 import { PveCredentialsStep } from "./pve-credentials-step";
+import {
+  TroubleshootPlaybook,
+  type TroubleshootProbe,
+} from "./troubleshoot-playbook";
 import { hasRole, type Role } from "@/lib/roles";
 
 interface PveSdnStatus {
@@ -100,6 +106,22 @@ const [pveConfig, setPveConfig] = useState<PveConfigPublic | null>(null);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
   const [showCredsModal, setShowCredsModal] = useState(false);
   const [settingUpBridges, setSettingUpBridges] = useState(false);
+  const [serviceStatus, setServiceStatus] = useState<ServiceStatus | null>(
+    null,
+  );
+
+  // Aggregated probe passed to TroubleshootPlaybook. Built fresh each
+  // render so the playbook always sees the latest snapshot.
+  const troubleshootProbe: TroubleshootProbe = {
+    pveReachable: sdn?.reachable,
+    pveConfigSource: pveConfig?.source ?? null,
+    sdnError: sdn?.error ?? null,
+    sdnRequiredRole: sdn?.required_role ?? null,
+    sdnPveumHint: sdn?.pveum_hint ?? null,
+    bridgesMissing: bridges?.missing ?? [],
+    bridgesPresent: bridges?.present ?? [],
+    templateReady: template?.ready ?? null,
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -107,11 +129,12 @@ const [pveConfig, setPveConfig] = useState<PveConfigPublic | null>(null);
     try {
       // Single round-trip per probe -- these are independent so we fire
       // them in parallel; failure of one doesn't block the others.
-      const [cfg, s, b, t] = await Promise.allSettled([
+      const [cfg, s, b, t, ss] = await Promise.allSettled([
         getPveConfig(),
         api.get<PveSdnStatus>("/api/v1/admin/pve-sdn-status"),
         api.get<PveBridgeStatus>("/api/v1/admin/pve-bridge-status"),
         api.get<TemplateStatus>("/api/v1/admin/drill-template-status"),
+        getServiceStatus(),
       ]);
       if (cfg.status === "fulfilled") setPveConfig(cfg.value);
       else setPveConfig(null);
@@ -121,6 +144,8 @@ const [pveConfig, setPveConfig] = useState<PveConfigPublic | null>(null);
       else setBridges(null);
       if (t.status === "fulfilled") setTemplate(t.value);
       else setTemplate(null);
+      if (ss.status === "fulfilled") setServiceStatus(ss.value);
+      else setServiceStatus(null);
       // If every probe failed, surface the first failure's message so the
       // operator knows it's a real outage (typically 401/403 -- token is
       // stale or insufficient role) rather than an empty state.
@@ -210,6 +235,169 @@ return (
         <div className="rounded-md border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive">
           {error}
         </div>
+      )}
+
+      <TroubleshootPlaybook probe={troubleshootProbe} />
+
+      {/* Deployment status -- live wg-easy / WG env / disk / audit */}
+      {serviceStatus && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Server className="h-5 w-5 text-primary" /> Deployment status
+            </CardTitle>
+            <CardDescription>
+              One-shot snapshot of every host-level dependency the API
+              needs. Updated on{" "}
+              {new Date(serviceStatus.captured_at).toLocaleTimeString([], {
+                hour: "2-digit",
+                minute: "2-digit",
+                second: "2-digit",
+              })}
+              .
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
+            {/* wg-easy */}
+            <div className="rounded border border-border p-3">
+              <div className="flex items-center justify-between">
+                <span className="font-medium">wg-easy</span>
+                {serviceStatus.wg_easy.state === "up" ? (
+                  <span className="flex items-center gap-1 text-emerald-500">
+                    <CheckCircle2 className="h-4 w-4" /> up
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-1 text-destructive">
+                    <XCircle className="h-4 w-4" /> unreachable
+                  </span>
+                )}
+              </div>
+              <div className="mt-1 text-xs text-muted-foreground">
+                probed {serviceStatus.wg_easy.target}
+                {serviceStatus.wg_easy.error && (
+                  <div className="mt-1 font-mono text-[11px] text-destructive">
+                    {serviceStatus.wg_easy.error}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* WireGuard env */}
+            <div className="rounded border border-border p-3">
+              <div className="flex items-center justify-between">
+                <span className="font-medium">WireGuard env</span>
+                {serviceStatus.wireguard.ready ? (
+                  <span className="flex items-center gap-1 text-emerald-500">
+                    <CheckCircle2 className="h-4 w-4" /> ready
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-1 text-amber-500">
+                    <XCircle className="h-4 w-4" /> not ready
+                  </span>
+                )}
+              </div>
+              <div className="mt-1 space-y-1 text-xs text-muted-foreground">
+                <div>
+                  WG_HOST:{" "}
+                  <span className="font-mono">
+                    {serviceStatus.wireguard.wg_host ?? "(unset)"}
+                  </span>
+                </div>
+                <div>
+                  DIVIDE_WG_PEER_SECRET:{" "}
+                  <span className="font-mono">
+                    {serviceStatus.wireguard.peer_secret_set
+                      ? "<set>"
+                      : "(unset)"}
+                  </span>
+                </div>
+                <div>
+                  WG_DEFAULT_DNS:{" "}
+                  <span className="font-mono">
+                    {serviceStatus.wireguard.wg_default_dns ?? "(unset)"}
+                  </span>
+                </div>
+              </div>
+              {!serviceStatus.wireguard.ready && (
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Set these in <span className="font-mono">deploy/.env</span>{" "}
+                  and restart the API container for changes to take effect.
+                </p>
+              )}
+            </div>
+
+            {/* Disk */}
+            {"total_gb" in serviceStatus.disk && (
+              <div className="rounded border border-border p-3">
+                <div className="flex items-center justify-between">
+                  <span className="font-medium">
+                    Disk ({serviceStatus.disk.path})
+                  </span>
+                  <span
+                    className={
+                      serviceStatus.disk.percent_used > 90
+                        ? "text-destructive"
+                        : serviceStatus.disk.percent_used > 75
+                          ? "text-amber-500"
+                          : "text-emerald-500"
+                    }
+                  >
+                    {serviceStatus.disk.percent_used}%
+                  </span>
+                </div>
+                <div className="mt-1 text-xs text-muted-foreground">
+                  {serviceStatus.disk.used_gb} GB used /{" "}
+                  {serviceStatus.disk.total_gb} GB total
+                </div>
+                <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
+                  <div
+                    className={
+                      serviceStatus.disk.percent_used > 90
+                        ? "h-full bg-destructive"
+                        : serviceStatus.disk.percent_used > 75
+                          ? "h-full bg-amber-500"
+                          : "h-full bg-emerald-500"
+                    }
+                    style={{
+                      width: `${Math.min(100, serviceStatus.disk.percent_used)}%`,
+                    }}
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Audit recency */}
+            <div className="rounded border border-border p-3">
+              <div className="flex items-center justify-between">
+                <span className="font-medium">Audit log</span>
+                {serviceStatus.audit.state === "fresh" ? (
+                  <span className="flex items-center gap-1 text-emerald-500">
+                    <CheckCircle2 className="h-4 w-4" /> fresh
+                  </span>
+                ) : serviceStatus.audit.state === "stale" ? (
+                  <span className="flex items-center gap-1 text-amber-500">
+                    <XCircle className="h-4 w-4" /> stale
+                  </span>
+                ) : serviceStatus.audit.state === "empty" ? (
+                  <span className="flex items-center gap-1 text-muted-foreground">
+                    <XCircle className="h-4 w-4" /> empty
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-1 text-muted-foreground">
+                    <XCircle className="h-4 w-4" /> unknown
+                  </span>
+                )}
+              </div>
+              <div className="mt-1 text-xs text-muted-foreground">
+                {serviceStatus.audit.latest
+                  ? `latest ${new Date(serviceStatus.audit.latest).toLocaleString()} (${
+                      serviceStatus.audit.age_hours ?? "?"
+                    }h ago)`
+                  : "no audit rows yet"}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
       )}
 
       {/* PVE connection card */}

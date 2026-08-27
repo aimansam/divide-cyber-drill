@@ -43,6 +43,7 @@ import {
   Check,
   ChevronRight,
   Loader2,
+  Settings,
   ShieldCheck,
   Sparkles,
   Target,
@@ -104,6 +105,13 @@ interface OnboardingWizardProps {
   /** Callback fired when the wizard launches the exercise.
    *  Parent (app.tsx) uses this to switch to the live view. */
   onLaunched: (exerciseId: number) => void;
+  /**
+   * Optional: navigate the operator to the Config tab. Used by the
+   * drill-launch error banner so they can fix PVE creds / bridges
+   * without manually hunting for the tab. Not all consumers wire it
+   * (e.g. unit tests), so it must stay optional.
+   */
+  onNavigateToConfig?: () => void;
 }
 
 // ---------------------------------------------------------------- helpers
@@ -157,13 +165,20 @@ async function setupFirstAdmin(
 // removed the adminExists state entirely in the F-auth-ux cleanup
 // so the wizard now strictly handles the empty-deployment path.
 
-export function OnboardingWizard({ onLaunched }: OnboardingWizardProps) {
+export function OnboardingWizard({ onLaunched, onNavigateToConfig }: OnboardingWizardProps) {
   // F-pve-config-ui: start at -1 (the PVE credentials pre-step). The
   // component for that step calls onContinue() which advances to 0.
   // If the API already has a config, the pre-step auto-advances via
   // its own onMount effect, so the operator never sees a flicker.
   const [step, setStep] = useState<Step>(-1);
   const [error, setError] = useState<string | null>(null);
+  /**
+   * True when the current `error` should render alongside a
+   * "Open Config" navigation button. Set true by the drill-launch
+   * error path (which has actionable config remediation), and
+   * cleared by any subsequent error update or successful submit.
+   */
+  const [showConfigLink, setShowConfigLink] = useState(false);
 
   // Step 1 state: admin credentials.
   const [adminSub, setAdminSub] = useState("");
@@ -312,6 +327,7 @@ export function OnboardingWizard({ onLaunched }: OnboardingWizardProps) {
     e.preventDefault();
     if (pickedScenario === null) return;
     setError(null);
+    setShowConfigLink(false);
     setLaunching(true);
     try {
       const run = await api.post<{ id: number }>("/api/v1/drills", {
@@ -320,7 +336,8 @@ export function OnboardingWizard({ onLaunched }: OnboardingWizardProps) {
       onLaunched(run.id);
     } catch (e: unknown) {
       const msg = detailFromError(e);
-      setError(`drill launch failed: ${msg}\n\n→ Open the Config tab to inspect PVE credentials and bridges.`);
+      setError(`drill launch failed: ${msg}`);
+      setShowConfigLink(true);
     } finally {
       setLaunching(false);
     }
@@ -354,7 +371,21 @@ export function OnboardingWizard({ onLaunched }: OnboardingWizardProps) {
             role="alert"
             className="mb-4 rounded-md border border-red-700 bg-red-950/40 px-3 py-2 text-sm text-red-200"
           >
-            {error}
+            <div className="whitespace-pre-wrap">{error}</div>
+            {showConfigLink && onNavigateToConfig && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="mt-2 border-red-700 text-red-100 hover:bg-red-900"
+                onClick={() => {
+                  setShowConfigLink(false);
+                  onNavigateToConfig();
+                }}
+              >
+                <Settings className="h-3.5 w-3.5" />
+                <span className="ml-1">Open Config</span>
+              </Button>
+            )}
           </div>
         )}
 

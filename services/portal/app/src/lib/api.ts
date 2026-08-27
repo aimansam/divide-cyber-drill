@@ -343,3 +343,50 @@ export async function deletePveConfig(): Promise<{ deleted: boolean; message: st
     "/api/v1/admin/pve-config",
   );
 }
+
+/**
+ * Service-status snapshot for the Config tab's "Deployment status"
+ * panel. Returns the same shape as the server: PVE reachability,
+ * wg-easy probe, WireGuard env summary, disk usage, audit recency.
+ *
+ * Fails soft by design -- callers should treat any thrown error as
+ * "service-status itself unavailable" rather than drilling in.
+ */
+export interface ServiceStatus {
+  captured_at: string;
+  pve: {
+    reachable: boolean;
+    version: string | null;
+    error: string | null;
+  };
+  wg_easy: {
+    state: "up" | "unreachable";
+    target: string;
+    error?: string;
+  };
+  wireguard: {
+    wg_host: string | null;
+    wg_default_dns: string | null;
+    peer_secret_set: boolean;
+    ready: boolean;
+  };
+  disk:
+    | {
+        path: string;
+        total_gb: number;
+        used_gb: number;
+        free_gb: number;
+        percent_used: number;
+      }
+    | { path: string; error: string };
+  audit: {
+    latest: string | null;
+    state: "fresh" | "stale" | "empty" | "unknown";
+    age_hours?: number;
+  };
+  all_ok: boolean;
+}
+
+export async function getServiceStatus(): Promise<ServiceStatus> {
+  return api.get<ServiceStatus>("/api/v1/admin/service-status");
+}

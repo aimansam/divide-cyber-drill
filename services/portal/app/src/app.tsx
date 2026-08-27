@@ -217,6 +217,7 @@ export default function App() {
               });
               setActiveView("observe");
             }}
+            onNavigateToConfig={() => setActiveView("config")}
           />
         )}
         {me &&
@@ -242,6 +243,7 @@ export default function App() {
                       meRole={me.role}
                       scenario={pickedScenario}
                       pickedRunId={pickedRun?.id ?? null}
+                      onNavigateToConfig={() => setActiveView("config")}
                     />
                     <MyRunsCard
                       meRole={me.role}

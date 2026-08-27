@@ -30,6 +30,7 @@ import {
   Loader2,
   Play,
   RefreshCw,
+  Settings,
   Shield,
   Square,
   AlertTriangle,
@@ -92,12 +93,19 @@ interface RunLifecycleCardProps {
   meRole: Role;
   scenario: Scenario | null;
   pickedRunId: number | null;
+  /**
+   * Optional: navigate to the Config tab. Used by the drill-launch
+   * error banner so the operator can fix PVE creds / bridges with
+   * one click. Not all consumers wire it.
+   */
+  onNavigateToConfig?: () => void;
 }
 export function RunLifecycleCard({
   meSub,
   meRole,
   scenario,
   pickedRunId,
+  onNavigateToConfig,
 }: RunLifecycleCardProps) {
   const [run, setRun] = useState<RunDetail | null>(null);
   const [loading, setLoading] = useState(false);
@@ -231,9 +239,22 @@ export function RunLifecycleCard({
       </CardHeader>
       <CardContent className="space-y-4">
         {error && (
-          <div className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
-            <AlertTriangle className="mt-0.5 h-4 w-4" />
-            <span className="font-mono">{error}</span>
+          <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+            <div className="flex items-start gap-2">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span className="font-mono whitespace-pre-wrap">{error}</span>
+            </div>
+            {onNavigateToConfig && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="mt-2"
+                onClick={onNavigateToConfig}
+              >
+                <Settings className="h-3.5 w-3.5" />
+                <span className="ml-1">Open Config</span>
+              </Button>
+            )}
           </div>
         )}
 

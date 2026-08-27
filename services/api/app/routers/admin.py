@@ -859,3 +859,27 @@ async def delete_pve_config(
             else "No DB row to delete; API is already on env-var fallback."
         ),
     }
+
+
+# -- service-status aggregator --------------------------------------------
+#
+# Aggregates PVE / wg-easy / WireGuard env / disk / audit recency into a
+# single read-only snapshot for the Config tab's "Deployment status"
+# panel. Authenticated (admin or lead) so we don't leak env-derived
+# signals to anonymous callers, but no role gate beyond login -- the
+# existing probe endpoints have the same posture.
+
+from app.services import service_status as service_status_svc  # noqa: E402
+
+
+@router.get(
+    "/service-status",
+    summary="Aggregated runtime status for the Config tab's deployment panel",
+)
+async def get_service_status(
+    db: Annotated[AsyncSession, Depends(get_session)],
+) -> dict[str, Any]:
+    """Read-only aggregator. Fails soft: one bad probe never blocks
+    the rest. Polled on every Config tab Refresh.
+    """
+    return await service_status_svc.get_service_status(db)
