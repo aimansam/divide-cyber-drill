@@ -35,7 +35,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPExcepti
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.auth import Role, TokenData, require_role
+from app.core.auth import Role, TokenData, current_token, require_role
 from app.db.session import get_session
 from app.services import admin as admin_svc
 from app.services import pve_config as pve_config_svc
@@ -91,7 +91,21 @@ class SetTemplateRequest(BaseModel):
 
 
 class StartFirstDrillRequest(BaseModel):
+    """Body for ``POST /admin/start-first-drill``.
+
+    Q14: added optional ``team`` field so the operator can name the
+    team running the drill (matches POST /drills's team binding).
+    """
+
     timeout_s: int = 300
+    team: str | None = Field(
+        default=None,
+        max_length=128,
+        description=(
+            "Optional team name for the run (e.g. 'blue', 'red-team-A'). "
+            "Matches the ``team`` field accepted by POST /api/v1/drills."
+        ),
+    )
 
 
 @router.get(
@@ -299,39 +313,95 @@ async def drill_template_status() -> dict[str, Any]:
     "/start-first-drill",
     summary="Convenience: start the first-live-drill scenario",
 )
-async def start_first_drill(body: StartFirstDrillRequest) -> dict[str, Any]:
-    """Run the canonical L1 demo drill."""
-    import httpx
+async def start_first_drill(
+    body: StartFirstDrillRequest,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    token=Depends(current_token),
+) -> dict[str, Any]:
+    """Run the canonical L1 demo drill.
+
+    Q14: was a loopback HTTP call to ``/api/v1/drills`` which
+    required ``X-Divide-Token`` to be forwarded. The forward
+    was missing, so every call returned a doubly-nested 401.
+    Rewritten to call the runner in-process:
+      * look up the scenario in the same DB session,
+      * build a RunRequest with the caller's token.sub,
+      * call ``runner.start_run()`` directly,
+      * return the result RunResult as JSON.
+
+    This keeps the wizard's "Start first drill" button working
+    without leaking auth tokens into a self-call.
+    """
+    from app.runners.runner import (
+        RunRequest,
+        RunnerError,
+        build_runner,
+    )
+
+    from sqlalchemy import select
+
+    from app.db import models as db_models
+    from app.services.proxmox import ProxmoxAPIError
+    from app.services.pve_sdn import SdnPermissionError
 
     scenario_name = "first-live-drill"
-    api_base = os.environ.get("DIVIDE_API_BASE", "http://api:8000")
-
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        sr = await client.get(f"{api_base}/api/v1/scenarios")
-        if sr.status_code != 200:
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=f"could not list scenarios: HTTP {sr.status_code}",
+    scenario = (
+        await session.execute(
+            select(db_models.Scenario).where(
+                db_models.Scenario.name == scenario_name,
+                db_models.Scenario.archived_at.is_(None),
             )
-        scenarios = (sr.json().get("items") or [])
-        match = next((s for s in scenarios if s.get("name") == scenario_name), None)
-        if match is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"scenario {scenario_name!r} not in DB -- run 'make sync-scenarios'",
-            )
-
-        dr = await client.post(
-            f"{api_base}/api/v1/drills",
-            json={"scenario_id": match["id"]},
-            timeout=body.timeout_s + 5.0,
         )
-        if dr.status_code not in (200, 201):
-            raise HTTPException(
-                status_code=dr.status_code,
-                detail=dr.text[:500],
-            )
-        return dr.json()
+    ).scalar_one_or_none()
+    if scenario is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=(
+                f"scenario {scenario_name!r} not in DB or is archived -- "
+                "run 'make sync-scenarios' or restore it first"
+            ),
+        )
+
+    runner = build_runner()
+    try:
+        result = await runner.start_run(
+            RunRequest(
+                scenario_id=scenario.id,
+                started_by=token.sub,
+                exercise_id=None,
+                team=body.team,
+                template_id=None,
+            ),
+            session,
+        )
+    except RunnerError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        ) from exc
+    except SdnPermissionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "message": str(exc),
+                "required_role": getattr(exc, "required_role", None),
+                "pveum_hint": getattr(exc, "pveum_hint", None),
+                "pve_path": getattr(exc, "pve_path", None),
+            },
+        ) from exc
+    except ProxmoxAPIError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"PVE unreachable: {exc}",
+        ) from exc
+    return {
+        "run_id": result.run_id,
+        "status": result.status.value,
+        "scenario_id": scenario.id,
+        "scenario_name": scenario_name,
+        "team": body.team,
+        "started_by": token.sub,
+    }
 
 
 # ---------------------------------------------------------------------------

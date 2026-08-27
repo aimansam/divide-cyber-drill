@@ -5,9 +5,11 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import structlog
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy.exc import IntegrityError
 
 from app import __version__
 from app.core.config import settings
@@ -186,6 +188,66 @@ def create_app() -> FastAPI:
         redoc_url=None,
         lifespan=lifespan,
     )
+
+    # Q14: install global exception handlers so any unhandled
+    # exception (e.g. sql IntegrityError that slipped past a
+    # router's ``except`` chain) returns structured JSON instead
+    # of Uvicorn's default text/plain "Internal Server Error".
+    # The portal's Q8 ``detailFromError`` helper expects
+    # ``{"detail": "..."}`` to surface the message in the toast.
+    @app.exception_handler(Exception)
+    async def _unhandled_exception_handler(  # noqa: ARG001
+        request: Request, exc: Exception
+    ) -> JSONResponse:
+        # HTTPException + RequestValidationError + everything
+        # FastAPI handles natively is caught by their respective
+        # built-in handlers before this one runs. So this is only
+        # the catch-all for things like SQLAlchemyError, asyncio
+        # errors, or unanticipated runtime exceptions.
+        log.exception(
+            "divide_api.unhandled_exception",
+            path=str(request.url.path),
+            method=request.method,
+        )
+        return JSONResponse(
+            status_code=500,
+            content={
+                "detail": (
+                    "internal server error; the request was not "
+                    "completed. Check /api/v1/admin/service-status "
+                    "for cluster health and report this URL+method "
+                    "to the operator."
+                ),
+                "path": str(request.url.path),
+                "method": request.method,
+            },
+        )
+
+    @app.exception_handler(IntegrityError)
+    async def _integrity_error_handler(  # noqa: ARG001
+        request: Request, exc: IntegrityError
+    ) -> JSONResponse:
+        # Top-level safety net for any router that forgets to
+        # catch IntegrityError locally (we added router-level
+        # catches in Q14 too, but defence in depth).
+        msg = str(exc.orig) if getattr(exc, "orig", None) else str(exc)
+        log.warning(
+            "divide_api.integrity_error",
+            path=str(request.url.path),
+            detail=msg[:300],
+        )
+        return JSONResponse(
+            status_code=502,
+            content={
+                "detail": (
+                    f"transaction integrity error: {msg}. "
+                    "Retry the request; if it persists, capture "
+                    "/api/v1/admin/service-status and report."
+                ),
+                "path": str(request.url.path),
+                "method": request.method,
+            },
+        )
 
     app.add_middleware(
         CORSMiddleware,

@@ -278,6 +278,33 @@ async def start_drill(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"PVE unreachable: {exc}",
         ) from exc
+    except IntegrityError as exc:
+        # Q14: the runner calls ``session.add(run); await
+        # session.flush()`` then continues. If a side operation
+        # (e.g. telemetry insert via ``event_recorder``) raises
+        # an IntegrityError, the runner can end up trying to
+        # insert Assets referencing a Run that was rolled back.
+        # We map this to 502 with a clear message rather than
+        # letting Uvicorn's default 500 (text/plain "Internal
+        # Server Error") leak the raw SQLAlchemy message.
+        # Surface the chained exception's detail so the operator
+        # can diagnose.
+        msg = str(exc.orig) if getattr(exc, "orig", None) else str(exc)
+        log.warning(
+            "drills.start_drill.integrity_error",
+            detail=msg[:300],
+        )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=(
+                "drill-start transaction integrity error: "
+                f"{msg}. This usually means a side effect "
+                "(telemetry/audit/asset) referenced a row that "
+                "was rolled back. Retry the request; if it "
+                "persists, capture /api/v1/admin/service-status "
+                "and report."
+            ),
+        ) from exc
     return {
         "run_id": result.run_id,
         "status": result.status.value,

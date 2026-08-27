@@ -51,7 +51,26 @@ async def record_event(
 
     Returns the persisted event (for tests) or ``None`` on
     failure (we log + swallow).
+
+    Q14: do NOT roll back the outer transaction on telemetry
+    failure. The runner does ``session.add(run); await
+    session.flush()`` to populate ``run.id``, then calls
+    ``record_event``, then continues to add assets with
+    ``run_id=run.id``. If the telemetry insert fails and we
+    rollback, the Run row disappears from the transaction and
+    the subsequent Asset INSERT hits an FK violation with
+    ``Key (run_id)=(N) is not present in table "runs"`` -- the
+    catastrophic Q14 bug that turned POST /api/v1/drills into a
+    raw 500.
+
+    The fix: use ``session.begin_nested()`` (SAVEPOINT) so the
+    telemetry insert is isolated from the outer transaction. If
+    it fails, we rollback only the SAVEPOINT and return None.
+    If it succeeds, we release the SAVEPOINT (no-op) so the
+    outer transaction keeps both rows.
     """
+    from sqlalchemy.exc import SQLAlchemyError
+
     payload = payload or {}
     ts = ts or datetime.now(timezone.utc)
     event = TelemetryEvent(
@@ -63,19 +82,17 @@ async def record_event(
         severity=severity,
         payload=payload,
     )
-    session.add(event)
     try:
-        await session.flush()
-    except Exception as exc:  # noqa: BLE001
-        # Best-effort: rollback the partial row but do NOT raise.
-        # The runner must continue even if telemetry failed.
+        # SAVEPOINT isolates telemetry from the outer transaction.
+        # If the inner flush fails, only the SAVEPOINT rolls back;
+        # the Run row (and any other prior work) survives.
+        async with session.begin_nested():
+            session.add(event)
+            await session.flush()
+    except SQLAlchemyError as exc:  # noqa: BLE001
         logger.warning(
             "F8 event_bus.record_event: db flush failed: %s", exc
         )
-        try:
-            await session.rollback()
-        except Exception:
-            pass
         return None
     serialized = {
         "id": event.id,
