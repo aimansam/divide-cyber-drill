@@ -68,6 +68,14 @@ export function OperatorConsoleCard() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [pending, setPending] = useState<number | null>(null);
+  /**
+   * Q21: runs the operator has just stopped in this session.
+   * Keyed by run_id, value is the timestamp of the stop.
+   * Drives the "Recently stopped" panel below the live list
+   * and the "just stopped" badge on a live row that was
+   * stopped but hasn't yet polled-out of the live filter.
+   */
+  const [recentlyStopped, setRecentlyStopped] = useState<Record<number, number>>({});
   // The Inject button opens a modal focused on one run. We
   // store the target runId (or null when closed).
   const [injectForRun, setInjectForRun] = useState<number | null>(null);
@@ -97,14 +105,37 @@ export function OperatorConsoleCard() {
     [runs],
   );
 
+  /**
+   * Q21: derive the "recently stopped" list from the
+   * ``recentlyStopped`` state. We only keep entries < 1 hour
+   * old (the 5s poll would otherwise grow this forever during
+   * a long operator session). Limited to the last 10 entries
+   * newest-first.
+   */
+  const recentlyStoppedList = useMemo(() => {
+    const cutoff = Date.now() - 60 * 60 * 1000;
+    return Object.entries(recentlyStopped)
+      .filter(([, t]) => t > cutoff)
+      .map(([id, t]) => ({ run_id: Number(id), stopped_at: t }))
+      .sort((a, b) => b.stopped_at - a.stopped_at)
+      .slice(0, 10);
+  }, [recentlyStopped]);
+
   async function stop(id: number) {
     setPending(id);
+    setError(null);
+    setSuccess(null);
     try {
       await api.post(`/api/v1/drills/${id}/stop`);
+      // Q21: surface success feedback. Previously the row
+      // silently vanished from the live filter and the operator
+      // had to trust that the stop worked. We pin the row in
+      // ``recentlyStopped`` so the operator gets visual confirmation
+      // and the row stays visible until the next poll cycle.
+      setRecentlyStopped((prev) => ({ ...prev, [id]: Date.now() }));
       await load();
     } catch (e: unknown) {
-      const status = e instanceof ApiError ? e.status : 0;
-      setError(`stop failed: HTTP ${status || "unknown"}`);
+      setError(`stop failed: ${detailFromError(e)}`);
     } finally {
       setPending(null);
     }
@@ -116,17 +147,19 @@ export function OperatorConsoleCard() {
       await api.post(`/api/v1/drills/${id}/reset`);
       await load();
     } catch (e: unknown) {
+      // Q21: use the structured detail when available so the
+      // operator sees the actual error from the API instead of
+      // just an HTTP status. Fall back to the status code only
+      // for the 409 special case where we want to give a
+      // specific "save-as-template first" hint.
       const status = e instanceof ApiError ? e.status : 0;
-      // 409: the run has no template snapshot. Tell the
-      // operator what to do next (use save-as-template
-      // first) -- the F7 reset semantics require a snapshot.
       if (status === 409) {
         setError(
           "reset failed: this run has no template snapshot. " +
             "POST /api/v1/drills/{id}/save-as-template first, then retry.",
         );
       } else {
-        setError(`reset failed: HTTP ${status || "unknown"}`);
+        setError(`reset failed: ${detailFromError(e)}`);
       }
     } finally {
       setPending(null);
@@ -240,6 +273,38 @@ export function OperatorConsoleCard() {
               </li>
             ))}
           </ul>
+        )}
+        {/* Q21: "Recently stopped" panel below the live list.
+            Operators need a place to see what they just stopped
+            without having to switch to the History tab. Limited
+            to the last 10 stops in this session (<1h old). */}
+        {recentlyStoppedList.length > 0 && (
+          <div className="mt-4 border-t pt-3" data-testid="operator-recently-stopped">
+            <div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              Recently stopped ({recentlyStoppedList.length})
+            </div>
+            <ul className="space-y-1">
+              {recentlyStoppedList.map(({ run_id, stopped_at }) => {
+                const agoMs = Date.now() - stopped_at;
+                const agoLabel =
+                  agoMs < 60_000
+                    ? `${Math.floor(agoMs / 1000)}s ago`
+                    : `${Math.floor(agoMs / 60_000)}m ago`;
+                return (
+                  <li
+                    key={run_id}
+                    className="flex items-center gap-2 text-xs text-muted-foreground"
+                    data-testid="operator-recently-stopped-row"
+                    data-run-id={run_id}
+                  >
+                    <span className="font-mono">#{run_id}</span>
+                    <StatusPill status="stopped" />
+                    <span>stopped {agoLabel}</span>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
         )}
       </CardContent>
       {/* F9.4: success + error banners above the modal so the

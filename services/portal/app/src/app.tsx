@@ -12,6 +12,7 @@ import { TopNav, type ViewKey } from "@/components/portal/top-nav";
 import { DashboardCard } from "@/components/portal/dashboard-card";
 import { DrillConsole } from "@/components/portal/drill-console";
 import { OperatorConsoleCard } from "@/components/portal/operator-console-card";
+import { GlobalAuditCard } from "@/components/portal/global-audit-card";
 import { ProfileCard } from "@/components/portal/profile-card";
 import { UserListCard } from "@/components/portal/user-list-card";
 import { ToastHost } from "@/components/portal/toast";
@@ -264,6 +265,10 @@ export default function App() {
                   <>
                     <OperatorConsoleCard />
                     <PveOpsCard />
+                    {/* Q21: cross-run audit search. Pinned at the top
+                        of the admin tab so it doesn't get buried
+                        below the longer scenario + user CRUD cards. */}
+                    <GlobalAuditCard />
                     <ScenarioAuthoringCard />
                     <UserListCard />
                   </>

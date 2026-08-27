@@ -16,10 +16,22 @@
  * own events, `meSub` for cancel events, the watchdog for
  * auto-timeout events once next-plan #4 lands), and an optional
  * `details` JSON blob.
+ *
+ * Q21 polish:
+ *   * Relative timestamps ("2m ago") in the timestamp column.
+ *   * Action filter chips ("all", "run.*", "asset.*", "system.*").
+ *   * Click-to-expand details disclosure -- inline JSON.stringify
+ *     is replaced by a panel that opens on click.
+ *   * Empty ``{}`` details are hidden.
+ *   * Null actor renders as ``system`` instead of ``?`` so the
+ *     operator can tell "no actor" from "load failed".
+ *   * Compact mode (used inside DrillConsole) keeps a small
+ *     ``run #NN`` chip in the header so operators know what
+ *     they're looking at without scrolling back up.
  */
 
-import { useEffect, useState } from "react";
-import { Loader2, RefreshCw, ScrollText } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { ChevronDown, ChevronRight, Loader2, RefreshCw, ScrollText } from "lucide-react";
 import {
   Card,
   CardContent,
@@ -91,6 +103,35 @@ function actionLabel(action: string | undefined): string {
     .join(" · ");
 }
 
+/**
+ * Q21: relative timestamp for at-a-glance scanning. Falls back
+ * to the locale string for events far in the past or future.
+ * Examples: "just now", "12s ago", "3m ago", "2h ago".
+ */
+function relativeTime(iso: string | null | undefined): string {
+  if (!iso) return "?";
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return "?";
+  const diff = Date.now() - t;
+  if (diff < 0) return new Date(iso).toLocaleString();
+  if (diff < 5_000) return "just now";
+  if (diff < 60_000) return `${Math.floor(diff / 1000)}s ago`;
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
+  return new Date(iso).toLocaleString();
+}
+
+/**
+ * Q21: details payload has lots of empty objects. Treat
+ * ``{}``, ``[]``, and ``null`` as "no details" so we don't
+ * render an ugly chip.
+ */
+function hasDetails(details: unknown): boolean {
+  if (details === null || details === undefined) return false;
+  if (typeof details !== "object") return Boolean(details);
+  return Object.keys(details as Record<string, unknown>).length > 0;
+}
+
 export function AuditExplorerCard({
   pickedRunId,
   compact = false,
@@ -101,6 +142,20 @@ export function AuditExplorerCard({
   const [items, setItems] = useState<AuditRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  /**
+   * Q21: filter by action family. ``"all"`` shows everything;
+   * ``"run"`` matches ``run.started``, ``run.stopped`` etc;
+   * ``"asset"`` matches ``asset.spawned`` etc; ``"system"``
+   * matches the password-reset events. Defaults to ``"all"``
+   * to preserve the pre-Q21 behaviour.
+   */
+  const [actionFilter, setActionFilter] = useState<"all" | "run" | "asset" | "system">("all");
+  /**
+   * Q21: which row is expanded to show its ``details`` blob.
+   * Only one row is expanded at a time (click another to switch).
+   * Models a disclosure pattern common to audit-log UIs.
+   */
+  const [expandedId, setExpandedId] = useState<number | string | null>(null);
 
   async function load() {
     if (pickedRunId === null) {
@@ -128,6 +183,16 @@ export function AuditExplorerCard({
     // pickedRunId change -> re-fetch.
   }, [pickedRunId]);
 
+  /**
+   * Q21: filter the loaded items by the selected action family.
+   * Done in a memo so re-renders triggered by ``expandedId`` or
+   * ``actionFilter`` don't walk the list more than necessary.
+   */
+  const filteredItems = useMemo(() => {
+    if (actionFilter === "all") return items;
+    return items.filter((row) => (row.action ?? "").startsWith(`${actionFilter}.`));
+  }, [items, actionFilter]);
+
   return (
     <Card>
       {!compact && (
@@ -142,7 +207,7 @@ export function AuditExplorerCard({
           <CardDescription>
             {pickedRunId === null
               ? "Click a run to read its audit timeline."
-              : `Run #${pickedRunId} — ${items.length} event${items.length === 1 ? "" : "s"}`}
+              : `Run #${pickedRunId} — ${filteredItems.length} of ${items.length} event${items.length === 1 ? "" : "s"}`}
           </CardDescription>
         </div>
         <Button
@@ -175,37 +240,113 @@ export function AuditExplorerCard({
             here within a second of starting.
           </div>
         )}
-        <ol className="space-y-1">
-          {items.map((row, i) => (
-            <li
-              key={row.id ?? `${row.at}-${i}`}
-              className="flex items-start gap-2 rounded border border-border bg-card/30 px-2 py-1 text-xs"
-            >
-              <span
-                className={`inline-block shrink-0 rounded px-1.5 py-0.5 font-mono text-[10px] ${tone(row.action)}`}
-                title={row.action ?? ""}
+        {!error && items.length > 0 && (
+          /* Q21: filter chips. Cheap radio-style segmented control
+             that scopes which rows render below. */
+          <div
+            className="mb-2 flex flex-wrap items-center gap-1"
+            data-testid="audit-filter"
+            role="radiogroup"
+            aria-label="Filter by action family"
+          >
+            {(["all", "run", "asset", "system"] as const).map((opt) => (
+              <button
+                key={opt}
+                type="button"
+                role="radio"
+                aria-checked={actionFilter === opt}
+                onClick={() => setActionFilter(opt)}
+                className={
+                  "rounded-md border px-2 py-0.5 text-xs font-medium uppercase tracking-wide transition-colors " +
+                  (actionFilter === opt
+                    ? "border-primary bg-primary/20 text-primary"
+                    : "border-border bg-card/40 text-muted-foreground hover:bg-accent")
+                }
               >
-                {actionLabel(row.action)}
-              </span>
-              <span className="font-mono text-muted-foreground">
-                {row.at ? new Date(row.at).toLocaleString() : "?"}
-              </span>
-              <span className="font-mono">
-                {row.actor ?? "?"}
-              </span>
-              {row.asset_id !== null && row.asset_id !== undefined ? (
-                <span className="font-mono text-muted-foreground">
-                  asset={row.asset_id}
-                </span>
-              ) : null}
-              {row.details ? (
-                <span className="ml-auto truncate font-mono text-muted-foreground">
-                  {JSON.stringify(row.details)}
-                </span>
-              ) : null}
-            </li>
-          ))}
+                {opt}
+              </button>
+            ))}
+          </div>
+        )}
+        <ol className="space-y-1">
+          {filteredItems.map((row, i) => {
+            const rowKey = row.id ?? `${row.at}-${i}`;
+            const expanded = expandedId === rowKey;
+            const showDetails = hasDetails(row.details);
+            const actorLabel = row.actor ?? "system";
+            return (
+              <li
+                key={rowKey}
+                className="rounded border border-border bg-card/30 text-xs"
+                data-testid="audit-row"
+              >
+                <button
+                  type="button"
+                  onClick={() => showDetails && setExpandedId(expanded ? null : rowKey)}
+                  aria-expanded={expanded}
+                  className={
+                    "flex w-full items-start gap-2 px-2 py-1 text-left " +
+                    (showDetails ? "cursor-pointer hover:bg-accent/40" : "cursor-default")
+                  }
+                >
+                  {showDetails ? (
+                    expanded ? (
+                      <ChevronDown className="mt-0.5 h-3 w-3 shrink-0 text-muted-foreground" />
+                    ) : (
+                      <ChevronRight className="mt-0.5 h-3 w-3 shrink-0 text-muted-foreground" />
+                    )
+                  ) : (
+                    <span className="mt-0.5 inline-block h-3 w-3 shrink-0" />
+                  )}
+                  <span
+                    className={`inline-block shrink-0 rounded px-1.5 py-0.5 font-mono text-[10px] ${tone(row.action)}`}
+                    title={row.action ?? ""}
+                  >
+                    {actionLabel(row.action)}
+                  </span>
+                  <span
+                    className="font-mono text-muted-foreground"
+                    title={row.at ?? ""}
+                  >
+                    {relativeTime(row.at)}
+                  </span>
+                  <span className="font-mono">{actorLabel}</span>
+                  {row.asset_id !== null && row.asset_id !== undefined ? (
+                    <span className="font-mono text-muted-foreground">
+                      asset={row.asset_id}
+                    </span>
+                  ) : null}
+                  {showDetails && !expanded ? (
+                    <span className="ml-auto truncate font-mono text-muted-foreground">
+                      {JSON.stringify(row.details)}
+                    </span>
+                  ) : null}
+                </button>
+                {expanded && showDetails && (
+                  <pre
+                    className="overflow-x-auto border-t border-border bg-background/60 px-3 py-2 text-[11px] font-mono text-foreground/80"
+                    data-testid="audit-row-details"
+                  >
+                    {JSON.stringify(row.details, null, 2)}
+                  </pre>
+                )}
+              </li>
+            );
+          })}
         </ol>
+        {!error && !loading && items.length > 0 && filteredItems.length === 0 && (
+          <div className="mt-2 text-xs italic text-muted-foreground">
+            No events match the {actionFilter} filter.{" "}
+            <button
+              type="button"
+              className="underline hover:text-foreground"
+              onClick={() => setActionFilter("all")}
+            >
+              Clear filter
+            </button>
+            .
+          </div>
+        )}
       </CardContent>
     </Card>
   );
