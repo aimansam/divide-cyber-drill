@@ -42,6 +42,7 @@ export type ViewKey =
   | "operate"
   | "observe"
   | "admin"
+  | "config"
   | "history"
   | "profile";
 
@@ -76,6 +77,12 @@ const TABS: readonly TabSpec[] = [
     key: "admin",
     label: "Admin",
     icon: Shield,
+    roles: ["admin", "lead"] as const,
+  },
+  {
+    key: "config",
+    label: "Config",
+    icon: Settings,
     roles: ["admin", "lead"] as const,
   },
   {

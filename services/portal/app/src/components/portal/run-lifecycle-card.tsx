@@ -173,7 +173,9 @@ export function RunLifecycleCard({
         startPoll(created.run_id);
       }
     } catch (e: unknown) {
-      setError(detailFromError(e));
+      setError(
+        `${detailFromError(e)}\n\n→ Open the Config tab to inspect PVE credentials and bridges.`,
+      );
     } finally {
       setLoading(false);
     }

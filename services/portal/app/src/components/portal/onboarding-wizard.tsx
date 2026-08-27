@@ -320,7 +320,7 @@ export function OnboardingWizard({ onLaunched }: OnboardingWizardProps) {
       onLaunched(run.id);
     } catch (e: unknown) {
       const msg = detailFromError(e);
-      setError(`drill launch failed: ${msg}`);
+      setError(`drill launch failed: ${msg}\n\n→ Open the Config tab to inspect PVE credentials and bridges.`);
     } finally {
       setLaunching(false);
     }

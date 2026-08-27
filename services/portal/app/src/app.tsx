@@ -3,6 +3,7 @@ import { ScenariosCard, type Scenario } from "@/components/portal/scenarios-card
 import { MyRunsCard, type RunRow } from "@/components/portal/my-runs-card";
 import { RunLifecycleCard } from "@/components/portal/run-lifecycle-card";
 import { PveOpsCard } from "@/components/portal/pve-ops-card";
+import { ConfigCard } from "@/components/portal/config-card";
 import { ScenarioAuthoringCard } from "@/components/portal/scenario-authoring-card";
 import { SignInCard } from "@/components/portal/sign-in-card";
 import { ResetPasswordCard } from "@/components/portal/reset-password-card";
@@ -66,6 +67,7 @@ const VALID_VIEWS = [
   "operate",
   "observe",
   "admin",
+  "config",
   "history",
   "profile",
 ] as const;
@@ -264,6 +266,8 @@ export default function App() {
                     <UserListCard />
                   </>
                 );
+              case "config":
+                return <ConfigCard meRole={me.role} />;
               case "history":
                 return (
                   <MyRunsCard
