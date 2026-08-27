@@ -45,21 +45,50 @@ interface AuditPayload {
   total?: number;
 }
 
+// Q18: keys match the wire shape — the API serialises the
+// AuditAction enum as lowercase dotted strings (e.g. ``run.started``).
+// Pre-Q18 the keys were uppercase enum-names (``RUN_STARTED``) which
+// never matched anything returned by the API, so every audit row
+// fell through to the default ``bg-zinc-700/40`` tone. Every row
+// looked identical. Switched to the wire shape AND extended the
+// set with ``run.stopped`` (added by Q17) and ``asset.orphaned``
+// (added by Q14).
 const ACTION_TONES: Record<string, string> = {
-  RUN_STARTED: "bg-emerald-900/40 text-emerald-200",
-  RUN_COMPLETED: "bg-emerald-900/40 text-emerald-200",
-  RUN_CANCELLED: "bg-amber-900/40 text-amber-200",
-  RUN_CANCELED: "bg-amber-900/40 text-amber-200",
-  RUN_FAILED: "bg-red-900/40 text-red-200",
-  RUN_TIMEOUT: "bg-red-900/40 text-red-200",
-  ASSET_SPAWNED: "bg-sky-900/40 text-sky-200",
-  ASSET_READY: "bg-sky-900/40 text-sky-200",
-  ASSET_TERMINATED: "bg-zinc-700/40 text-zinc-200",
+  "scenario.created": "bg-emerald-900/40 text-emerald-200",
+  "scenario.updated": "bg-emerald-900/40 text-emerald-200",
+  "scenario.deleted": "bg-red-900/40 text-red-200",
+  "run.started": "bg-emerald-900/40 text-emerald-200",
+  "run.completed": "bg-emerald-900/40 text-emerald-200",
+  "run.cancelled": "bg-amber-900/40 text-amber-200",
+  "run.stopped": "bg-amber-900/40 text-amber-200", // Q17: operator-initiated
+  "run.failed": "bg-red-900/40 text-red-200",
+  "run.timeout": "bg-red-900/40 text-red-200",
+  "asset.spawned": "bg-sky-900/40 text-sky-200",
+  "asset.orphaned": "bg-orange-900/40 text-orange-200", // Q14: post-drill cleanup failure
+  "asset.failed": "bg-red-900/40 text-red-200",
+  "flag.planted": "bg-violet-900/40 text-violet-200",
+  "password.reset.issued": "bg-zinc-700/40 text-zinc-200",
+  "password.reset.used": "bg-zinc-700/40 text-zinc-200",
 };
 
 function tone(action: string | undefined): string {
   if (!action) return "bg-zinc-700/40 text-zinc-200";
   return ACTION_TONES[action] ?? "bg-zinc-700/40 text-zinc-200";
+}
+
+/**
+ * Q18: render audit actions in a more readable form. The wire
+ * shape is lowercase dotted (``run.stopped``); we display the
+ * uppercase enum-style label (``RUN STOPPED``) but keep the
+ * original string as a hover tooltip so power users can still
+ * grep by the API shape.
+ */
+function actionLabel(action: string | undefined): string {
+  if (!action) return "?";
+  return action
+    .split(".")
+    .map((seg) => seg.toUpperCase().replace(/_/g, " "))
+    .join(" · ");
 }
 
 export function AuditExplorerCard({
@@ -154,8 +183,9 @@ export function AuditExplorerCard({
             >
               <span
                 className={`inline-block shrink-0 rounded px-1.5 py-0.5 font-mono text-[10px] ${tone(row.action)}`}
+                title={row.action ?? ""}
               >
-                {row.action ?? "?"}
+                {actionLabel(row.action)}
               </span>
               <span className="font-mono text-muted-foreground">
                 {row.at ? new Date(row.at).toLocaleString() : "?"}

@@ -1,7 +1,7 @@
 /**
- * RunLifecycleCard — start a drill, watch it tick, cancel it.
+ * RunLifecycleCard — start a drill, watch it tick, cancel or stop it.
  *
- * Three actions, gated by role:
+ * Four actions, gated by role:
  *
  *   * Start:   POST /api/v1/drills  { scenario_id }
  *              Allowed: admin, lead, red
@@ -11,6 +11,13 @@
  *              Red may only cancel runs they started (server enforced
  *              by commit 4d840f9 — we mirror the rule client-side so
  *              the button is disabled instead of 403-ing on click).
+ *   * Stop:    POST /api/v1/drills/{id}/stop   (Q17: admin/lead only)
+ *              Operator-initiated force-stop. Differs from Cancel in
+ *              that the audit row records ``run.stopped`` (not
+ *              ``run.cancelled``) and the actor is the operator's
+ *              token subject. The dedicated Stop button lives on the
+ *              OperatorConsoleCard (admin tab) for now; this card
+ *              delegates to it so we keep the bundle small.
  *
  * Roles (M3.2, Half 1): shown to admin, lead, red. Blue and observer
  * don't get this card at all (COMPOSITIONS table in app.tsx). The
@@ -18,7 +25,8 @@
  *
  * Polling: a single useEffect owns a 2s interval while a run is
  * active. On unmount or status transition to a terminal state the
- * interval clears itself.
+ * interval clears itself. ``stopped`` is now in TERMINAL_STATUSES
+ * (Q18) so a stopped run does not keep polling.
  *
  * Asset preview: we render the vmid + IP for each asset once the
  * run reaches `provisioning`. The full AssetsCard lands in Half 2.
@@ -93,6 +101,7 @@ const TERMINAL_STATUSES = new Set([
   "completed",
   "cancelled",
   "canceled",
+  "stopped",
   "failed",
   "timeout",
 ]);

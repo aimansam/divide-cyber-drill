@@ -55,6 +55,9 @@ const FILTER_OPTIONS = [
   "failed",
   "timeout",
   "cancelled",
+  "stopped", // Q18: Q17 added the run.stopped audit action + the
+            // "stopped" Run.status (set by /drills/{id}/stop),
+            // so users need a way to filter for it.
 ] as const;
 
 export function MyRunsCard({

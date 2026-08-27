@@ -262,7 +262,7 @@ export function DrillConsole({ pickedRunId, scenarioName }: DrillConsoleProps) {
             <RefreshCw className="mr-1 h-3 w-3" />
             Refresh
           </Button>
-          {run && (run.status === "succeeded" || run.status === "failed" || run.status === "timeout" || run.status === "cancelled" || run.status === "completed") && (
+          {run && (run.status === "succeeded" || run.status === "failed" || run.status === "timeout" || run.status === "cancelled" || run.status === "completed" || run.status === "stopped") && (
             <>
               {/* F11.2: leadership-facing markdown play-by-play.
                   Opens in a new tab (modern browsers render .md
