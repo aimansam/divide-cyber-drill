@@ -143,13 +143,30 @@ async def check_drill_start_limit(sub: str) -> None:
     if int(count) > cfg.limit:
         # Don't decrement; the bucket naturally expires. Returning
         # the limit in the detail lets the UI render a useful toast.
+        # Q15: carry a ``kind`` discriminator in the JSON detail
+        # so the portal can dispatch on error type instead of
+        # routing every failure to "Open Config". Today the run
+        # lifecycle card always appends "Open Config" because the
+        # rate-limit error has nothing to do with PVE credentials
+        # or bridges -- the message says "rate limit exceeded"
+        # but the UI sends the user to the wrong place. The
+        # structured detail below lets the UI render a different
+        # banner for ``kind="rate_limited"`` vs PVE/bridge errors.
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=(
-                f"rate limit exceeded for subject {sub!r}: "
-                f"{count}/{cfg.limit} drill starts in the last "
-                f"{cfg.window_seconds}s window"
-            ),
+            detail={
+                "kind": "rate_limited",
+                "message": (
+                    f"drill start rate limit exceeded for {sub!r}: "
+                    f"{count}/{cfg.limit} starts in the last "
+                    f"{cfg.window_seconds}s window. Wait for the "
+                    f"window to reset before retrying."
+                ),
+                "subject": sub,
+                "count": int(count),
+                "limit": cfg.limit,
+                "window_s": cfg.window_seconds,
+            },
         )
 
 

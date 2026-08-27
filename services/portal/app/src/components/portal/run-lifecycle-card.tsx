@@ -48,6 +48,44 @@ import { api, detailFromError } from "@/lib/api";
 import { hasRole, type Role } from "@/lib/roles";
 import type { Scenario } from "@/components/portal/scenarios-card";
 
+/**
+ * Shape of a structured error response from the API.
+ *
+ * Q15: drill-start failures used to all surface the same banner
+ * ("Open the Config tab to inspect PVE credentials and bridges")
+ * regardless of the actual error. Now the API returns a JSON
+ * ``detail`` object on rate-limit and other known errors with a
+ * ``kind`` discriminator; the UI dispatches on it. If the
+ * response detail is a plain string (older / un-tagged endpoints)
+ * the kind falls back to ``"generic"`` and the banner keeps its
+ * previous behaviour.
+ */
+interface DrillsErrorDetail {
+  kind?: string;
+  message?: string;
+  subject?: string;
+  count?: number;
+  limit?: number;
+  window_s?: number;
+}
+
+function parseErrorKind(rawBody: unknown): DrillsErrorDetail {
+  if (
+    rawBody &&
+    typeof rawBody === "object" &&
+    "body" in (rawBody as Record<string, unknown>)
+  ) {
+    const body = (rawBody as { body?: unknown }).body;
+    if (body && typeof body === "object" && "detail" in (body as Record<string, unknown>)) {
+      const detail = (body as { detail?: unknown }).detail;
+      if (detail && typeof detail === "object") {
+        return detail as DrillsErrorDetail;
+      }
+    }
+  }
+  return {};
+}
+
 const CAN_START: readonly Role[] = ["admin", "lead", "red"];
 const CAN_CANCEL: readonly Role[] = ["admin", "lead", "red"];
 
@@ -110,6 +148,16 @@ export function RunLifecycleCard({
   const [run, setRun] = useState<RunDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  /**
+   * Q15: discriminate between drill-start error kinds so the
+   * banner can show the right remediation.
+   *   ``"rate_limited"`` -> "wait for window to reset" message
+   *   ``"generic"``      -> "Open Config" banner (legacy behaviour)
+   *   ``null``           -> no error to show
+   */
+  const [errorKind, setErrorKind] = useState<"rate_limited" | "generic" | null>(
+    null,
+  );
   const [cancelReason, setCancelReason] = useState("user requested");
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -171,6 +219,7 @@ export function RunLifecycleCard({
   async function onStart() {
     if (scenario === null) return;
     setError(null);
+    setErrorKind(null);
     setLoading(true);
     try {
       const created = await api.post<RunDetail>("/api/v1/drills", {
@@ -181,9 +230,24 @@ export function RunLifecycleCard({
         startPoll(created.run_id);
       }
     } catch (e: unknown) {
-      setError(
-        `${detailFromError(e)}\n\n→ Open the Config tab to inspect PVE credentials and bridges.`,
-      );
+      // Q15: distinguish rate-limit errors from PVE/bridge
+      // errors. The rate-limit toast used to say
+      // "Open the Config tab" which sent the operator to
+      // the wrong place -- now we surface a different banner
+      // (no Open-Config button; instead a "wait or check
+      // service-status" message with the reset window).
+      const structured = parseErrorKind(e);
+      if (structured.kind === "rate_limited") {
+        setErrorKind("rate_limited");
+        setError(
+          structured.message ?? detailFromError(e),
+        );
+      } else {
+        setErrorKind("generic");
+        setError(
+          `${detailFromError(e)}\n\n→ Open the Config tab to inspect PVE credentials and bridges.`,
+        );
+      }
     } finally {
       setLoading(false);
     }
@@ -244,7 +308,16 @@ export function RunLifecycleCard({
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
               <span className="font-mono whitespace-pre-wrap">{error}</span>
             </div>
-            {onNavigateToConfig && (
+            {/*
+              Q15: only show "Open Config" when the error is a PVE /
+              bridge / credential issue (errorKind === "generic").
+              Rate-limit errors get a different banner below.
+              The legacy banner with "Open Config" was misleading
+              for rate limits because the operator would click it,
+              find PVE/bridges are fine, and never realize they
+              just need to wait.
+            */}
+            {errorKind !== "rate_limited" && onNavigateToConfig && (
               <Button
                 size="sm"
                 variant="outline"
@@ -254,6 +327,24 @@ export function RunLifecycleCard({
                 <Settings className="h-3.5 w-3.5" />
                 <span className="ml-1">Open Config</span>
               </Button>
+            )}
+            {errorKind === "rate_limited" && (
+              <p className="mt-2 text-xs text-muted-foreground">
+                Need to inspect cluster health instead?{" "}
+                {onNavigateToConfig && (
+                  <button
+                    type="button"
+                    className="underline underline-offset-2 hover:text-foreground"
+                    onClick={onNavigateToConfig}
+                  >
+                    Open the Config tab
+                  </button>
+                )}
+                . The limit resets when the window expires (no
+                manual action required -- try again in a few
+                minutes, or restart the stack with a higher
+                ``DRILL_START_LIMIT`` env var).
+              </p>
             )}
           </div>
         )}

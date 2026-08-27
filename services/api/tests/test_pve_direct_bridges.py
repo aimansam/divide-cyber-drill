@@ -101,8 +101,16 @@ def _patch_httpx(
 
 
 def _run(coro):
-    """Sync helper to run an async function from test bodies."""
-    return asyncio.get_event_loop().run_until_complete(coro)
+    """Sync helper to run an async function from test bodies.
+
+    Uses ``asyncio.run()`` instead of
+    ``asyncio.get_event_loop().run_until_complete()`` -- the latter
+    fails when pytest-asyncio has already managed the loop in this
+    thread (e.g. when test_routers.py runs first and closes the
+    loop). ``asyncio.run()`` creates a fresh loop each call, so test
+    ordering doesn't matter.
+    """
+    return asyncio.run(coro)
 
 class TestApplyDirectPlan:
     """Happy-path applier tests. All network calls are mocked."""

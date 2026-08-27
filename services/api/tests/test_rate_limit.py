@@ -77,16 +77,56 @@ def test_first_n_requests_pass(fake_redis, set_limit):
 
 
 def test_over_limit_raises_429(fake_redis, set_limit):
-    """The (limit+1)th request from the same sub raises 429."""
+    """The (limit+1)th request from the same sub raises 429.
+
+    Q15: detail is now a structured dict with a ``kind`` discriminator
+    so the portal can dispatch on error type instead of routing every
+    drill-start failure to the "Open Config" banner.
+    """
     from app.services.rate_limit import check_drill_start_limit as rl
 
-    async def _go():
+    async def _go() -> None:
         for _ in range(5):
             await rl("alice")
         with pytest.raises(HTTPException) as exc_info:
             await rl("alice")
         assert exc_info.value.status_code == 429
-        assert "alice" in exc_info.value.detail
+        detail = exc_info.value.detail
+        # Structured detail (dict) -- portal dispatches on this.
+        assert isinstance(detail, dict)
+        assert detail["kind"] == "rate_limited"
+        assert detail["subject"] == "alice"
+        assert detail["limit"] == 5
+        assert detail["window_s"] == 3600
+        assert detail["count"] >= 6
+        # The message must mention the subject for the toast.
+        assert "alice" in detail["message"]
+        # Must NOT be a plain string anymore (the old behaviour).
+        assert not isinstance(detail, str)
+
+    _run(_go())
+
+
+def test_over_limit_message_mentions_wait(fake_redis, set_limit):
+    """The rate-limit message must tell the operator to wait.
+
+    Before Q15 the message was just the bare ``count/limit/window``
+    triple. The wizard would render it inside a banner that also
+    showed "Open the Config tab" -- the operator thought PVE was
+    broken. Now the message explicitly says "Wait for the window
+    to reset".
+    """
+    from app.services.rate_limit import check_drill_start_limit as rl
+
+    async def _go() -> None:
+        for _ in range(5):
+            await rl("alice")
+        with pytest.raises(HTTPException) as exc_info:
+            await rl("alice")
+        msg = exc_info.value.detail["message"]
+        assert "wait" in msg.lower() or "reset" in msg.lower(), (
+            f"rate-limit message must hint at waiting; got: {msg!r}"
+        )
 
     _run(_go())
 
