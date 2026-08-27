@@ -15,9 +15,8 @@
  *              Operator-initiated force-stop. Differs from Cancel in
  *              that the audit row records ``run.stopped`` (not
  *              ``run.cancelled``) and the actor is the operator's
- *              token subject. The dedicated Stop button lives on the
- *              OperatorConsoleCard (admin tab) for now; this card
- *              delegates to it so we keep the bundle small.
+ *              token subject. Q19 adds the inline Stop button here
+ *              so operators don't have to switch to the Admin tab.
  *
  * Roles (M3.2, Half 1): shown to admin, lead, red. Blue and observer
  * don't get this card at all (COMPOSITIONS table in app.tsx). The
@@ -41,6 +40,7 @@ import {
   Settings,
   Shield,
   Square,
+  CircleStop,
   AlertTriangle,
 } from "lucide-react";
 import {
@@ -96,6 +96,11 @@ function parseErrorKind(rawBody: unknown): DrillsErrorDetail {
 
 const CAN_START: readonly Role[] = ["admin", "lead", "red"];
 const CAN_CANCEL: readonly Role[] = ["admin", "lead", "red"];
+// Q19: operator-initiated force-stop. Unlike Cancel (which a red
+// trainee can call on their own run), Stop is restricted to roles
+// with range-operator authority. Red team should not be able to
+// kill drills other operators are running.
+const CAN_STOP: readonly Role[] = ["admin", "lead"];
 
 const TERMINAL_STATUSES = new Set([
   "completed",
@@ -172,6 +177,9 @@ export function RunLifecycleCard({
 
   const canStart = hasRole(meRole, CAN_START);
   const canCancel = hasRole(meRole, CAN_CANCEL);
+  // Q19: stop is operator-only. No "own-only" filter needed since
+  // red doesn't have the role at all.
+  const canStop = hasRole(meRole, CAN_STOP);
   // red can cancel any of *their* runs; admin/lead cancel anything.
   // This mirrors the server rule from commit 4d840f9.
   const canCancelThis =
@@ -275,6 +283,42 @@ export function RunLifecycleCard({
       clearPoll();
     } catch (e: unknown) {
       setError(detailFromError(e));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  /**
+   * Q19: operator-initiated force-stop. Hits POST /drills/{id}/stop
+   * which the API distinguishes from /cancel by writing a
+   * ``run.stopped`` audit row (not ``run.cancelled``) and threading
+   * the actor (token sub) into the audit record. No reason input --
+   * stops are operational, not user-attributed.
+   *
+   * Optimistic UI: we set the run to ``"stopped"`` immediately so
+   * the operator gets instant feedback, then reconcile with the
+   * server response. If the server disagrees (e.g. 409 already-
+   * terminal), we revert and re-fetch.
+   */
+  async function onStop() {
+    if (run === null || !canStop || !hasLiveRun) return;
+    setLoading(true);
+    setError(null);
+    // Optimistic state.
+    const prevRun = run;
+    setRun({ ...run, status: "stopped", ended_at: new Date().toISOString() });
+    clearPoll();
+    try {
+      const updated = await api.post<RunDetail>(
+        `/api/v1/drills/${run.run_id}/stop`,
+      );
+      setRun(updated);
+    } catch (e: unknown) {
+      // Revert and surface the error.
+      setRun(prevRun);
+      setError(detailFromError(e));
+      // Re-sync in case the server actually did succeed (network blip).
+      void fetchRun(prevRun.run_id);
     } finally {
       setLoading(false);
     }
@@ -452,6 +496,24 @@ export function RunLifecycleCard({
                 <Button variant="destructive" onClick={onCancel} disabled={loading}>
                   <Square className="mr-2 h-4 w-4" /> Cancel
                 </Button>
+              </div>
+            )}
+
+            {canStop && hasLiveRun && (
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  onClick={onStop}
+                  disabled={loading}
+                  data-testid="lifecycle-stop"
+                  title="Operator force-stop: tears down all assets and writes a run.stopped audit row."
+                >
+                  <CircleStop className="mr-2 h-4 w-4" />
+                  Stop
+                </Button>
+                <span className="text-xs italic text-muted-foreground">
+                  Operator force-stop — tears down all VMs immediately.
+                </span>
               </div>
             )}
 
