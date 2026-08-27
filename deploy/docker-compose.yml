@@ -46,6 +46,13 @@ services:
       PROXMOX_TOKEN_ID: ${PROXMOX_TOKEN_ID:-}
       PROXMOX_TOKEN_SECRET: ${PROXMOX_TOKEN_SECRET:-}
       PROXMOX_VERIFY_SSL: ${PROXMOX_VERIFY_SSL:-true}
+      # Q22: orphan janitor. Off by default; flip to true in
+      # deployments where stale VMs accumulate faster than humans
+      # notice. See services/api/app/core/config.py for full
+      # semantics.
+      DIVIDE_ORPHAN_JANITOR_ENABLED: ${DIVIDE_ORPHAN_JANITOR_ENABLED:-false}
+      DIVIDE_ORPHAN_JANITOR_INTERVAL_MIN: ${DIVIDE_ORPHAN_JANITOR_INTERVAL_MIN:-30}
+      DIVIDE_ORPHAN_JANITOR_GRACE_MINUTES: ${DIVIDE_ORPHAN_JANITOR_GRACE_MINUTES:-5}
     depends_on:
       postgres:
         condition: service_healthy

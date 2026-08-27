@@ -1,0 +1,57 @@
+"""Add ``asset.cleaned`` audit action (Q22).
+
+Distinct from ``asset.orphaned``: the orphan row is recorded
+when teardown failed (Q17), ``asset.cleaned`` is recorded when
+the operator / janitor successfully retried ``destroy_vm`` on
+an orphan and the PVE row was released. Having both lets
+operators answer "did this orphan ever get resolved?".
+
+Idempotent on re-run via the ``DuplicateObject`` swallow used by
+migrations 0012 / 0014 (``ALTER TYPE ... ADD VALUE`` has no
+``IF NOT EXISTS``). Downgrade is intentionally a no-op because
+Postgres refuses to DROP a value from an in-use enum; the
+dangling value is harmless and the Python ``AuditAction`` enum
+remains the source of truth for what code paths can write the
+value.
+
+Revision ID: 0015_audit_asset_cleaned
+Revises: 0014_audit_run_stopped
+Create Date: 2026-08-28
+"""
+from __future__ import annotations
+
+import sqlalchemy as sa
+from alembic import op
+
+
+revision = "0015_audit_asset_cleaned"
+down_revision = "0014_audit_run_stopped"
+branch_labels = None
+depends_on = None
+
+
+def _safe_add_value(enum_value: str) -> None:
+    """ALTER TYPE ADD VALUE is non-transactional on PG and lacks
+    IF NOT EXISTS; swallow DuplicateObject so the migration is
+    re-runnable. Pattern copied from 0012_audit_reset_events +
+    0014_audit_run_stopped.
+    """
+    sql = sa.text(f"ALTER TYPE audit_action ADD VALUE '{enum_value}'")
+    try:
+        op.execute(sql)
+    except Exception:  # noqa: BLE001
+        # DuplicateObject -> already present. Other errors bubble
+        # up so we don't hide real migration failures.
+        pass
+
+
+def upgrade() -> None:
+    _safe_add_value("asset.cleaned")
+
+
+def downgrade() -> None:
+    # No-op: Postgres refuses to drop a value from an enum in use,
+    # and leaving the dangling value is harmless. The Python
+    # ``AuditAction`` enum is the source of truth for which values
+    # can be written at runtime.
+    pass

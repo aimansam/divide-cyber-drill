@@ -123,6 +123,16 @@ class Settings(BaseSettings):
     # ``drill_timeout_min > 0``.
     drill_timeout_enabled: bool = True
 
+    # Q22: orphan janitor. Periodically runs the cleanup logic
+    # on Asset rows that the Q17 teardown loop left in
+    # AssetStatus.ORPHANED. Off by default so deployments don't
+    # surprise operators with background destroys; enable in
+    # environments where stale VMs accumulate faster than humans
+    # notice.
+    orphan_janitor_enabled: bool = False
+    orphan_janitor_interval_min: int = 30
+    orphan_janitor_grace_minutes: int = 5
+
     # F3-prep credential login. Lifetime of the HMAC token minted by
     # POST /api/v1/auth/login, in seconds. Default 8h covers a working
     # day; override for shorter demos. Clamped to a positive int at the

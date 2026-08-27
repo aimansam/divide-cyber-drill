@@ -16,7 +16,9 @@ from app.core.config import settings
 from app.core.logging import configure_logging
 from app.observability.middleware import PrometheusMiddleware
 from app.routers import admin, audit, auth, debrief, drills, events, exercises, health, me, proxmox, reports, scenarios, templates
+from app.services import orphan_cleanup as orphan_svc
 from app.services.scenario_sync import sync_files
+from app.runners.runner import build_runner
 
 log = structlog.get_logger()
 
@@ -162,7 +164,67 @@ async def lifespan(app: FastAPI):
     except Exception as exc:  # pragma: no cover - best-effort
         log.warning("divide_api.pve_overlay.hydrate_failed", error=str(exc))
 
+    # Q22: orphan janitor background task. Off by default
+    # (orphan_janitor_enabled=False). When on, periodically calls
+    # the same cleanup_orphans() helper that backs POST
+    # /api/v1/admin/assets/cleanup. Cancellable on shutdown.
+    janitor_task = None
+    if settings.orphan_janitor_enabled:
+        from app.db.session import get_sessionmaker
+
+        async def _janitor_loop() -> None:
+            sm = get_sessionmaker()
+            runner = build_runner()
+            adapter = runner._adapter  # noqa: SLF001
+            interval = settings.orphan_janitor_interval_min * 60
+            grace = settings.orphan_janitor_grace_minutes
+            log.info(
+                "divide_api.orphan_janitor.started",
+                interval_min=settings.orphan_janitor_interval_min,
+                grace_minutes=grace,
+            )
+            import asyncio
+
+            while True:
+                try:
+                    async with sm() as session:
+                        result = await orphan_svc.cleanup_orphans(
+                            session,
+                            adapter,
+                            actor="system:janitor",
+                            grace_minutes=grace,
+                        )
+                    if result.destroyed or result.failed:
+                        log.info(
+                            "divide_api.orphan_janitor.tick",
+                            scanned=result.scanned,
+                            destroyed=result.destroyed,
+                            failed=len(result.failed),
+                        )
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:  # noqa: BLE001
+                    log.warning(
+                        "divide_api.orphan_janitor.error", error=str(exc)
+                    )
+                await asyncio.sleep(interval)
+
+        import asyncio
+
+        janitor_task = asyncio.create_task(_janitor_loop())
+
     yield
+
+    # Cancel the janitor (if running) before tearing down other
+    # resources so the cleanup loop doesn't fire after the bus is
+    # closed.
+    if janitor_task is not None:
+        janitor_task.cancel()
+        try:
+            await janitor_task
+        except (asyncio.CancelledError, Exception):  # noqa: BLE001
+            pass
+        log.info("divide_api.orphan_janitor.stopped")
 
     # R1: tear down the RedisEventBus bridge thread + redis pool.
     # InProcessEventBus has nothing to close. The factory caches

@@ -90,6 +90,10 @@ class AuditAction(str, enum.Enum):
     ASSET_SPAWNED = "asset.spawned"
     ASSET_FAILED = "asset.failed"
     ASSET_ORPHANED = "asset.orphaned"
+    # Q22: janitor successfully retried destroy_vm on an orphan
+    # and the PVE row was released. Distinct from asset.orphaned
+    # so operators can answer "did this orphan ever get resolved?".
+    ASSET_CLEANED = "asset.cleaned"
     # F5: runner logged the planting intent for a flag
     # declared in spec.flags[]. The actual filesystem write
     # happens via cloud-init user_data (see docs/F5-SCORING.md);
@@ -275,6 +279,15 @@ class Asset(Base, TimestampMixin):
     pve_node: Mapped[str | None] = mapped_column(String(64), nullable=True)
     pve_ip: Mapped[str | None] = mapped_column(String(45), nullable=True)  # IPv6 max
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Q22: when the janitor (POST /api/v1/admin/assets/cleanup)
+    # successfully retried destroy_vm on an orphan, we flip the
+    # row to STOPPED and stamp cleaned_at. The asset row is kept
+    # (not hard-deleted) so the run's history stays intact;
+    # audit_log.asset_id has ON DELETE SET NULL anyway, but we'd
+    # rather preserve the link.
+    cleaned_at: Mapped["datetime | None"] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     run: Mapped[Run] = relationship(back_populates="assets")
 
