@@ -346,31 +346,40 @@ async def apply_bridges(
     *,
     node: str = "pve",
     dry_run: bool = False,
+    method: str = "direct",
 ) -> ApplyResult:
-    """Drive the PVE SDN controller to realize the plan.
+    """Realize the bridge plan on PVE.
 
-    Thin wrapper kept for callers that already pass a ``BridgePlan``
-    (notably ``POST /admin/pve-setup-bridges`` and the tests). The
-    actual implementation lives in :mod:`app.services.pve_sdn`.
+    Two paths are supported:
 
-    The old SSH-based path (``paramiko`` + ``ifreload -a``) is gone:
-    PVE 8.1+ exposes ``/cluster/sdn/{zones,vnets}`` which creates the
-    same Linux bridges purely via API. See
-    ``docs/PROXMOX-SETUP.md`` for the new permission requirement
-    (``SDN.Allocate`` on the PVE token).
+    * ``method="direct"`` (default) -- POSTs to PVE's node-level
+      network API (``/nodes/{n}/network``) which creates Linux
+      bridges on the node directly. Works on stock PVE 9 single-node
+      installs without an external SDN controller. Requires
+      ``Sys.Modify`` on ``/nodes/{node}``.
+
+    * ``method="sdn"`` -- legacy SDN path. Uses PVE's
+      ``/cluster/sdn/{zones,vnets}`` endpoints. Works without
+      ``Sys.Modify`` but requires ``SDN.Allocate`` and an external
+      SDN controller for the bridges to actually materialize on
+      PVE 9. Kept for clusters with a controller installed.
 
     The function signature still accepts ``node=`` for backwards
     compatibility with test fixtures that pre-date the pivot.
     """
     from app.services.pve_sdn import (
+        apply_direct_plan,
         apply_sdn_plan,
         get_active_auth,
         to_apply_result,
     )
 
     auth = get_active_auth(node=node)
-    sdn = await apply_sdn_plan(plan, auth=auth, dry_run=dry_run)
-    return to_apply_result(plan, sdn)
+    if method == "direct":
+        sdn = await apply_direct_plan(plan, auth=auth, dry_run=dry_run)
+    else:
+        sdn = await apply_sdn_plan(plan, auth=auth, dry_run=dry_run)
+    return to_apply_result(plan, sdn, method=method)
 
 
 # --- helpers --------------------------------------------------------------

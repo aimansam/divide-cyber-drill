@@ -26,37 +26,69 @@ In the Proxmox web UI:
 
 ## 2. Grant permissions
 
-F-pve-bridge-wizard (SDN variant) needs the PVE token to **create** Linux
-bridges via the SDN API. That requires the **`SDN.Allocate`**
-privilege, which is **not** included in PVE's built-in `PVEAuditor`
-role. We therefore grant two roles: the read-only `PVEAuditor` (for
-probes, health checks, etc.) plus a custom role that bundles the
-minimum writes the wizard needs.
+div:ide's day-1 wizard needs the PVE token to **create Linux bridges**
+on the PVE node. The path it uses depends on the PVE version:
 
-**Datacenter → Permissions → Add → User Permission** — grant twice
-(each entry needs its own line; PVE does not have a multi-role
-selector in the GUI):
+* **PVE 9 (default for new installs)**: the wizard creates bridges
+  directly via `POST /nodes/{n}/network`. This requires `Sys.Modify`
+  on `/nodes` -- **which is NOT in PVE's built-in `PVEAdmin` role**
+  as of PVE 9. `Sys.Modify` was in PVE 8's `PVEAdmin` but PVE 9
+  reserved it for `root@pam`. You need to create a custom role.
+* **PVE 8.x with an SDN controller installed**: the wizard can use
+  the SDN zone/vnet path (`SDN.Allocate` on `/sdn`). Most operators
+  on PVE 9 will not have a controller, so prefer the direct path.
+
+Grant three permissions (one role + two ACLs):
+
+**Datacenter → Permissions → Roles → Create** (only needed once):
+
+| Field | Value |
+|---|---|
+| Name | `DivideNetAdmin` |
+| Privileges | check `Sys.Modify` only |
+
+**Datacenter → Permissions → Add → User Permission** (three entries):
 
 | # | User / Group | Path | Role | Propagate |
 |---|---|---|---|---|
 | 1 | `divide@pam` | `/` | `PVEAuditor` | Yes |
 | 2 | `divide@pam` | `/sdn` | `SDN.Allocate` | No |
+| 3 | `divide@pam` | `/nodes` | `DivideNetAdmin` | Yes |
 
 Or, equivalently, via `pveum` on the PVE host:
 
 ```bash
+# Custom role with Sys.Modify (PVE 9 requires this for direct bridge creation).
+pveum role add DivideNetAdmin -privs Sys.Modify
+
+# Read-only probe (PVEAuditor).
 pveum aclmod divide@pam -role PVEAuditor -path / -propagate 1
+
+# SDN.Allocate (only used if you opt into the SDN path).
 pveum aclmod divide@pam -role SDN.Allocate -path /sdn
+
+# Sys.Modify on /nodes (the new PVE 9 requirement for direct bridge creation).
+pveum aclmod divide@pam -role DivideNetAdmin -path /nodes -propagate 1
 ```
 
-`PVEAuditor` alone is **insufficient** for the wizard's Step 0 — it lets
-the API probe PVE and list existing Vnets, but it returns 403 when
-the wizard tries to `POST /cluster/sdn/{zones,vnets}`. The wizard
-detects this and renders the exact `pveum aclmod` line you need.
+**Why a custom role?** PVE 9's `PVEAdmin` role does not include
+`Sys.Modify`. The built-in `Administrator` role DOES include it, but
+granting `Administrator` is overkill (it includes cluster-wide
+management). `DivideNetAdmin` is a minimal-role principle: just
+`Sys.Modify`, nothing else.
+
+`PVEAuditor` alone is **insufficient** -- it lets the API probe PVE
+and list existing bridges, but the wizard's Recreate button needs
+`Sys.Modify` to actually create them on PVE 9.
+
+The wizard's Recreate button surfaces the literal PVE error +
+copy-pasteable `pveum` lines when any role is missing. If you only
+want to set up probes (no bridge creation), skip entries 2 and 3 --
+but the wizard will be unable to complete setup.
 
 If you want to skip the wizard entirely and use the env-var
-fallback path (§6), only the first row is required — the env-var path
-never writes to PVE.
+fallback path (§6), only the first row is required -- the env-var
+path never writes to PVE.
 
 ## 3. Create the API token
 
@@ -76,73 +108,62 @@ The token secret is a UUID like `4ea3414f-d3a4-47b5-a2ed-19018f416cc0`. It is
 
 The div:ide runner allocates one Linux bridge per
 `spec.networks[]` declaration, starting at `vmbr100`. As of
-F-pve-bridge-wizard (SDN variant), the wizard creates these
-purely via PVE's SDN API — no SSH, no editing
-`/etc/network/interfaces`, no `ifreload`.
+**Q13 (direct bridge path)**, the wizard creates these directly
+via PVE's node-level network API — no SDN controller, no
+`/etc/network/interfaces` edits, no `ifreload`.
 
 The wizard's Step 0:
 
-1. **Probe PVE** (`GET /cluster/sdn/{zones,vnets}`) to see what's
-   already configured.
-2. **Create the `divide` zone** (`POST /cluster/sdn/zones`) if it's
-   not already there. A Simple zone that rides on `vmbr0` and
-   creates one Linux bridge per VNet on each node.
-3. **Create one VNet per bridge** (`POST /cluster/sdn/vnets`). The
-   VNet name becomes the iface name on every node (so VNet
-   `vmbr100` shows up as `vmbr100` in `ip link` output, identical
-   to a hand-crafted bridge).
-4. **Wait for propagation** (~1–3s) by polling
-   `GET /nodes/{n}/network`. Once every expected bridge is in
-   `UP` state, the wizard advances.
+1. **Probe PVE** (`GET /nodes/{n}/network`) to see what bridges
+   already exist.
+2. **Create one bridge per spec** (`POST /nodes/{n}/network`)
+   with `type=bridge`, `address=<gateway>/<prefix>`, and
+   `comments=div:ide:<scenario>/<network>`. PVE applies each
+   bridge within ~1s and it shows up as a Linux bridge on the
+   node.
+3. **Verify** by re-polling `/nodes/{n}/network`; once every
+   expected bridge is present, the wizard advances.
 
 The wizard auto-skips Step 0 when all expected bridges already
 exist on PVE, so it's safe to refresh the page.
 
-### PVE 8.1 / PVE 9
+### Why not PVE's SDN?
 
-PVE 8.1+ ships the SDN controller by default; PVE 9 always has it.
-No additional package install is needed.
+PVE 9's Simple-zone Vnets only materialize as Linux bridges on
+the node when an external SDN controller (faucet, evpn, etc.) is
+installed and configured. Most single-node lab installs don't
+have one. Going through SDN also requires `SDN.Allocate`; the
+direct path only needs `Sys.Modify` — which PVE 9 also reserves
+for `root@pam`, but at least it's a smaller privilege that can be
+wrapped in a minimal custom role (see §2 above).
 
-### Cluster-wide propagation
-
-A Simple zone's VNet shows up as a Linux bridge on **every node in
-the cluster**. div:ide's runner is pinned to one node per drill
-(configurable), but creating the bridge cluster-wide is harmless
-and matches PVE's recommended layout.
+For multi-node clusters that already run an SDN controller, the
+SDN path is still supported: the `apply_bridges()` function in
+`app/services/pve_bridges.py` accepts `method="sdn"` to fall back
+to the legacy zone/vnet path. The wizard does not expose this
+toggle today; if you need it, call the API directly with
+`{"method": "sdn"}` or open an issue.
 
 ### Rollback
 
-To remove a VNet the wizard created, run on the PVE host:
+To remove a single bridge the wizard created, run on the PVE host:
 
 ```bash
-pvesh delete /cluster/sdn/vnets/vmbr100 -vnet vmbr100
-# or via the web UI: Datacenter → SDN → Vnets → delete
+pvesh delete /nodes/pve/network/vmbr100 -iface vmbr100
+# or via the web UI: Datacenter -> Node -> pve -> Network -> vmbr100 -> Delete
 ```
 
-To remove the entire zone (and all its Vnets at once):
+The wizard does **not** write to `/etc/network/interfaces` and
+does not create any SDN zone, so there is nothing else to roll back.
 
-```bash
-pvesh delete /cluster/sdn/zones/divide -zone divide
-```
+### PVE 9 Sys.Modify grant
 
-The wizard does **not** create any `/etc/network/interfaces` content
-of its own — there is nothing to roll back from a `divide.conf`
-drop-in file because no such file is written.
-
-To roll back, drop the SDN zone (which also removes all its Vnets):
-
-```bash
-pvesh delete /cluster/sdn/zones/divide -zone divide
-# Or via the web UI: Datacenter → SDN → Zones → divide → delete.
-```
-
-If a single VNet needs to go away (e.g. a torn-down drill left
-an orphan), drop it individually:
-
-```bash
-pvesh delete /cluster/sdn/vnets/vmbr100 -vnet vmbr100
-# Or via the web UI: Datacenter → SDN → Vnets → vmbr100 → delete.
-```
+If the wizard's Recreate button returns a 403 with the message
+`Permission check failed (/nodes/pve, Sys.Modify)`, the token is
+missing the `Sys.Modify` privilege on `/nodes`. Grant it (see §2
+above) — the wizard will surface a copy-pasteable `pveum` snippet
+and a web-UI walkthrough so the operator doesn't need to read
+this doc to recover.
 
 ## 5. PVE connection: web setup (preferred)
 

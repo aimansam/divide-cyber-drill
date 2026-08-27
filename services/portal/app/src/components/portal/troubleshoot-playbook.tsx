@@ -67,6 +67,15 @@ export interface TroubleshootProbe {
     scenario: string;
   }>;
   templateReady?: boolean | null;
+  /**
+   * PVE 9 single-node installs need ``Sys.Modify`` on
+   * ``/nodes/{node}`` to create Linux bridges directly. PVEAdmin
+   * no longer includes this privilege as of PVE 9 -- the operator
+   * must create a custom role and grant it. This prop carries the
+   * 403 from PVE so the playbook can render the right fix-it card.
+   */
+  sysModifyRequired?: boolean;
+  sysModifyPveumHint?: string | null;
 }
 
 interface PlaybookStep {
@@ -173,9 +182,50 @@ function pickPlaybooks(probe: TroubleshootProbe): PlaybookEntry[] {
     });
   }
 
+  // 2b. Sys.Modify specifically (PVE 9 direct-bridge path).
+  // PVE 9 reserves this privilege for root@pam; PVEAdmin does NOT
+  // include it. The wizard surfaces this whenever the Recreate
+  // button gets a 403 Sys.Modify. Render a dedicated card so the
+  // operator doesn't have to dig through the error log.
+  if (probe.sysModifyRequired) {
+    out.push({
+      id: "sys-modify-missing",
+      severity: "error",
+      title: "PVE 9 needs Sys.Modify grant on /nodes",
+      why:
+        "PVE 9 split the 'modify node network' privilege from PVEAdmin. " +
+        "Creating Linux bridges on a PVE 9 node now requires the Sys.Modify " +
+        "privilege, which only root@pam holds by default. Create a custom " +
+        "role and grant it to your divide token.",
+      steps: [
+        {
+          text:
+            "On the PVE web UI: Datacenter -> Permissions -> Roles -> Create. " +
+            "Name: DivideNetAdmin. Privileges: check Sys.Modify. Click Create.",
+        },
+        {
+          text:
+            "Then grant the role to the divide token: Datacenter -> Permissions " +
+            "-> Users -> divide@pve@pam -> Add -> Path /nodes -> Role DivideNetAdmin.",
+        },
+        {
+          text:
+            "Or run the equivalent commands on the PVE host shell (copy + paste):",
+          command:
+            "pveum role add DivideNetAdmin -privs Sys.Modify\n" +
+            "pveum aclmod divide@pve@pam -role DivideNetAdmin -path /nodes",
+        },
+        {
+          text:
+            "Once granted, click Recreate in the Bridges card again. The " +
+            "Sys.Modify error will be replaced with a list of created bridges.",
+        },
+      ],
+    });
+  }
+
   // 3. Bridges missing -- recoverable with the in-portal Recreate button.
   if (probe.bridgesMissing && probe.bridgesMissing.length > 0) {
-    const firstMissing = probe.bridgesMissing[0];
     out.push({
       id: "bridges-missing",
       severity: "warn",
@@ -189,9 +239,11 @@ function pickPlaybooks(probe: TroubleshootProbe): PlaybookEntry[] {
         { text: "Click the Recreate button in the Bridges section above." },
         {
           text:
-            "If Recreate fails with a permission error, the token needs " +
-            "the SDN.Allocate role. You can also do it manually:",
-          command: `pvesh create /cluster/sdn/vnets -vnet ${firstMissing} -zone divide`,
+            "If Recreate fails with a permission error, the PVE 9 token " +
+            "needs the Sys.Modify role. Run on the PVE host:",
+          command:
+            "pveum role add DivideNetAdmin -privs Sys.Modify\n" +
+            "pveum aclmod divide@pve@pam -role DivideNetAdmin -path /nodes",
         },
       ],
     });

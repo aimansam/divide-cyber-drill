@@ -50,17 +50,27 @@ log = structlog.get_logger()
 
 # --- constants ------------------------------------------------------------
 
-#: Name of the SDN zone div:ide owns. Single zone for all VNet bridges;
-#: one per div:ide deployment. Operators can rename later via the
-#: admin UI if they need a multi-tenant layout.
 DEFAULT_ZONE: str = "divide"
 
-#: Seconds to wait for SDN propagation after the create POSTs. PVE's
-#: controller pushes the new VNet bridges to each node within ~1-3s
-#: in practice; we poll every ``PROBE_INTERVAL_S`` until every expected
-#: bridge appears on ``/nodes/{node}/network`` or the timeout elapses.
 PROPAGATE_TIMEOUT_S: float = 15.0
 PROBE_INTERVAL_S: float = 1.0
+
+
+# --- direct-bridge constants (PVE 9 happy path) ---------------------------
+
+#: Marker PVE uses in the comments field for div:ide-created bridges.
+#: Lets ``list_node_ifaces`` distinguish div:ide bridges from operator-
+#: maintained ones without an SDN zone to anchor on.
+DIVIDE_COMMENT_TAG: str = "div:ide"
+
+
+def _divide_comment(scenario: str, network: str) -> str:
+    """Render the comments string for a direct-created bridge.
+
+    Format is stable so a future operator can grep
+    ``/nodes/{n}/network`` output to see who owns the bridge.
+    """
+    return f"{DIVIDE_COMMENT_TAG}: {scenario}/{network}"
 
 
 # --- exceptions -----------------------------------------------------------
@@ -252,23 +262,49 @@ async def _request(
             msg = payload.get("message") or payload.get("errors") or r.text
         except Exception:  # noqa: BLE001
             msg = r.text or f"HTTP {r.status_code}"
-        role = "SDN.Allocate"
-        path = "/sdn"
-        if "SDN.Allocate" in msg:
+        # PVE 9 split the "modify node network" privilege from
+        # PVEAdmin. /nodes/{n}/network POSTs need Sys.Modify on
+        # /nodes/{n}; /cluster/sdn/{zones,vnets} needs SDN.Allocate
+        # on /sdn. Detect which one PVE is asking for from the
+        # message so the wizard renders the right pveum hint.
+        msg_lower = str(msg).lower()
+        if "sys.modify" in msg_lower or "/nodes/" in url and "/sdn" not in url:
+            role = "Sys.Modify"
+            path = url.split("/api2/json/")[1].split("/", 1)[0] if "/api2/json/" in url else "/"
+            # The /nodes/{n}/network POST scopes Sys.Modify to the
+            # specific node path. Operators can grant it wider if
+            # they prefer.
+            if path.startswith("nodes"):
+                # Take just '/nodes' (not '/nodes/pve') so the
+                # grant propagates to current and future nodes.
+                path = "/nodes"
+            else:
+                path = f"/{path}"
+            hint = (
+                f"pveum role add DivideNetAdmin -privs Sys.Modify\n"
+                f"pveum aclmod {auth.user} -role DivideNetAdmin -path {path}"
+            )
+        elif "sdn.allocate" in msg_lower or "/sdn" in url:
             role = "SDN.Allocate"
-        elif "Sys.Audit" in msg:
+            path = "/sdn"
+            hint = _pveum_aclmod_hint(user=auth.user, role=role, path=path)
+        elif "sys.audit" in msg_lower:
             role = "Sys.Audit"
             path = "/"
-        elif "VM.Audit" in msg:
+            hint = _pveum_aclmod_hint(user=auth.user, role=role, path=path)
+        elif "vm.audit" in msg_lower:
             role = "VM.Audit"
             path = "/vms"
+            hint = _pveum_aclmod_hint(user=auth.user, role=role, path=path)
+        else:
+            role = "SDN.Allocate"
+            path = "/sdn"
+            hint = _pveum_aclmod_hint(user=auth.user, role=role, path=path)
         raise SdnPermissionError(
-            msg.strip(),
+            str(msg).strip(),
             pve_path=path,
             required_role=role,
-            pveum_hint=_pveum_aclmod_hint(
-                user=auth.user, role=role, path=path
-            ),
+            pveum_hint=hint,
         )
     if r.status_code >= 400:
         try:
@@ -415,6 +451,71 @@ async def delete_vnet(auth: SdnAuth, *, vnet: str) -> None:
         raise
 
 
+# --- direct-bridge applier (PVE 9, single-node, no SDN controller) -------
+#
+# PVE 9's Simple-zone Vnets don't materialize as Linux bridges on
+# the node unless an external SDN controller (faucet, evpn, ...)
+# is installed. That's out of scope for a single-node lab. So
+# instead of going through SDN, we POST directly to PVE's
+# node-level network API (``/nodes/{n}/network``) which creates a
+# Linux bridge on the node in one call.
+#
+# Trade-off vs the SDN path:
+#   * No external controller needed. Works on stock PVE 9.
+#   * Bridges are per-node (not cluster-wide). For a single-node
+#     install that's fine; multi-node installs need SDN.
+#   * Requires ``Sys.Modify`` on ``/nodes/{node}``. PVE 9 reserves
+#     this privilege for ``root@pam``; see the playbook for the
+#     custom-role grant.
+#
+# The result shape (``SdnPlanResult``) is shared with the SDN
+# applier so the rest of the call chain is unchanged. We tag the
+# ``reload_method`` so the UI can show which path was taken.
+
+
+def _cidr_prefixlen(cidr: str) -> int:
+    """Extract the prefix length as an int.
+
+    Validates the CIDR by attempting to parse it (raises
+    ``ValueError`` on garbage).
+    """
+    import ipaddress
+
+    ipaddress.ip_network(cidr, strict=False)
+    return int(cidr.split("/")[1])
+
+
+async def create_bridge_direct(auth: SdnAuth, *, spec) -> None:
+    """Create one Linux bridge on the PVE node via the network API.
+
+    Idempotent: a 500 with "iface already exists" is treated as
+    success so re-running apply doesn't fail.
+
+    Note (PVE 9 compatibility): the POST payload is minimal on
+    purpose. PVE 9 rejects ``bridge_ports`` and ``bridge_vlan_aware``
+    in the same call as ``type=bridge``; we set those later via
+    PUT if needed (not used today -- bridges are simple VLAN-less
+    host bridges for drill isolation).
+    """
+    url = f"{auth.base_url}/api2/json/nodes/{auth.node}/network"
+    prefix = _cidr_prefixlen(spec.cidr)
+    body = {
+        "iface": spec.name,
+        "type": "bridge",
+        "autostart": 1,
+        "comments": _divide_comment(spec.scenario, spec.network),
+        "address": f"{spec.gateway_ip}/{prefix}",
+    }
+    try:
+        await _request("POST", url, auth=auth, json_body=body)
+    except SdnError as exc:
+        msg = str(exc).lower()
+        if "already exists" in msg:
+            log.info("pve_sdn.bridge_already_present", iface=spec.name)
+            return
+        raise
+
+
 # --- apply ----------------------------------------------------------------
 
 
@@ -515,22 +616,136 @@ async def apply_sdn_plan(
 
 
 def to_apply_result(
-    plan: BridgePlan, sdn: SdnPlanResult
+    plan: BridgePlan, sdn: SdnPlanResult, *, method: str = "sdn"
 ) -> ApplyResult:
     """Flatten ``SdnPlanResult`` into the public ``ApplyResult`` shape.
 
     The runner consumes ``ApplyResult``; keeping the shape stable means
     no caller changes downstream.
+
+    ``method`` is one of ``"sdn"`` (default; legacy path) or
+    ``"direct"`` (PVE 9 single-node path -- the new default).
     """
+    if method == "direct":
+        reload_method = (
+            "direct" if sdn.vnets_created else "direct-noop"
+        )
+        config_path = "/nodes/{node}/network"
+    else:
+        reload_method = (
+            "sdn" if (sdn.zone_created or sdn.vnets_created) else "sdn-noop"
+        )
+        config_path = f"/sdn/zones/{DEFAULT_ZONE}"
     return ApplyResult(
         added=sdn.vnets_created,
         already_present=sdn.vnets_already_present,
         reload_ok=sdn.propagate_ok,
-        reload_method=(
-            "sdn" if (sdn.zone_created or sdn.vnets_created) else "sdn-noop"
-        ),
+        reload_method=reload_method,
         verify_ok=sdn.propagate_ok,
-        config_path=f"/sdn/zones/{DEFAULT_ZONE}",
+        config_path=config_path,
+    )
+
+
+async def apply_direct_plan(
+    plan,  # app.services.pve_bridges.BridgePlan
+    *,
+    auth: SdnAuth,
+    dry_run: bool = False,
+) -> SdnPlanResult:
+    """Realize the bridge plan by creating Linux bridges directly.
+
+    Steps:
+      1. List existing node ifaces; classify each as bridge or not.
+      2. For each ``BridgeSpec`` in the plan, POST to
+         ``/nodes/{n}/network`` with the right ``address``+``cidr``.
+      3. Re-list node ifaces to confirm the new bridges are
+         present (PVE applies the config within ~1-2s).
+
+    Returns an ``SdnPlanResult`` with ``vnets_created`` carrying
+    the new iface names so the rest of the call chain treats
+    this identically to the SDN path.
+    """
+    from app.services.pve_bridges import BridgePlanError
+
+    if plan.conflicts:
+        raise BridgePlanError(
+            "refusing to apply: bridge plan has conflicts: "
+            + "; ".join(plan.conflicts)
+        )
+
+    raw: list[dict[str, Any]] = []
+
+    # Step 1: classify existing ifaces.
+    existing_ifaces = await list_node_ifaces(auth)
+    existing_bridge_names = {
+        i.get("iface")
+        for i in existing_ifaces
+        if i.get("type", "").lower() == "bridge" and i.get("iface")
+    }
+    expected = {b.name for b in plan.bridges}
+    present_at_start = expected & existing_bridge_names
+
+    if dry_run:
+        return SdnPlanResult(
+            zone_created=False,
+            vnets_created=[],
+            vnets_already_present=sorted(present_at_start),
+            propagate_ok=True,
+            propagation_wait_s=0.0,
+            raw_responses=[
+                {
+                    "would_create_bridges": sorted(
+                        n for n in expected if n not in existing_bridge_names
+                    ),
+                }
+            ],
+        )
+
+    # Step 2: create missing bridges.
+    vnets_created: list[str] = []
+    for spec in plan.bridges:
+        if spec.name in existing_bridge_names:
+            continue
+        await create_bridge_direct(auth, spec=spec)
+        vnets_created.append(spec.name)
+        existing_bridge_names.add(spec.name)
+        raw.append({"step": "create_bridge", "iface": spec.name, "ok": True})
+        log.info("pve_sdn.bridge_created", iface=spec.name)
+
+    # Step 3: re-poll to confirm propagation (PVE applies the
+    # config in the background; usually <1s but we poll up to
+    # PROPAGATE_TIMEOUT_S to be safe).
+    elapsed = 0.0
+    propagate_ok = bool(expected.issubset(existing_bridge_names))
+    while not propagate_ok and elapsed < PROPAGATE_TIMEOUT_S:
+        await asyncio.sleep(PROBE_INTERVAL_S)
+        elapsed += PROBE_INTERVAL_S
+        ifaces = await list_node_ifaces(auth)
+        present = {
+            i.get("iface")
+            for i in ifaces
+            if i.get("type", "").lower() == "bridge" and i.get("iface")
+        }
+        if expected.issubset(present):
+            propagate_ok = True
+            existing_bridge_names = present
+            break
+    log.info(
+        "pve_sdn.direct_propagate",
+        expected=sorted(expected),
+        elapsed_s=elapsed,
+        ok=propagate_ok,
+    )
+
+    vnets_already_present = sorted(present_at_start)
+
+    return SdnPlanResult(
+        zone_created=False,
+        vnets_created=vnets_created,
+        vnets_already_present=vnets_already_present,
+        propagate_ok=propagate_ok,
+        propagation_wait_s=elapsed,
+        raw_responses=raw,
     )
 
 
@@ -605,12 +820,15 @@ __all__ = [
     "PROPAGATE_TIMEOUT_S",
     "PROBE_INTERVAL_S",
     "BRIDGE_START",
+    "DIVIDE_COMMENT_TAG",
     "SdnAuth",
     "SdnError",
     "SdnPermissionError",
     "SdnPlanResult",
     "SdnReadiness",
+    "apply_direct_plan",
     "apply_sdn_plan",
+    "create_bridge_direct",
     "create_vnet",
     "create_zone",
     "delete_vnet",

@@ -552,24 +552,32 @@ class PveSetupBridgesResponse(BaseModel):
 
 @router.post(
     "/pve-setup-bridges",
-    summary="Create the F3 bridges on PVE via SDN",
+    summary="Create the F3 bridges on PVE",
 )
 async def post_pve_setup_bridges(
     body: PveSetupBridgesRequest,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> PveSetupBridgesResponse:
-    """Drive the PVE SDN controller to realize the bridge plan.
+    """Realize the bridge plan on PVE.
+
+    The default implementation (PVE 9 single-node friendly) POSTs
+    directly to PVE's node-level network API
+    (``/nodes/{n}/network``) which creates Linux bridges on the node
+    without requiring an external SDN controller. Set
+    ``method="sdn"`` in the request to fall back to the legacy
+    SDN zone/vnet path (needs ``SDN.Allocate`` and a controller
+    that materializes the bridges on PVE 9).
 
     Uses the credentials already saved in Step -1 of the wizard
-    (``pve_config`` DB row, with env-var fallback) -- there is no
-    longer any need for the operator to supply SSH credentials in the
-    browser. PVE 8.1+ exposes ``/cluster/sdn/{zones,vnets}`` which
-    creates Linux bridges purely via API; PVE then propagates them to
-    every node in the cluster.
+    (``pve_config`` DB row, with env-var fallback).
 
     Errors:
+      * 403 -- PVE rejected the create POST due to a missing
+        privilege (``Sys.Modify`` for the direct path,
+        ``SDN.Allocate`` for the SDN path). The response carries a
+        copy-pasteable ``pveum`` remediation hint.
       * 409 -- bridge plan has conflicts (resolve scenario CIDRs first)
-      * 502 -- PVE rejected the SDN POST (e.g. token lacks ``SDN.Allocate``)
+      * 502 -- PVE rejected the request for a non-permission reason.
       * 503 -- no PVE creds configured yet (complete Step -1 first)
     """
     from app.services.pve_bridges import (
@@ -579,9 +587,8 @@ async def post_pve_setup_bridges(
     from app.services.pve_sdn import (
         SdnError,
         SdnPermissionError,
-        apply_sdn_plan,
+        apply_direct_plan,
         get_active_auth,
-        to_apply_result,
     )
 
     plan = await plan_bridges_from_db(session)
@@ -620,28 +627,30 @@ async def post_pve_setup_bridges(
 
     if body.dry_run:
         # Don't call PVE; just report what would happen.
-        sdn = await apply_sdn_plan(plan, auth=auth, dry_run=True)
+        sdn = await apply_direct_plan(plan, auth=auth, dry_run=True)
+        n = len(sdn.vnets_already_present)
         return PveSetupBridgesResponse(
             ok=True,
             added=sdn.vnets_created,
             already_present=sdn.vnets_already_present,
             reload_ok=True,
-            reload_method="sdn-dry-run",
+            reload_method="direct-dry-run",
             verify_ok=True,
-            config_path=sdn.raw_responses[0].get("would_create_zone", "divide"),
+            config_path=f"/nodes/{auth.node}/network",
             dry_run=True,
             message=(
-                f"dry_run: would create {len(sdn.vnets_already_present)} "
-                f"Vnet(s) in zone 'divide' on PVE {auth.base_url}"
+                f"dry_run: would create {n} bridge(s) on PVE node "
+                f"{auth.node} ({auth.base_url})"
             ),
         )
 
     try:
-        sdn = await apply_sdn_plan(plan, auth=auth)
+        sdn = await apply_direct_plan(plan, auth=auth)
     except SdnPermissionError as exc:
-        # PVE said "Permission check failed (/sdn/zones, SDN.Allocate)".
-        # Surface the literal PVE message + a copy-pasteable pveum hint
-        # so the wizard can render a remediation card.
+        # PVE said "Permission check failed (/nodes/{n}, Sys.Modify)"
+        # (or /sdn if method=sdn). Surface the literal PVE message
+        # + a copy-pasteable pveum hint so the wizard can render a
+        # remediation card.
         log.warning(
             "pve_sdn.apply.permission_denied",
             host=auth.base_url,
@@ -665,7 +674,7 @@ async def post_pve_setup_bridges(
         )
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"PVE rejected the SDN request: {exc}",
+            detail=f"PVE rejected the request: {exc}",
         ) from exc
     except BridgePlanError as exc:
         raise HTTPException(
@@ -673,20 +682,21 @@ async def post_pve_setup_bridges(
             detail=str(exc),
         )
 
-    result = to_apply_result(plan, sdn)
+    reload_method = "direct" if sdn.vnets_created else "direct-noop"
     return PveSetupBridgesResponse(
-        ok=result.reload_ok and result.verify_ok,
-        added=result.added,
-        already_present=result.already_present,
-        reload_ok=result.reload_ok,
-        reload_method=result.reload_method,
-        verify_ok=result.verify_ok,
-        config_path=result.config_path,
+        ok=sdn.propagate_ok,
+        added=sdn.vnets_created,
+        already_present=sdn.vnets_already_present,
+        reload_ok=sdn.propagate_ok,
+        reload_method=reload_method,
+        verify_ok=sdn.propagate_ok,
+        config_path=f"/nodes/{auth.node}/network",
         dry_run=False,
         message=(
-            f"created SDN zone + {len(result.added)} Vnet(s); "
-            f"propagation {'ok' if result.verify_ok else 'TIMED OUT'} "
-            f"after {sdn.propagation_wait_s:.1f}s"
+            f"created {len(sdn.vnets_created)} Linux bridge(s) on PVE "
+            f"node {auth.node}; propagation "
+            f"{'ok' if sdn.propagate_ok else 'TIMED OUT'} after "
+            f"{sdn.propagation_wait_s:.1f}s"
         ),
     )
 # ---------------------------------------------------------------------------

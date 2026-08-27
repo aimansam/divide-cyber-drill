@@ -128,6 +128,14 @@ const [pveConfig, setPveConfig] = useState<PveConfigPublic | null>(null);
   const [bridgeActionError, setBridgeActionError] = useState<string | null>(
     null,
   );
+  /** True when the last Recreate attempt got a 403 Sys.Modify from
+   * PVE. The TroubleshootPlaybook shows a dedicated "PVE 9 needs
+   * Sys.Modify grant on /nodes" card while this is true; cleared on
+   * the next Recreate attempt (whether success or another error). */
+  const [sysModifyRequired, setSysModifyRequired] = useState(false);
+  const [sysModifyPveumHint, setSysModifyPveumHint] = useState<string | null>(
+    null,
+  );
 
   // Aggregated probe passed to TroubleshootPlaybook. Built fresh each
   // render so the playbook always sees the latest snapshot.
@@ -142,6 +150,8 @@ const [pveConfig, setPveConfig] = useState<PveConfigPublic | null>(null);
     bridgeConflicts,
     expectedBridges,
     templateReady: template?.ready ?? null,
+    sysModifyRequired,
+    sysModifyPveumHint,
   };
 
   const load = useCallback(async () => {
@@ -207,6 +217,7 @@ const [pveConfig, setPveConfig] = useState<PveConfigPublic | null>(null);
   async function onSetupBridges() {
     setSettingUpBridges(true);
     setBridgeActionError(null);
+    setSysModifyRequired(false);
     try {
       await api.post<PveSetupBridgesResponse>(
         "/api/v1/admin/pve-setup-bridges",
@@ -214,10 +225,31 @@ const [pveConfig, setPveConfig] = useState<PveConfigPublic | null>(null);
       );
       await load();
     } catch (e: unknown) {
-      // Inline error under the Bridges card so the operator sees the
-      // cause right where they clicked (was previously off-screen at
-      // the top of the page).
-      setBridgeActionError(detailFromError(e));
+      // The router maps a missing PVE privilege to HTTP 403 with a
+      // JSON body of {message, required_role, pveum_hint, pve_path}.
+      // If the missing role is Sys.Modify, surface the dedicated
+      // playbook entry instead of a generic error toast.
+      let detail: unknown = null;
+      if (e && typeof e === "object" && "body" in e) {
+        detail = (e as { body?: unknown }).body;
+      }
+      const requiredRole =
+        detail && typeof detail === "object" && "required_role" in detail
+          ? String((detail as { required_role?: unknown }).required_role)
+          : "";
+      const pveumHint =
+        detail && typeof detail === "object" && "pveum_hint" in detail
+          ? String((detail as { pveum_hint?: unknown }).pveum_hint)
+          : "";
+      if (requiredRole === "Sys.Modify") {
+        setSysModifyRequired(true);
+        setSysModifyPveumHint(pveumHint || null);
+        setBridgeActionError(
+          "PVE rejected the request: Sys.Modify missing on /nodes. See the playbook below for the fix-it card.",
+        );
+      } else {
+        setBridgeActionError(detailFromError(e));
+      }
     } finally {
       setSettingUpBridges(false);
     }
