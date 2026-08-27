@@ -485,6 +485,28 @@ def _cidr_prefixlen(cidr: str) -> int:
     return int(cidr.split("/")[1])
 
 
+def _prefix_to_netmask(prefix: int) -> str:
+    """Convert a CIDR prefix length to a dotted-quad netmask.
+
+    PVE 9's ``/nodes/{n}/network`` POST requires ``netmask`` as a
+    dotted-quad (``255.255.255.0``), **not** a prefix length
+    (``24``) or CIDR notation. This helper converts any prefix in
+    the 0-32 range.
+
+    Examples:
+      * ``24`` -> ``255.255.255.0``
+      * ``8``  -> ``255.0.0.0``
+      * ``32`` -> ``255.255.255.255``
+    """
+    if not (0 <= prefix <= 32):
+        raise ValueError(f"prefix must be 0-32, got {prefix}")
+    bits = (1 << 32) - 1
+    shifted = (bits << (32 - prefix)) & 0xFFFFFFFF
+    return ".".join(
+        str((shifted >> (8 * i)) & 0xFF) for i in range(3, -1, -1)
+    )
+
+
 async def create_bridge_direct(auth: SdnAuth, *, spec) -> None:
     """Create one Linux bridge on the PVE node via the network API.
 
@@ -492,10 +514,19 @@ async def create_bridge_direct(auth: SdnAuth, *, spec) -> None:
     success so re-running apply doesn't fail.
 
     Note (PVE 9 compatibility): the POST payload is minimal on
-    purpose. PVE 9 rejects ``bridge_ports`` and ``bridge_vlan_aware``
-    in the same call as ``type=bridge``; we set those later via
-    PUT if needed (not used today -- bridges are simple VLAN-less
-    host bridges for drill isolation).
+    purpose. PVE 9 explicitly rejects:
+      * ``address`` in CIDR form (``10.50.0.1/24``) -- the slash and
+        prefix are rejected with "invalid format".
+      * ``netmask`` as a prefix length (``24``) -- rejected with
+        "invalid format - value does not look like a valid IP netmask".
+      * ``bridge_ports`` / ``bridge_vlan_aware`` in the same call as
+        ``type=bridge`` -- we set those later via PUT if needed (not
+        used today -- bridges are simple VLAN-less host bridges for
+        drill isolation).
+
+    What we send instead: ``address`` bare (no slash) and
+    ``netmask`` as a dotted-quad. PVE renders it back as the prefix
+    length (``/24``) in subsequent GETs.
     """
     url = f"{auth.base_url}/api2/json/nodes/{auth.node}/network"
     prefix = _cidr_prefixlen(spec.cidr)
@@ -504,7 +535,8 @@ async def create_bridge_direct(auth: SdnAuth, *, spec) -> None:
         "type": "bridge",
         "autostart": 1,
         "comments": _divide_comment(spec.scenario, spec.network),
-        "address": f"{spec.gateway_ip}/{prefix}",
+        "address": spec.gateway_ip,
+        "netmask": _prefix_to_netmask(prefix),
     }
     try:
         await _request("POST", url, auth=auth, json_body=body)
@@ -839,4 +871,5 @@ __all__ = [
     "list_zones",
     "read_sdn_state",
     "to_apply_result",
+    "_prefix_to_netmask",
 ]

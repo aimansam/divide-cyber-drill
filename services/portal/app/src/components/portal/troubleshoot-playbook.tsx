@@ -191,29 +191,35 @@ function pickPlaybooks(probe: TroubleshootProbe): PlaybookEntry[] {
     out.push({
       id: "sys-modify-missing",
       severity: "error",
-      title: "PVE 9 needs Sys.Modify grant on /nodes",
+      title: "PVE 9 needs DivideDrill role on /nodes",
       why:
         "PVE 9 split the 'modify node network' privilege from PVEAdmin. " +
         "Creating Linux bridges on a PVE 9 node now requires the Sys.Modify " +
-        "privilege, which only root@pam holds by default. Create a custom " +
-        "role and grant it to your divide token.",
+        "privilege, which only root@pam holds by default. The DivideDrill " +
+        "custom role bundles Sys.Modify plus everything else the drill " +
+        "runner needs (VM lifecycle, storage, pools, SDN) without giving " +
+        "cluster-wide root. Grant it on /nodes once and you're done.",
       steps: [
         {
           text:
             "On the PVE web UI: Datacenter -> Permissions -> Roles -> Create. " +
-            "Name: DivideNetAdmin. Privileges: check Sys.Modify. Click Create.",
+            "Name: DivideDrill. Privileges: check Sys.Modify, VM.Allocate, " +
+            "VM.PowerMgmt, VM.Config.*, VM.Clone, VM.Console, VM.Snapshot, " +
+            "Datastore.Allocate, Datastore.AllocateSpace, Pool.Allocate, " +
+            "SDN.Allocate. Click Create.",
         },
         {
           text:
             "Then grant the role to the divide token: Datacenter -> Permissions " +
-            "-> Users -> divide@pve@pam -> Add -> Path /nodes -> Role DivideNetAdmin.",
+            "-> Users -> divide@pve@pam -> Add -> Path /nodes -> Role DivideDrill. " +
+            "Propagate: Yes.",
         },
         {
           text:
             "Or run the equivalent commands on the PVE host shell (copy + paste):",
           command:
-            "pveum role add DivideNetAdmin -privs Sys.Modify\n" +
-            "pveum aclmod divide@pve@pam -role DivideNetAdmin -path /nodes",
+            "pveum roleadd DivideDrill -privs 'Sys.Modify,VM.Allocate,VM.PowerMgmt,VM.Config.*,VM.Clone,VM.Console,VM.Snapshot,Datastore.Allocate,Datastore.AllocateSpace,Pool.Allocate,SDN.Allocate'\n" +
+            "pveum aclmod divide@pve@pam --roles DivideDrill --path /nodes --propagate 1",
         },
         {
           text:
@@ -240,10 +246,10 @@ function pickPlaybooks(probe: TroubleshootProbe): PlaybookEntry[] {
         {
           text:
             "If Recreate fails with a permission error, the PVE 9 token " +
-            "needs the Sys.Modify role. Run on the PVE host:",
+            "needs the DivideDrill role. Run on the PVE host:",
           command:
-            "pveum role add DivideNetAdmin -privs Sys.Modify\n" +
-            "pveum aclmod divide@pve@pam -role DivideNetAdmin -path /nodes",
+            "pveum roleadd DivideDrill -privs 'Sys.Modify,VM.Allocate,VM.PowerMgmt,VM.Config.*,VM.Clone,VM.Console,VM.Snapshot,Datastore.Allocate,Datastore.AllocateSpace,Pool.Allocate,SDN.Allocate'\n" +
+            "pveum aclmod divide@pve@pam --roles DivideDrill --path /nodes --propagate 1",
         },
       ],
     });

@@ -147,12 +147,14 @@ class TestApplyDirectPlan:
         assert result.vnets_created == ["vmbr100", "vmbr101", "vmbr102"]
         assert result.vnets_already_present == []
         assert len(posted_bodies) == 3
-        # Verify each POST shape.
+        # Verify each POST shape (PVE 9 format: address bare, netmask
+        # dotted-quad).
         first = posted_bodies[0]
         assert first["iface"] == "vmbr100"
         assert first["type"] == "bridge"
         assert first["autostart"] == 1
-        assert first["address"] == "10.50.0.1/24"
+        assert first["address"] == "10.50.0.1"
+        assert first["netmask"] == "255.255.255.0"
         assert first["comments"].startswith("div:ide:")
         # All POSTs targeted the right node path.
         for body in posted_bodies:

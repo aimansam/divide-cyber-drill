@@ -27,68 +27,97 @@ In the Proxmox web UI:
 ## 2. Grant permissions
 
 div:ide's day-1 wizard needs the PVE token to **create Linux bridges**
-on the PVE node. The path it uses depends on the PVE version:
+on the PVE node, **clone/start/stop VMs** for drills, and **manage
+storage pools** for drill assets. As of Q13 (PVE 9 direct-bridge
+path), the wizard does this via PVE's node-level network API
+(`POST /nodes/{n}/network`) and the existing `VM.*`/`Datastore.*`/
+`SDN.*` endpoints.
 
-* **PVE 9 (default for new installs)**: the wizard creates bridges
-  directly via `POST /nodes/{n}/network`. This requires `Sys.Modify`
-  on `/nodes` -- **which is NOT in PVE's built-in `PVEAdmin` role**
-  as of PVE 9. `Sys.Modify` was in PVE 8's `PVEAdmin` but PVE 9
-  reserved it for `root@pam`. You need to create a custom role.
-* **PVE 8.x with an SDN controller installed**: the wizard can use
-  the SDN zone/vnet path (`SDN.Allocate` on `/sdn`). Most operators
-  on PVE 9 will not have a controller, so prefer the direct path.
+PVE 9 reserves the `Sys.Modify` privilege for `root@pam` -- it's
+**not** in `PVEAdmin`. The only way to get `Sys.Modify` is either:
+* Grant the built-in `Administrator` role (full cluster root), or
+* Create a custom role with `Sys.Modify` plus the other privileges
+  div:ide needs.
 
-Grant three permissions (one role + two ACLs):
+We use a custom role named **`DivideDrill`** that bundles everything
+the drill runner needs in **one ACL grant** -- no separate `SDN.Allocate`
+on `/sdn`, no `VM.Allocate` on `/vms`, no `Datastore.Allocate` on
+`/storage`. It is **not** `root` (no `User.Modify`, no
+`Permissions.Modify`) so a token leak cannot escalate to full cluster
+root.
 
-**Datacenter → Permissions → Roles → Create** (only needed once):
+### What DivideDrill covers
+
+| Privilege | Why div:ide needs it |
+|---|---|
+| `Sys.Modify` | Create Linux bridges on `/nodes/{n}` (PVE 9) |
+| `VM.Allocate` | Clone drill VMs from templates |
+| `VM.PowerMgmt` | Start / stop / destroy drill VMs |
+| `VM.Config.*` | Configure VM network interfaces on clone |
+| `VM.Clone` | Clone the drill template |
+| `VM.Console` | Console access (optional but harmless) |
+| `VM.Snapshot` | Snapshot/rollback between drill phases |
+| `Datastore.Allocate` | Create drill asset pools |
+| `Datastore.AllocateSpace` | Write drill disks |
+| `Pool.Allocate` | Group drill VMs into pools for lifecycle mgmt |
+| `SDN.Allocate` | SDN fallback path (only if you opt in) |
+
+### How to grant (recommended: web UI)
+
+**Datacenter → Permissions → Roles → Create**:
 
 | Field | Value |
 |---|---|
-| Name | `DivideNetAdmin` |
-| Privileges | check `Sys.Modify` only |
+| Name | `DivideDrill` |
+| Privileges | Check: `Sys.Modify`, `VM.Allocate`, `VM.PowerMgmt`, `VM.Config.*`, `VM.Clone`, `VM.Console`, `VM.Snapshot`, `Datastore.Allocate`, `Datastore.AllocateSpace`, `Pool.Allocate`, `SDN.Allocate` |
 
-**Datacenter → Permissions → Add → User Permission** (three entries):
+**Datacenter → Permissions → Users → divide@pve@pam → Permissions → Add**:
 
-| # | User / Group | Path | Role | Propagate |
-|---|---|---|---|---|
-| 1 | `divide@pam` | `/` | `PVEAuditor` | Yes |
-| 2 | `divide@pam` | `/sdn` | `SDN.Allocate` | No |
-| 3 | `divide@pam` | `/nodes` | `DivideNetAdmin` | Yes |
+| Field | Value |
+|---|---|
+| Path | `/nodes` |
+| Role | `DivideDrill` |
+| Propagate | Yes |
 
-Or, equivalently, via `pveum` on the PVE host:
+### How to grant (shell, PVE host)
 
 ```bash
-# Custom role with Sys.Modify (PVE 9 requires this for direct bridge creation).
-pveum role add DivideNetAdmin -privs Sys.Modify
+# One-time role creation. Quote the privs list so bash doesn't glob VM.Config.*
+pveum roleadd DivideDrill -privs 'Sys.Modify,VM.Allocate,VM.PowerMgmt,VM.Config.*,VM.Clone,VM.Console,VM.Snapshot,Datastore.Allocate,Datastore.AllocateSpace,Pool.Allocate,SDN.Allocate'
 
-# Read-only probe (PVEAuditor).
-pveum aclmod divide@pam -role PVEAuditor -path / -propagate 1
-
-# SDN.Allocate (only used if you opt into the SDN path).
-pveum aclmod divide@pam -role SDN.Allocate -path /sdn
-
-# Sys.Modify on /nodes (the new PVE 9 requirement for direct bridge creation).
-pveum aclmod divide@pam -role DivideNetAdmin -path /nodes -propagate 1
+# Grant to the divide token on /nodes (propagates to all nodes).
+pveum aclmod divide@pve@pam --roles DivideDrill --path /nodes --propagate 1
 ```
 
-**Why a custom role?** PVE 9's `PVEAdmin` role does not include
-`Sys.Modify`. The built-in `Administrator` role DOES include it, but
-granting `Administrator` is overkill (it includes cluster-wide
-management). `DivideNetAdmin` is a minimal-role principle: just
-`Sys.Modify`, nothing else.
+> **PVE 9 syntax note:** PVE 9 renamed the commands:
+> * `pveum role add` → `pveum roleadd` (no space)
+> * `pveum acl modify` → `pveum aclmod`
+> * `-role <name>` → `--roles <name>` (plural)
+> * `-path <p>` → `--path <p>`
+> * `-propagate 1` → `--propagate 1`
 
-`PVEAuditor` alone is **insufficient** -- it lets the API probe PVE
-and list existing bridges, but the wizard's Recreate button needs
-`Sys.Modify` to actually create them on PVE 9.
+### What DivideDrill blocks
 
-The wizard's Recreate button surfaces the literal PVE error +
-copy-pasteable `pveum` lines when any role is missing. If you only
-want to set up probes (no bridge creation), skip entries 2 and 3 --
-but the wizard will be unable to complete setup.
+The role **cannot**:
+* Create or modify users (`User.Modify` missing)
+* Grant permissions (`Permissions.Modify` missing)
+* Modify groups or realms (`Group.Allocate`, `Realm.AllocateUser` missing)
+
+So a token leak lets an attacker wreck VMs and storage, but **cannot**
+become persistent cluster root by creating backdoor accounts.
+
+### Why not `Administrator`?
+
+`Administrator` is PVE's superuser role -- it includes every privilege
+on the cluster including `User.Modify` and `Permissions.Modify`.
+Granting it to `divide@pve@pam` is equivalent to giving the token
+full root access. For a single-node home/lab install this is fine
+if you're the only user; for anything else, `DivideDrill` above is
+the right trade-off (one grant, broad but not root).
 
 If you want to skip the wizard entirely and use the env-var
-fallback path (§6), only the first row is required -- the env-var
-path never writes to PVE.
+fallback path (§6), only the `PVEAuditor` grant is required --
+the env-var path never writes to PVE.
 
 ## 3. Create the API token
 
@@ -160,10 +189,10 @@ does not create any SDN zone, so there is nothing else to roll back.
 
 If the wizard's Recreate button returns a 403 with the message
 `Permission check failed (/nodes/pve, Sys.Modify)`, the token is
-missing the `Sys.Modify` privilege on `/nodes`. Grant it (see §2
-above) — the wizard will surface a copy-pasteable `pveum` snippet
-and a web-UI walkthrough so the operator doesn't need to read
-this doc to recover.
+missing the `Sys.Modify` privilege on `/nodes`. Grant the
+`DivideDrill` role (§2 above) — the wizard will surface a
+copy-pasteable `pveum` snippet and a web-UI walkthrough so the
+operator doesn't need to read this doc to recover.
 
 ## 5. PVE connection: web setup (preferred)
 
