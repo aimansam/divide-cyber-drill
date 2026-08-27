@@ -30,6 +30,7 @@ import {
   Copy,
   Info,
   Terminal,
+  Archive,
 } from "lucide-react";
 import {
   Card,
@@ -48,6 +49,23 @@ export interface TroubleshootProbe {
   sdnPveumHint?: string | null;
   bridgesMissing?: string[];
   bridgesPresent?: string[];
+  /**
+    * CIDR / overlap / ordering conflicts in the bridge plan.
+    * Surfaced here so the playbook entry can list them and offer a
+    * one-click fix (archive one of the conflicting scenarios).
+    */
+  bridgeConflicts?: string[];
+  /**
+    * vmbrN -> scenario mapping from /expected-bridges. Used by the
+    * conflict playbook to resolve which scenarios to suggest
+    * archiving. Optional: if absent, the entry falls back to a
+    * generic "open Admin" hint.
+    */
+  expectedBridges?: Array<{
+    name: string;
+    cidr: string;
+    scenario: string;
+  }>;
   templateReady?: boolean | null;
 }
 
@@ -55,6 +73,18 @@ interface PlaybookStep {
   text: string;
   /** Optional shell command to copy. */
   command?: string;
+  /**
+   * Optional inline button. Used by bridge-conflicts entry to offer
+   * "Archive scenario X" without forcing a navigation. The action
+   * receives the playbook's onArchiveScenario callback so the parent
+   * controls the actual API call + reload.
+   */
+  button?: {
+    label: string;
+    /** Stable key so the parent can resolve which scenario to act on. */
+    action: "archive-scenario";
+    value: string;
+  };
 }
 
 interface PlaybookEntry {
@@ -67,6 +97,12 @@ interface PlaybookEntry {
 
 interface TroubleshootPlaybookProps {
   probe: TroubleshootProbe;
+  /**
+   * Optional: invoked when a step's `button.action` is "archive-scenario"
+   * and the operator clicks it. The parent owns the API call and any
+   * subsequent refresh; the playbook is purely presentational.
+   */
+  onArchiveScenario?: (name: string) => void;
 }
 
 function pickPlaybooks(probe: TroubleshootProbe): PlaybookEntry[] {
@@ -161,6 +197,73 @@ function pickPlaybooks(probe: TroubleshootProbe): PlaybookEntry[] {
     });
   }
 
+  // 3b. Bridge plan has CIDR conflicts -- a *data* problem, not a
+  // permission problem. Two scenarios both claiming 10.10.10.0/24
+  // means the bridge plan can't be applied. Resolution: archive one
+  // of the conflicting scenarios (the playbook offers a button).
+  if (probe.bridgeConflicts && probe.bridgeConflicts.length > 0) {
+    // Resolve vmbrN -> scenario names by parsing the conflict string
+    // and looking each vmbr up in the expected-bridges plan.
+    // Conflict format: "CIDR overlap: vmbr103=10.10.10.0/24 overlaps vmbr107=..."
+    const vmbrToScenario = new Map<string, string>();
+    if (probe.expectedBridges) {
+      for (const eb of probe.expectedBridges) {
+        vmbrToScenario.set(eb.name, eb.scenario);
+      }
+    }
+    const parseVmbrs = (s: string): string[] => {
+      const matches = s.match(/vmbr\d+/g);
+      return matches ?? [];
+    };
+    const conflictScenarios = new Set<string>();
+    for (const c of probe.bridgeConflicts) {
+      for (const v of parseVmbrs(c)) {
+        const sc = vmbrToScenario.get(v);
+        if (sc) conflictScenarios.add(sc);
+      }
+    }
+    const archiveSteps = Array.from(conflictScenarios).map((sc) => ({
+      text: `Archive '${sc}' to remove it from the bridge plan (reversible via Admin → Scenarios → Restore).`,
+      button: {
+        label: `Archive '${sc}'`,
+        action: "archive-scenario" as const,
+        value: sc,
+      },
+    }));
+    if (archiveSteps.length === 0) {
+      // Couldn't resolve scenarios -- fall back to a generic hint.
+      archiveSteps.push({
+        text:
+          "Open Admin → Scenarios and archive whichever scenario you don't need right now.",
+        button: {
+          label: "Open Admin (scenarios)",
+          action: "archive-scenario" as const,
+          value: "__open_admin__",
+        },
+      });
+    }
+    out.push({
+      id: "bridge-conflicts",
+      severity: "error",
+      title: `Bridge plan has ${probe.bridgeConflicts.length} conflict${
+        probe.bridgeConflicts.length === 1 ? "" : "s"
+      }`,
+      why:
+        "Two or more active scenarios declare the same subnet for " +
+        "different roles. The API refuses to apply the plan until " +
+        "one of them is archived. Recreate bridges will return 409 " +
+        "until this is fixed.",
+      steps: [
+        {
+          text:
+            "These conflicts are listed in the Bridges card below -- " +
+            "each row shows the vmbrN values that overlap.",
+        },
+        ...archiveSteps,
+      ],
+    });
+  }
+
   // 4. Template not ready -- only flag if PVE is otherwise healthy.
   if (
     probe.templateReady === false &&
@@ -187,7 +290,10 @@ function pickPlaybooks(probe: TroubleshootProbe): PlaybookEntry[] {
   return out;
 }
 
-export function TroubleshootPlaybook({ probe }: TroubleshootPlaybookProps) {
+export function TroubleshootPlaybook({
+  probe,
+  onArchiveScenario,
+}: TroubleshootPlaybookProps) {
   const entries = pickPlaybooks(probe);
   const [expandedWhy, setExpandedWhy] = useState<Set<string>>(new Set());
   const [copied, setCopied] = useState<string | null>(null);
@@ -293,6 +399,32 @@ export function TroubleshootPlaybook({ probe }: TroubleshootPlaybookProps) {
                                   <span className="ml-1">Copy</span>
                                 </>
                               )}
+                            </Button>
+                          </div>
+                        )}
+                        {step.button && (
+                          <div className="mt-1">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-7"
+                              disabled={
+                                !onArchiveScenario ||
+                                (step.button.action === "archive-scenario" &&
+                                  step.button.value === "__open_admin__" &&
+                                  !onArchiveScenario)
+                              }
+                              onClick={() => {
+                                if (!onArchiveScenario) return;
+                                if (
+                                  step.button?.action === "archive-scenario"
+                                ) {
+                                  onArchiveScenario(step.button.value);
+                                }
+                              }}
+                            >
+                              <Archive className="h-3 w-3" />
+                              <span className="ml-1">{step.button.label}</span>
                             </Button>
                           </div>
                         )}

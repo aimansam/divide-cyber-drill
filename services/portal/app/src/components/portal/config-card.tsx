@@ -29,6 +29,7 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   Activity,
+  AlertCircle,
   CheckCircle2,
   HardDrive,
   KeyRound,
@@ -48,7 +49,9 @@ import {
 import { Button } from "@/components/ui/button";
 import {
   api,
+  archiveScenario,
   detailFromError,
+  getExpectedBridges,
   getPveConfig,
   getServiceStatus,
   type PveConfigPublic,
@@ -94,9 +97,15 @@ interface PveSetupBridgesResponse {
 
 interface ConfigCardProps {
   meRole: Role;
+  /**
+   * Optional: jump to another view (e.g. "admin" when the operator
+   * needs to see Scenarios after archiving). Mirrors the same
+   * navigation pattern used by the wizard's onNavigateToConfig.
+   */
+  onNavigateToView?: (view: "admin" | "operate" | "dashboard") => void;
 }
 
-export function ConfigCard({ meRole }: ConfigCardProps) {
+export function ConfigCard({ meRole, onNavigateToView }: ConfigCardProps) {
 const [pveConfig, setPveConfig] = useState<PveConfigPublic | null>(null);
   const [sdn, setSdn] = useState<PveSdnStatus | null>(null);
   const [bridges, setBridges] = useState<PveBridgeStatus | null>(null);
@@ -107,6 +116,16 @@ const [pveConfig, setPveConfig] = useState<PveConfigPublic | null>(null);
   const [showCredsModal, setShowCredsModal] = useState(false);
   const [settingUpBridges, setSettingUpBridges] = useState(false);
   const [serviceStatus, setServiceStatus] = useState<ServiceStatus | null>(
+    null,
+  );
+  const [bridgeConflicts, setBridgeConflicts] = useState<string[]>([]);
+  const [expectedBridges, setExpectedBridges] = useState<
+    Array<{ name: string; cidr: string; scenario: string }>
+  >([]);
+  /** Inline error for the Bridges card (separate from the top-level
+   * load-error). Shows the user the immediate reason a "Recreate"
+   * click failed. */
+  const [bridgeActionError, setBridgeActionError] = useState<string | null>(
     null,
   );
 
@@ -120,6 +139,8 @@ const [pveConfig, setPveConfig] = useState<PveConfigPublic | null>(null);
     sdnPveumHint: sdn?.pveum_hint ?? null,
     bridgesMissing: bridges?.missing ?? [],
     bridgesPresent: bridges?.present ?? [],
+    bridgeConflicts,
+    expectedBridges,
     templateReady: template?.ready ?? null,
   };
 
@@ -129,12 +150,13 @@ const [pveConfig, setPveConfig] = useState<PveConfigPublic | null>(null);
     try {
       // Single round-trip per probe -- these are independent so we fire
       // them in parallel; failure of one doesn't block the others.
-      const [cfg, s, b, t, ss] = await Promise.allSettled([
+      const [cfg, s, b, t, ss, eb] = await Promise.allSettled([
         getPveConfig(),
         api.get<PveSdnStatus>("/api/v1/admin/pve-sdn-status"),
         api.get<PveBridgeStatus>("/api/v1/admin/pve-bridge-status"),
         api.get<TemplateStatus>("/api/v1/admin/drill-template-status"),
         getServiceStatus(),
+        getExpectedBridges(),
       ]);
       if (cfg.status === "fulfilled") setPveConfig(cfg.value);
       else setPveConfig(null);
@@ -146,6 +168,19 @@ const [pveConfig, setPveConfig] = useState<PveConfigPublic | null>(null);
       else setTemplate(null);
       if (ss.status === "fulfilled") setServiceStatus(ss.value);
       else setServiceStatus(null);
+      if (eb.status === "fulfilled") {
+        setBridgeConflicts(eb.value.conflicts);
+        setExpectedBridges(
+          eb.value.bridges.map((b) => ({
+            name: b.name,
+            cidr: b.cidr,
+            scenario: b.scenario,
+          })),
+        );
+      } else {
+        setBridgeConflicts([]);
+        setExpectedBridges([]);
+      }
       // If every probe failed, surface the first failure's message so the
       // operator knows it's a real outage (typically 401/403 -- token is
       // stale or insufficient role) rather than an empty state.
@@ -171,7 +206,7 @@ const [pveConfig, setPveConfig] = useState<PveConfigPublic | null>(null);
 
   async function onSetupBridges() {
     setSettingUpBridges(true);
-    setError(null);
+    setBridgeActionError(null);
     try {
       await api.post<PveSetupBridgesResponse>(
         "/api/v1/admin/pve-setup-bridges",
@@ -179,9 +214,35 @@ const [pveConfig, setPveConfig] = useState<PveConfigPublic | null>(null);
       );
       await load();
     } catch (e: unknown) {
-      setError(detailFromError(e));
+      // Inline error under the Bridges card so the operator sees the
+      // cause right where they clicked (was previously off-screen at
+      // the top of the page).
+      setBridgeActionError(detailFromError(e));
     } finally {
       setSettingUpBridges(false);
+    }
+  }
+
+  /**
+   * Called by TroubleshootPlaybook when the operator clicks "Archive
+   * scenario X". Handles the three value shapes:
+   *   - "phish-to-ransom"  -> archive that scenario, refresh
+   *   - "red-vs-blue-baseline" -> same
+   *   - "__open_admin__"   -> just jump to Admin tab
+   */
+  async function onArchiveScenario(name: string) {
+    if (name === "__open_admin__") {
+      onNavigateToView?.("admin");
+      return;
+    }
+    try {
+      await archiveScenario(name);
+      // Refresh so the playbook updates (conflict gone, bridges re-fetched).
+      await load();
+    } catch (e: unknown) {
+      setBridgeActionError(
+        `Failed to archive '${name}': ${detailFromError(e)}`,
+      );
     }
   }
 
@@ -237,7 +298,10 @@ return (
         </div>
       )}
 
-      <TroubleshootPlaybook probe={troubleshootProbe} />
+      <TroubleshootPlaybook
+        probe={troubleshootProbe}
+        onArchiveScenario={(name) => void onArchiveScenario(name)}
+      />
 
       {/* Deployment status -- live wg-easy / WG env / disk / audit */}
       {serviceStatus && (
@@ -536,6 +600,39 @@ return (
             <div className="text-muted-foreground">no data</div>
           ) : (
             <>
+              {bridgeConflicts.length > 0 && (
+                <div className="rounded-md border border-destructive/50 bg-destructive/10 p-3 text-xs text-destructive">
+                  <div className="flex items-start gap-2">
+                    <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                    <div className="flex-1 space-y-1">
+                      <div className="font-medium">
+                        {bridgeConflicts.length} bridge plan conflict
+                        {bridgeConflicts.length === 1 ? "" : "s"} block the
+                        Recreate button:
+                      </div>
+                      <ul className="ml-4 list-disc space-y-0.5 font-mono">
+                        {bridgeConflicts.map((c, i) => (
+                          <li key={i}>{c}</li>
+                        ))}
+                      </ul>
+                      <div className="pt-1 text-foreground">
+                        Fix it from the Troubleshoot card above (Archive
+                        button) or via Admin → Scenarios.
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+              {bridgeActionError && (
+                <div className="rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive">
+                  <div className="flex items-start gap-2">
+                    <AlertCircle className="mt-0.5 h-3 w-3 shrink-0" />
+                    <span className="font-mono whitespace-pre-wrap">
+                      {bridgeActionError}
+                    </span>
+                  </div>
+                </div>
+              )}
               <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
                 {bridges.expected.map((b) => {
                   const present = bridges.present.includes(b);
@@ -564,7 +661,11 @@ return (
                     variant="default"
                     size="sm"
                     onClick={() => void onSetupBridges()}
-                    disabled={settingUpBridges || !sdn?.reachable}
+                    disabled={
+                      settingUpBridges ||
+                      !sdn?.reachable ||
+                      bridgeConflicts.length > 0
+                    }
                   >
                     {settingUpBridges ? (
                       <Loader2 className="h-4 w-4 animate-spin" />

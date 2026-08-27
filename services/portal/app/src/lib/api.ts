@@ -390,3 +390,43 @@ export interface ServiceStatus {
 export async function getServiceStatus(): Promise<ServiceStatus> {
   return api.get<ServiceStatus>("/api/v1/admin/service-status");
 }
+
+/**
+ * Expected-bridges plan from /api/v1/admin/expected-bridges.
+ *
+ * This is the *intended* bridge state derived from the active
+ * scenario YAMLs (no PVE interaction). The `conflicts` field lists
+ * CIDR overlaps or other plan inconsistencies that block the actual
+ * `pve-setup-bridges` POST. Showing conflicts here is the first half
+ * of fixing the silently-failing "Recreate bridges" button (Q11).
+ */
+export interface ExpectedBridge {
+  name: string;
+  cidr: string;
+  gateway_ip: string;
+  scenario: string;
+  network: string;
+}
+
+export interface ExpectedBridgesResponse {
+  bridges: ExpectedBridge[];
+  conflicts: string[];
+}
+
+export async function getExpectedBridges(): Promise<ExpectedBridgesResponse> {
+  return api.get<ExpectedBridgesResponse>("/api/v1/admin/expected-bridges");
+}
+
+/**
+ * Archive (soft-delete) a scenario by name. Used by the Config
+ * tab's TroubleshootPlaybook to resolve bridge-plan CIDR conflicts:
+ * if scenario A and scenario B both want 10.10.10.0/24, archiving
+ * one of them lets the other be applied.
+ *
+ * Note: the server endpoint currently has no role gate -- any
+ * authenticated caller can archive. That's a pre-existing concern
+ * outside the Q11 scope.
+ */
+export async function archiveScenario(name: string): Promise<void> {
+  await api.delete<unknown>(`/api/v1/scenarios/${encodeURIComponent(name)}`);
+}

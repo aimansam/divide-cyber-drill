@@ -269,7 +269,12 @@ export default function App() {
                   </>
                 );
               case "config":
-                return <ConfigCard meRole={me.role} />;
+                return (
+                  <ConfigCard
+                    meRole={me.role}
+                    onNavigateToView={(v) => setActiveView(v)}
+                  />
+                );
               case "history":
                 return (
                   <MyRunsCard
