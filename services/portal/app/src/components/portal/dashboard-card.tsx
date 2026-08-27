@@ -37,7 +37,13 @@ import { StatusPill } from "./status-pill";
 import { EmptyState } from "./empty-state";
 
 export interface DashboardRunRow {
-  id: number;
+  /**
+   * Q20: align with the wire shape -- the API returns ``run_id``,
+   * not ``id``. Pre-Q20 the dashboard row text showed ``#undefined``
+   * and the onPickRun callback passed NaN to the parent. See the
+   * matching fix in ``my-runs-card.tsx``.
+   */
+  run_id: number;
   scenario_id?: number;
   status: string;
   started_by?: string | null;
@@ -213,16 +219,16 @@ export function DashboardCard({
           <ul className="divide-y divide-border rounded-md border border-border bg-card">
             {recent.map((r) => (
               <li
-                key={r.id}
+                key={r.run_id}
                 className="flex items-center gap-3 px-3 py-2 text-sm"
               >
                 <button
                   type="button"
                   className="font-mono text-xs text-primary hover:underline"
-                  onClick={() => onPickRun?.(r.id)}
+                  onClick={() => onPickRun?.(r.run_id)}
                   data-testid="dashboard-recent-run"
                 >
-                  #{r.id}
+                  #{r.run_id}
                 </button>
                 <StatusPill status={r.status} />
                 <span className="flex-1 text-muted-foreground">

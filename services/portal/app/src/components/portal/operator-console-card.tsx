@@ -42,7 +42,16 @@ import { InjectEventModal } from "./inject-event-modal";
 import { api, ApiError, detailFromError } from "@/lib/api";
 
 interface LiveRun {
-  id: number;
+  /**
+   * Q20: align with the wire shape -- the API serialises the run
+   * row as ``run_id``. Pre-Q20 this interface declared ``id`` which
+   * never matched, so ``r.id`` was ``undefined`` at every callsite
+   * below and the Stop / Reset buttons on this card were silently
+   * calling ``POST /api/v1/drills/undefined/{stop,reset}`` -- the
+   * 404 from those calls failed silently inside the try/catch and
+   * the operator saw no feedback.
+   */
+  run_id: number;
   scenario_id?: number;
   status: string;
   started_by?: string | null;
@@ -182,12 +191,12 @@ export function OperatorConsoleCard() {
           <ul className="divide-y divide-border" data-testid="operator-live-list">
             {live.map((r) => (
               <li
-                key={r.id}
+                key={r.run_id}
                 className="flex items-center gap-2 px-3 py-2 text-sm"
                 data-testid="operator-row"
-                data-run-id={r.id}
+                data-run-id={r.run_id}
               >
-                <span className="font-mono text-xs">#{r.id}</span>
+                <span className="font-mono text-xs">#{r.run_id}</span>
                 <StatusPill status={r.status} />
                 <span className="text-muted-foreground">
                   {r.started_by ?? "—"}
@@ -201,27 +210,27 @@ export function OperatorConsoleCard() {
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => stop(r.id)}
-                    disabled={pending === r.id}
+                    onClick={() => stop(r.run_id)}
+                    disabled={pending === r.run_id}
                     data-testid="operator-stop"
                   >
                     <CircleStop className="mr-1 h-3 w-3" />
-                    {pending === r.id ? "Stopping…" : "Stop"}
+                    {pending === r.run_id ? "Stopping…" : "Stop"}
                   </Button>
                   <Button
                     variant="ghost"
                     size="sm"
-                    onClick={() => reset(r.id)}
-                    disabled={pending === r.id}
+                    onClick={() => reset(r.run_id)}
+                    disabled={pending === r.run_id}
                     data-testid="operator-reset"
                   >
                     <RotateCcw className="mr-1 h-3 w-3" />
-                    {pending === r.id ? "Resetting…" : "Reset"}
+                    {pending === r.run_id ? "Resetting…" : "Reset"}
                   </Button>
                   <Button
                     variant="ghost"
                     size="sm"
-                    onClick={() => setInjectForRun(r.id)}
+                    onClick={() => setInjectForRun(r.run_id)}
                     data-testid="operator-inject"
                   >
                     <Siren className="mr-1 h-3 w-3" />

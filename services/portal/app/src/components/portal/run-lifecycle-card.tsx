@@ -403,14 +403,35 @@ export function RunLifecycleCard({
         )}
 
         {canStart && scenario !== null && (run === null || !hasLiveRun) && (
-          <Button onClick={onStart} disabled={loading || scenario === null}>
-            {loading ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            ) : (
-              <Play className="mr-2 h-4 w-4" />
+          <div className="flex items-center gap-2">
+            <Button onClick={onStart} disabled={loading || scenario === null}>
+              {loading ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Play className="mr-2 h-4 w-4" />
+              )}
+              Start drill
+            </Button>
+            {/* Q20: always-visible Stop button (disabled until a
+                live run exists). Q19's gate ``canStop && hasLiveRun``
+                hid it for first-time operators who hadn't yet
+                started a drill -- they'd never learn the capability
+                exists. Now it sits next to Start as a discoverable
+                affordance; the button is greyed out until the
+                operator has a running drill to stop. */}
+            {canStop && (
+              <Button
+                variant="outline"
+                onClick={onStop}
+                disabled={loading || !hasLiveRun}
+                data-testid="lifecycle-stop"
+                title="Operator force-stop — only enabled while a drill is live."
+              >
+                <CircleStop className="mr-2 h-4 w-4" />
+                Stop
+              </Button>
             )}
-            Start drill
-          </Button>
+          </div>
         )}
 
         {run !== null && (
@@ -496,24 +517,6 @@ export function RunLifecycleCard({
                 <Button variant="destructive" onClick={onCancel} disabled={loading}>
                   <Square className="mr-2 h-4 w-4" /> Cancel
                 </Button>
-              </div>
-            )}
-
-            {canStop && hasLiveRun && (
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="outline"
-                  onClick={onStop}
-                  disabled={loading}
-                  data-testid="lifecycle-stop"
-                  title="Operator force-stop: tears down all assets and writes a run.stopped audit row."
-                >
-                  <CircleStop className="mr-2 h-4 w-4" />
-                  Stop
-                </Button>
-                <span className="text-xs italic text-muted-foreground">
-                  Operator force-stop — tears down all VMs immediately.
-                </span>
               </div>
             )}
 

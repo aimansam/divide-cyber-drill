@@ -155,7 +155,7 @@ export default function App() {
     // The Dashboard's "Recent runs" list jumps the operator
     // directly into Observe for that run.
     const fake: RunRow = {
-      id: runId,
+      run_id: runId,
       scenario_id: pickedScenario?.id,
       status: "unknown",
     };
@@ -212,7 +212,7 @@ export default function App() {
           <OnboardingWizard
             onLaunched={(runId) => {
               setPickedRun({
-                id: runId,
+                run_id: runId,
                 status: "unknown",
               });
               setActiveView("observe");
@@ -242,12 +242,12 @@ export default function App() {
                       meSub={me.sub}
                       meRole={me.role}
                       scenario={pickedScenario}
-                      pickedRunId={pickedRun?.id ?? null}
+                      pickedRunId={pickedRun?.run_id ?? null}
                       onNavigateToConfig={() => setActiveView("config")}
                     />
                     <MyRunsCard
                       meRole={me.role}
-                      pickedRunId={pickedRun?.id ?? null}
+                      pickedRunId={pickedRun?.run_id ?? null}
                       onPick={setPickedRun}
                     />
                   </>
@@ -255,7 +255,7 @@ export default function App() {
               case "observe":
                 return (
                   <DrillConsole
-                    pickedRunId={pickedRun?.id ?? null}
+                    pickedRunId={pickedRun?.run_id ?? null}
                     scenarioName={pickedScenario?.title ?? pickedScenario?.name}
                   />
                 );
@@ -279,7 +279,7 @@ export default function App() {
                 return (
                   <MyRunsCard
                     meRole={me.role}
-                    pickedRunId={pickedRun?.id ?? null}
+                    pickedRunId={pickedRun?.run_id ?? null}
                     onPick={setPickedRun}
                   />
                 );

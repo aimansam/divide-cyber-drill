@@ -32,7 +32,16 @@ import { StatusPill } from "./status-pill";
 import type { Role } from "@/lib/roles";
 
 export interface RunRow {
-  id: number;
+  /**
+   * Q20: the API serialises this row as ``run_id`` (not ``id``).
+   * Pre-Q20 the portal declared ``id: number`` and read ``r.id``,
+   * but the wire shape never carried that key — every row
+   * rendered as ``run # · scenario 1`` with the number blank,
+   * and ``r.id === pickedRunId`` was always false so picked
+   * highlighting + cross-card run selection was broken. Align
+   * the TS shape with what the API actually returns.
+   */
+  run_id: number;
   scenario_id?: number;
   status: string;
   started_by?: string | null;
@@ -156,9 +165,9 @@ export function MyRunsCard({
         )}
         <ul className="divide-y divide-border">
           {filtered.map((r) => {
-            const isPicked = r.id === pickedRunId;
+            const isPicked = r.run_id === pickedRunId;
             return (
-              <li key={r.id}>
+              <li key={r.run_id}>
                 <button
                   onClick={() => onPick(r)}
                   className={
@@ -168,7 +177,7 @@ export function MyRunsCard({
                 >
                   <div>
                     <div className="font-mono text-sm">
-                      run #{r.id}
+                      run #{r.run_id}
                       {r.scenario_id !== undefined ? (
                         <span className="text-muted-foreground">
                           {" "}
