@@ -82,12 +82,18 @@ def test_over_limit_raises_429(fake_redis, set_limit):
     Q15: detail is now a structured dict with a ``kind`` discriminator
     so the portal can dispatch on error type instead of routing every
     drill-start failure to the "Open Config" banner.
+
+    Q16: limit is now 1/5s (was 5/3600s). The (limit+1)th request
+    triggers the 429 immediately. This test sets the limit
+    explicitly (the default fixture sets limit=5 to test the
+    override path; we want to test the Q16 default behaviour).
     """
+    set_limit.set_config(limit=1, window_seconds=5)
     from app.services.rate_limit import check_drill_start_limit as rl
 
     async def _go() -> None:
-        for _ in range(5):
-            await rl("alice")
+        # limit=1, so the first call passes, the second call trips the 429.
+        await rl("alice")
         with pytest.raises(HTTPException) as exc_info:
             await rl("alice")
         assert exc_info.value.status_code == 429
@@ -96,9 +102,10 @@ def test_over_limit_raises_429(fake_redis, set_limit):
         assert isinstance(detail, dict)
         assert detail["kind"] == "rate_limited"
         assert detail["subject"] == "alice"
-        assert detail["limit"] == 5
-        assert detail["window_s"] == 3600
-        assert detail["count"] >= 6
+        # Q16: limit is now 1 (was 5)
+        assert detail["limit"] == 1
+        assert detail["window_s"] == 5
+        assert detail["count"] >= 2
         # The message must mention the subject for the toast.
         assert "alice" in detail["message"]
         # Must NOT be a plain string anymore (the old behaviour).
@@ -116,11 +123,11 @@ def test_over_limit_message_mentions_wait(fake_redis, set_limit):
     broken. Now the message explicitly says "Wait for the window
     to reset".
     """
+    set_limit.set_config(limit=1, window_seconds=5)
     from app.services.rate_limit import check_drill_start_limit as rl
 
     async def _go() -> None:
-        for _ in range(5):
-            await rl("alice")
+        await rl("alice")
         with pytest.raises(HTTPException) as exc_info:
             await rl("alice")
         msg = exc_info.value.detail["message"]

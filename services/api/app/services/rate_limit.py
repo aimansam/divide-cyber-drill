@@ -48,8 +48,24 @@ from app.services import cache as _cache_module
 # the integration simple and the tests pure.
 
 
-DEFAULT_LIMIT: int = 5  # max drill starts per window per sub
-DEFAULT_WINDOW_SECONDS: int = 3600  # 1 hour
+DEFAULT_LIMIT: int = 1  # max drill starts per window per sub
+# Q16: 1/5s replaces the old 5/3600s.
+# * Old 5/hour was tuned to stop a misclicking operator from
+#   spawning many clones (~120 GB disk per VM, ~30s each).
+#   That ceiling was correct for production, but made dev
+#   iteration painful: every fix-and-verify took an hour to
+#   budget-cycle, and the operator gets blocked after a single
+#   debugging session.
+# * 1 per 5 seconds was chosen for two reasons:
+#   1. Stops real accidents (double-click, runaway retry loop)
+#      without false positives on rapid sequential clicks.
+#   2. Allows fast dev iteration: 5 seconds per drill start is
+#      a negligible delay during verification of Q-bugs.
+# * Tradeoff: this is a weaker safety net against sustained
+#   misuse (~12/hour ceiling) than the original 5/hour. Acceptable
+#   because div:ide is a dev-tool with single-operator usage
+#   today. Revisit if the deployment grows to multi-user.
+DEFAULT_WINDOW_SECONDS: int = 5  # 5 seconds
 
 
 @dataclass(frozen=True)
