@@ -556,3 +556,187 @@ class TestListEndpoints:
         auth = _make_auth()
         ifaces = asyncio.run(list_node_ifaces(auth))
         assert ifaces == [{"iface": "vmbr0", "type": "bridge"}]
+
+
+class TestPve9Compatibility:
+    """PVE 9.x removed/changed several fields on the SDN zone + vnet APIs.
+
+    The Q12 live incident surfaced two:
+      * ``create_zone``: PVE 9 rejects the legacy ``bridge`` field
+        with "unexpected property 'bridge'".
+      * ``create_vnet``: PVE 9 rejects ``tag: -1`` (PVE 8 "no tag"
+        sentinel) AND ``tag: N >= 1`` (simple zones don't support
+        VLAN tagging). The only accepted payload is {vnet, zone}.
+
+    These tests pin both behaviours so we don't regress when the
+    planner is refactored. They also verify that the field-level
+    ``errors`` dict from PVE surfaces in our error message -- without
+    that, the operator sees the bare "Parameter verification failed."
+    and has no idea which field is wrong.
+    """
+
+    def test_create_zone_sends_minimal_body_no_bridge(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """PVE 9 rejects Simple-zone POSTs that carry the legacy
+        ``bridge`` field. We must send zone+type+mtu+dhcp only.
+        """
+        captured: list[dict] = []
+
+        def on_zone_create(req: httpx.Request) -> httpx.Response:
+            captured.append(json.loads(req.content.decode()))
+            return httpx.Response(200, json={"data": None})
+
+        # Zone missing -> create; vnets all "already present" so we
+        # don't accidentally test vnet creation in this case.
+        existing_vnets = [
+            {"vnet": b.name, "zone": DEFAULT_ZONE}
+            for b in _three_bridge_plan().bridges
+        ]
+        node_ifaces = [
+            {"iface": b.name, "type": "bridge"}
+            for b in _three_bridge_plan().bridges
+        ]
+        transport, _ = _make_handler(
+            zones=[],
+            vnets=existing_vnets,
+            node_ifaces=node_ifaces,
+            on_zone_create=on_zone_create,
+        )
+        _patch_httpx(monkeypatch, transport)
+
+        auth = _make_auth()
+        plan = _three_bridge_plan()
+        asyncio.run(apply_sdn_plan(plan, auth=auth))
+
+        assert len(captured) == 1
+        body = captured[0]
+        # Must NOT contain the legacy bridge field
+        assert "bridge" not in body, (
+            f"PVE 9 rejects the 'bridge' field; body was {body}"
+        )
+        # Must NOT contain the legacy dhcp=none field (PVE 9 only
+        # enumerates 'dnsmasq', so 'no DHCP' = omit the field).
+        assert "dhcp" not in body, (
+            f"PVE 9 rejects dhcp='none'; body was {body}"
+        )
+        # Must contain the required fields
+        assert body["zone"] == DEFAULT_ZONE
+        assert body["type"] == "simple"
+        assert body["mtu"] == 1500
+
+    def test_create_vnet_sends_no_tag(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """PVE 9 rejects both ``tag: -1`` and ``tag: N`` for Simple
+        zones. We must omit the field entirely.
+        """
+        captured: list[dict] = []
+
+        def on_vnet_create(req: httpx.Request) -> httpx.Response:
+            captured.append(json.loads(req.content.decode()))
+            return httpx.Response(200, json={"data": None})
+
+        transport, _ = _make_handler(
+            zones=[{"zone": DEFAULT_ZONE}],
+            vnets=[],
+            node_ifaces=[
+                {"iface": b.name, "type": "bridge"}
+                for b in _three_bridge_plan().bridges
+            ],
+            on_vnet_create=on_vnet_create,
+        )
+        _patch_httpx(monkeypatch, transport)
+
+        auth = _make_auth()
+        plan = _three_bridge_plan()
+        asyncio.run(apply_sdn_plan(plan, auth=auth))
+
+        assert len(captured) == 3
+        for body in captured:
+            assert "tag" not in body, (
+                f"PVE 9 rejects the 'tag' field on Simple-zone vnets; "
+                f"body was {body}"
+            )
+            assert "vnet" in body
+            assert "zone" in body
+
+    def test_pve_field_level_errors_surface_in_sdn_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """When PVE returns 400 with an ``errors`` dict (per-field
+        reasons), the message we raise must include those reasons
+        -- otherwise the operator sees only the bare
+        "Parameter verification failed." and can't tell which field
+        is wrong.
+        """
+
+        def on_zone_create(req: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                400,
+                json={
+                    "data": None,
+                    "message": "Parameter verification failed.\n",
+                    "errors": {
+                        "bridge": "unexpected property 'bridge'"
+                    },
+                },
+            )
+
+        transport, _ = _make_handler(
+            zones=[],
+            vnets=[],
+            node_ifaces=[],
+            on_zone_create=on_zone_create,
+        )
+        _patch_httpx(monkeypatch, transport)
+
+        auth = _make_auth()
+        plan = _three_bridge_plan()
+
+        with pytest.raises(SdnError) as ei:
+            asyncio.run(apply_sdn_plan(plan, auth=auth))
+
+        msg = str(ei.value)
+        # Both the summary and the field-level reason must appear
+        assert "Parameter verification failed" in msg
+        assert "bridge" in msg
+        assert "unexpected property" in msg
+
+    def test_pve_errors_dict_with_multiple_fields(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Multiple field-level errors should all be surfaced."""
+
+        def on_zone_create(req: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                400,
+                json={
+                    "data": None,
+                    "message": "Parameter verification failed.\n",
+                    "errors": {
+                        "zone": "invalid format - zone ID 'bad zone' contains illegal characters\n",
+                        "mtu": "value must be a multiple of 100\n",
+                    },
+                },
+            )
+
+        transport, _ = _make_handler(
+            zones=[],
+            vnets=[],
+            node_ifaces=[],
+            on_zone_create=on_zone_create,
+        )
+        _patch_httpx(monkeypatch, transport)
+
+        auth = _make_auth()
+        plan = _three_bridge_plan()
+
+        with pytest.raises(SdnError) as ei:
+            asyncio.run(apply_sdn_plan(plan, auth=auth))
+
+        msg = str(ei.value)
+        assert "zone" in msg
+        assert "illegal characters" in msg
+        assert "mtu" in msg
+        assert "multiple of 100" in msg

@@ -273,8 +273,27 @@ async def _request(
     if r.status_code >= 400:
         try:
             payload = r.json()
-            msg = payload.get("message") or r.text
         except Exception:  # noqa: BLE001
+            payload = None
+        msg = ""
+        if isinstance(payload, dict):
+            # PVE's API errors carry two fields:
+            #   - "message": human summary ("Parameter verification failed.")
+            #   - "errors":  dict of {field: reason} (e.g. {"tag": "...", "bridge": "..."})
+            # The 1-line "message" is too vague to debug; concatenate the
+            # field-level reasons so the operator sees exactly which
+            # field is wrong (PVE 9.x changed Simple-zone + VNet
+            # payloads; this matters more than ever).
+            base_msg = (payload.get("message") or "").strip()
+            errs = payload.get("errors")
+            if isinstance(errs, dict) and errs:
+                rendered = "; ".join(
+                    f"{k}: {v}" for k, v in errs.items() if v
+                )
+                msg = f"{base_msg} ({rendered})" if base_msg else rendered
+            else:
+                msg = base_msg or r.text or f"HTTP {r.status_code}"
+        else:
             msg = r.text or f"HTTP {r.status_code}"
         raise SdnError(f"PVE {method} {url} failed: {msg}".strip())
 
@@ -310,21 +329,27 @@ async def create_zone(
     auth: SdnAuth,
     *,
     zone: str = DEFAULT_ZONE,
-    bridge: str = "vmbr0",
 ) -> None:
     """Create the div:ide SDN zone if it doesn't already exist.
 
     Idempotent: PVE returns 500 with a "Zone already exists" message
     on duplicate POSTs; we treat that as a no-op so apply_sdn_plan can
     safely re-run.
+
+    Note (PVE 9.x compatibility): PVE 9 rejected several fields that
+    PVE 8 accepted on Simple zones. We now send only the minimum:
+        zone + type=simple + mtu=1500
+
+    Specifically removed vs. PVE 8:
+      * ``bridge`` -- PVE 9 returns "unexpected property 'bridge'"
+      * ``dhcp: "none"`` -- PVE 9 only enumerates 'dnsmasq', so the
+        "no DHCP" semantic must be expressed by omitting the field.
     """
     url = f"{auth.base_url}/api2/json/cluster/sdn/zones"
     body = {
         "zone": zone,
         "type": "simple",
-        "bridge": bridge,
         "mtu": 1500,
-        "dhcp": "none",
     }
     try:
         await _request("POST", url, auth=auth, json_body=body)
@@ -354,12 +379,20 @@ async def create_vnet(
     vnet: str,
     zone: str = DEFAULT_ZONE,
 ) -> None:
-    """Create one SDN VNet (== one Linux bridge on the node)."""
+    """Create one SDN VNet (== one Linux bridge on the node).
+
+    Note (PVE 9.x compatibility): PVE 9 changed the VNet API:
+      * ``tag: -1`` (the PVE 8 "no VLAN tag" sentinel) is rejected
+        with ``value must have a minimum value of 1``.
+      * ``tag: N`` for any N >= 1 is rejected with
+        ``vlan tag is not allowed on simple zone`` because Simple
+        zones don't support VLAN tagging.
+      The only payload PVE 9 accepts is {vnet, zone} with no tag.
+    """
     url = f"{auth.base_url}/api2/json/cluster/sdn/vnets"
     body = {
         "vnet": vnet,
         "zone": zone,
-        "tag": -1,
     }
     try:
         await _request("POST", url, auth=auth, json_body=body)
