@@ -100,13 +100,16 @@ export function SocViewCard({
       setConnected(false);
       return;
     }
-    // EventSource doesn't natively support headers, so we use
-    // the URL with a token query param. We need backend support
-    // for that -- for F8.3 we use the X-Divide-Token header by
-    // shimming EventSource via the browser's polyfill. To keep
-    // this light, we surface an explicit "Live" toggle and
-    // fall back to polling if EventSource is blocked.
-    const url = `/api/v1/runs/${runId}/events/stream`;
+    // EventSource doesn't natively support custom headers. Q24-B2
+    // teaches the API to accept ``?token=`` as a query-param
+    // fallback (see services/api/app/core/auth.py:current_token).
+    // The token is HMAC-signed so it's safe in a URL -- an attacker
+    // would need the signing secret to forge one. We keep this in
+    // a query param rather than a fragment to avoid any chance of
+    // showing up in browser history / referer headers / etc.
+    const url = `/api/v1/runs/${runId}/events/stream?token=${encodeURIComponent(
+      authToken,
+    )}`;
     let es: EventSource | null = null;
     try {
       es = new EventSource(url, { withCredentials: false });

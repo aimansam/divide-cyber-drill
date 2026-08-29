@@ -69,7 +69,7 @@ async def record_event(
     If it succeeds, we release the SAVEPOINT (no-op) so the
     outer transaction keeps both rows.
     """
-    from sqlalchemy.exc import SQLAlchemyError
+    from sqlalchemy.exc import IntegrityError, ProgrammingError
 
     payload = payload or {}
     ts = ts or datetime.now(timezone.utc)
@@ -89,11 +89,29 @@ async def record_event(
         async with session.begin_nested():
             session.add(event)
             await session.flush()
-    except SQLAlchemyError as exc:  # noqa: BLE001
+    except IntegrityError as exc:
+        # FK / NOT NULL / unique-constraint violations are
+        # expected (e.g. the run was deleted mid-drill, asset_id
+        # refers to a non-existent row). Swallow + log so the
+        # drill doesn't get blocked by a stale telemetry row.
         logger.warning(
-            "F8 event_bus.record_event: db flush failed: %s", exc
+            "F8 event_bus.record_event: db integrity error: %s", exc
         )
         return None
+    except ProgrammingError as exc:
+        # Q24-B3: type-cast / schema-drift errors are NOT
+        # expected. The previous broad ``except SQLAlchemyError``
+        # hid real bugs (the missing telemetry_severity enum
+        # went unnoticed for the entire F8 lifecycle). Now we
+        # log loudly and re-raise so the operator sees the 500
+        # instead of silently losing every event.
+        logger.error(
+            "F8 event_bus.record_event: db schema/programming error "
+            "(this should never happen -- the telemetry table may "
+            "need a migration): %s",
+            exc,
+        )
+        raise
     serialized = {
         "id": event.id,
         "run_id": event.run_id,

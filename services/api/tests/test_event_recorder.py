@@ -91,15 +91,63 @@ async def test_event_recorder_catches_sqlalchemyerror_not_bare_exception():
     from app.services import event_recorder
 
     source = inspect.getsource(event_recorder.record_event)
-    # Must catch SQLAlchemyError, not bare Exception.
-    assert "except SQLAlchemyError" in source
-    # Must NOT catch bare Exception on the flush path (the
-    # original Q14 bug was a bare ``except Exception:``).
-    # Note: the bus.publish branch still uses bare Exception to
-    # log + swallow; that's intentional (publish should never
-    # block the request). But the flush-path branch must be
-    # specific.
+    # Q24-B3: must catch the specific subclasses
+    # IntegrityError (expected: FK / NOT NULL / unique) AND
+    # ProgrammingError (schema-drift: re-raise so operators
+    # see the 500 instead of silently dropping events). We no
+    # longer use the broad ``except SQLAlchemyError``.
+    assert "except IntegrityError" in source
+    assert "except ProgrammingError" in source
+    # Legacy guard for the original Q14 fix -- the flush branch
+    # should never have been a bare ``except Exception``.
     flush_branch = source.split("bus.publish")[0]
-    # The flush branch should NOT contain a bare "except Exception"
-    # followed by a rollback.
     assert "rollback" in flush_branch  # nb: the comment refers to "do NOT"
+
+
+@pytest.mark.asyncio
+async def test_event_recorder_re_raises_programming_errors():
+    """Q24-B3: schema-drift errors (e.g. missing PG enum type)
+    must NOT be silently swallowed. Pre-B3, the broad
+    ``except SQLAlchemyError`` hid the missing telemetry_severity
+    enum for the entire F8 lifecycle.
+
+    A ProgrammingError surfaces a real operator-visible 500
+    instead of silently dropping every event.
+    """
+    from sqlalchemy.exc import ProgrammingError
+
+    from app.services import event_recorder
+    from app.services.event_recorder import record_event
+
+    session = MagicMock()
+    session.rollback = AsyncMock()
+    cm = MagicMock()
+    cm.__aenter__ = AsyncMock(return_value=None)
+    cm.__aexit__ = AsyncMock(return_value=None)
+    session.begin_nested = MagicMock(return_value=cm)
+
+    async def boom(*args, **kwargs):
+        raise ProgrammingError(
+            "ALTER TABLE",
+            params={},
+            orig=Exception("type telemetry_severity does not exist"),
+        )
+
+    session.flush = boom
+
+    with pytest.raises(ProgrammingError):
+        await record_event(
+            session,
+            run_id=42,
+            kind="schema.drift",
+            source="pytest",
+            payload={},
+        )
+
+    # The Q14 invariant still holds: the outer transaction's
+    # rollback must NOT be called even on ProgrammingError
+    # (only the SAVEPOINT rolls back).
+    assert session.rollback.await_count == 0, (
+        "Q24-B3 regression: ProgrammingError leaked to "
+        "session.rollback() and wiped the outer transaction"
+    )

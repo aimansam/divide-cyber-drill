@@ -230,10 +230,15 @@ async def recent_events(
     session: AsyncSession = Depends(get_session),
     token=Depends(current_token),
 ) -> dict:
-    """Return up to ``n`` events from the in-process bus buffer.
+    """Return up to ``n`` events for a run.
 
-    Used by the SOC dashboard on initial connect -- the SSE
-    stream then takes over for new events.
+    Q24-B5: prefer the in-process bus buffer (cheap, instant),
+    but fall back to the DB if the buffer is empty (process
+    restart, multi-worker setup, or a fresh deploy). The DB
+    fallback uses an ORDER BY ts DESC LIMIT n and reverses to
+    return oldest-first so the client timeline reads naturally.
+
+    The SSE stream then takes over for new events.
     """
     if n < 1 or n > 1024:
         raise HTTPException(
@@ -245,6 +250,24 @@ async def recent_events(
         e for e in bus.recent(n)
         if e.get("run_id") == run_id
     ]
+    if not items:
+        # Q24-B5: cold-connect fallback. The buffer is empty
+        # (process restart, fresh deploy, or a multi-worker
+        # setup where the bus lives in a different process).
+        # Query the DB so the SOC view still shows recent events
+        # rather than a blank "no events" page.
+        from sqlalchemy import select
+
+        rows = (
+            await session.execute(
+                select(TelemetryEvent)
+                .where(TelemetryEvent.run_id == run_id)
+                .order_by(TelemetryEvent.ts.desc())
+                .limit(n)
+            )
+        ).scalars().all()
+        # Reverse to oldest-first so the timeline reads naturally.
+        items = [_serialize_event(r) for r in reversed(rows)]
     return {
         "items": items[-n:],
         "total": len(items),

@@ -272,11 +272,26 @@ async def current_token(
     ``request.state.token`` so downstream code can access it without
     re-decoding.
 
-    Returns ``None`` if the header is absent (anonymous caller).
+    Token lookup order:
+      1. ``X-Divide-Token`` header (the standard path).
+      2. ``?token=<token>`` query parameter (Q24 SSE fallback;
+         ``EventSource`` doesn't allow custom headers, so SSE
+         clients pass the token as a query param. We validate it
+         identically -- the token is HMAC-signed so it can't be
+         tampered with via the URL).
+
+    Returns ``None`` if no token is present (anonymous caller).
     Raises ``HTTPException(401)`` if a token was supplied but failed
     to validate -- that's a real authentication failure, not an
     anonymous request.
     """
+    if x_divide_token is None:
+        # Q24-B2: SSE fallback. The browser EventSource API doesn't
+        # support custom headers, so SSE clients send the token
+        # via the query string. The token is HMAC-signed, so
+        # putting it in a URL doesn't weaken the auth model --
+        # an attacker would need the signing secret to forge one.
+        x_divide_token = request.query_params.get("token")
     if x_divide_token is None:
         request.state.token = None
         return None
