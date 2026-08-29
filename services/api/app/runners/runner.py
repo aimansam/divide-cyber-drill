@@ -504,6 +504,21 @@ class Runner:
         ).scalar_one_or_none()
         if run is None:
             raise RunnerError(f"run id={run_id} not found")
+        # Q23-B1: refuse to write a duplicate RUN_STOPPED audit row
+        # for an already-terminal run. Pre-B1, double-clicking Stop
+        # (or stopping an already-stopped run via API) flipped the
+        # row to SUCCEEDED again and stacked audit rows -- making
+        # "how many times was this stopped?" unanswerable. We still
+        # return the run row so the caller gets a 200, but no DB
+        # mutation occurs.
+        if run.status in (
+            RunStatus.SUCCEEDED,
+            RunStatus.FAILED,
+            RunStatus.CANCELLED,
+            RunStatus.TIMEOUT,
+        ):
+            await session.refresh(run, attribute_names=["assets"])
+            return run
         assets = (
             await session.execute(
                 select(models.Asset).where(models.Asset.run_id == run_id)

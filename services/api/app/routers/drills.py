@@ -926,8 +926,15 @@ async def reset_run(
 
     This is the operator's "undo" button -- they can pull a run
     back to the snapshot state without re-creating the run.
-    If the run is not bound to a template (template_id is NULL),
-    this is a 409 (use ``save-as-template`` first to bind one).
+
+    Status codes:
+      * 200 -- reset; run is now PENDING with re-staged assets.
+      * 404 -- run not found.
+      * 409 -- run is still live (PENDING / RUNNING). Stop it
+                first via ``POST /drills/{id}/stop``; the snapshot
+                restore can't safely clobber a running drill.
+      * 409 -- run has no template_id; bind one with
+                ``POST /drills/{id}/save-as-template`` first.
     """
     run = (
         await session.execute(
@@ -938,6 +945,21 @@ async def reset_run(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"run id={run_id} not found",
+        )
+    # Q23-B2: refuse to reset a live run. Previously the endpoint
+    # would silently drop assets + flip to PENDING mid-drill,
+    # which is exactly the kind of "operator clicked the wrong
+    # button" incident the audit trail is supposed to surface.
+    if run.status in (
+        db_models.RunStatus.PENDING,
+        db_models.RunStatus.RUNNING,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"run id={run_id} is live ({run.status.value}); "
+                "stop it first via POST /drills/{id}/stop"
+            ),
         )
     if run.template_id is None:
         raise HTTPException(
@@ -995,6 +1017,22 @@ async def reset_run(
         session.add(asset)
         await session.flush()
         new_asset_ids.append(asset.id)
+    await session.commit()
+    # Q23-B3: previously reset_run wrote no audit row, so
+    # "who reset what when" was unanswerable. Match the
+    # runner's other audit rows and add one here.
+    session.add(
+        db_models.AuditLog(
+            action=db_models.AuditAction.RUN_RESET,
+            actor=getattr(token, "sub", "unknown"),
+            run_id=run.id,
+            scenario_id=run.scenario_id,
+            details={
+                "template_id": template.id,
+                "asset_count": len(new_asset_ids),
+            },
+        )
+    )
     await session.commit()
     return {
         "run_id": run.id,

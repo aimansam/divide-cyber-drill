@@ -87,6 +87,10 @@ class AuditAction(str, enum.Enum):
         # POST /drills/{id}/stop). Distinct from RUN_CANCELLED
         # which is trainee-initiated (POST /drills/{id}/cancel).
     RUN_TIMEOUT = "run.timeout"  # auto-cancelled by the watchdog (L2 2.8)
+    # Q23-B3: operator-initiated reset of a terminal run back to
+    # its template snapshot. Distinct from RUN_STOPPED (which
+    # destroys assets) and RUN_CANCELLED (trainee abort).
+    RUN_RESET = "run.reset"
     ASSET_SPAWNED = "asset.spawned"
     ASSET_FAILED = "asset.failed"
     ASSET_ORPHANED = "asset.orphaned"

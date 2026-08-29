@@ -28,6 +28,33 @@ import {
   RotateCcw,
   Siren,
 } from "lucide-react";
+
+/**
+ * Q23: relative-time formatter for run rows.
+ *
+ * Mirrors the pattern set by Q21 in ``audit-explorer-card.tsx``
+ * and ``global-audit-card.tsx`` so the operator console reads
+ * consistently with the audit panels on the same admin tab.
+ *
+ * Buckets:
+ *   * < 60s   -> "Ns ago"
+ *   * < 60m   -> "Nm ago"
+ *   * < 24h   -> "Nh ago"
+ *   * else    -> locale string fallback
+ */
+function formatRelative(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return iso;
+  const deltaMs = Date.now() - t;
+  const sec = Math.max(0, Math.floor(deltaMs / 1000));
+  if (sec < 60) return `${sec}s ago`;
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  return new Date(t).toLocaleString();
+}
 import {
   Card,
   CardContent,
@@ -64,7 +91,13 @@ interface RunsPayload {
 
 export function OperatorConsoleCard() {
   const [runs, setRuns] = useState<LiveRun[]>([]);
+  // Q23-B4+B5: split "loading" (initial fetch -- show the
+  // "Loading…" placeholder) from "refreshing" (background poll
+  // -- keep the list rendered, just spin the Refresh icon).
+  // Pre-fix, every 5s poll set loading=true and unmounted the
+  // list for ~100ms which made the UI feel broken.
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [pending, setPending] = useState<number | null>(null);
@@ -80,8 +113,9 @@ export function OperatorConsoleCard() {
   // store the target runId (or null when closed).
   const [injectForRun, setInjectForRun] = useState<number | null>(null);
 
-  async function load() {
-    setLoading(true);
+  async function load(opts: { initial?: boolean } = {}) {
+    if (opts.initial) setLoading(true);
+    else setRefreshing(true);
     setError(null);
     try {
       const data = await api.get<RunsPayload>("/api/v1/drills");
@@ -91,12 +125,13 @@ export function OperatorConsoleCard() {
       setRuns([]);
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   }
 
   useEffect(() => {
-    load();
-    const id = window.setInterval(load, 5000);
+    load({ initial: true });
+    const id = window.setInterval(() => load(), 5000);
     return () => window.clearInterval(id);
   }, []);
 
@@ -143,20 +178,24 @@ export function OperatorConsoleCard() {
 
   async function reset(id: number) {
     setPending(id);
+    // Q23-B6: clear any stale success banner from a previous
+    // inject. Pre-fix, hitting Reset right after an Inject left
+    // the "event injected" banner sitting while the Reset
+    // failure rendered below it.
+    setSuccess(null);
     try {
       await api.post(`/api/v1/drills/${id}/reset`);
       await load();
     } catch (e: unknown) {
       // Q21: use the structured detail when available so the
       // operator sees the actual error from the API instead of
-      // just an HTTP status. Fall back to the status code only
-      // for the 409 special case where we want to give a
-      // specific "save-as-template first" hint.
+      // just an HTTP status. The Q23-B2 server-side guard
+      // returns 409 with detail "run id=X is live (...); stop
+      // it first" for active runs, which we surface verbatim.
       const status = e instanceof ApiError ? e.status : 0;
       if (status === 409) {
         setError(
-          "reset failed: this run has no template snapshot. " +
-            "POST /api/v1/drills/{id}/save-as-template first, then retry.",
+          `reset failed: ${detailFromError(e)} (save-as-template first if the run has no template)`,
         );
       } else {
         setError(`reset failed: ${detailFromError(e)}`);
@@ -190,11 +229,11 @@ export function OperatorConsoleCard() {
         <Button
           variant="ghost"
           size="icon"
-          onClick={load}
+          onClick={() => load()}
           aria-label="Refresh"
-          disabled={loading}
+          disabled={loading || refreshing}
         >
-          {loading ? (
+          {loading || refreshing ? (
             <Loader2 className="h-4 w-4 animate-spin" />
           ) : (
             <RefreshCw className="h-4 w-4" />
@@ -234,10 +273,16 @@ export function OperatorConsoleCard() {
                 <span className="text-muted-foreground">
                   {r.started_by ?? "—"}
                 </span>
-                <time className="text-xs text-muted-foreground">
-                  {r.started_at
-                    ? new Date(r.started_at).toLocaleString()
-                    : "—"}
+                <time
+                  className="text-xs text-muted-foreground"
+                  dateTime={r.started_at ?? undefined}
+                  title={
+                    r.started_at
+                      ? new Date(r.started_at).toLocaleString()
+                      : undefined
+                  }
+                >
+                  {formatRelative(r.started_at)}
                 </time>
                 <div className="ml-auto flex items-center gap-1">
                   <Button
