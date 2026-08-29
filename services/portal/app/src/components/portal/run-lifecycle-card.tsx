@@ -33,10 +33,12 @@
 
 import { useEffect, useRef, useState } from "react";
 import {
+  BookMarked,
   Download,
   Loader2,
   Play,
   RefreshCw,
+  RotateCw,
   Settings,
   Shield,
   Square,
@@ -101,6 +103,12 @@ const CAN_CANCEL: readonly Role[] = ["admin", "lead", "red"];
 // with range-operator authority. Red team should not be able to
 // kill drills other operators are running.
 const CAN_STOP: readonly Role[] = ["admin", "lead"];
+// Q23: Restart re-runs the same scenario with a fresh run_id.
+// Anyone who can start a drill can restart one.
+const CAN_RESTART: readonly Role[] = ["admin", "lead", "red"];
+// Save-as-template is admin-only on the API side. Lead can
+// stop/cancel but can't author templates.
+const CAN_SAVE_AS_TEMPLATE: readonly Role[] = ["admin"];
 
 const TERMINAL_STATUSES = new Set([
   "completed",
@@ -173,6 +181,15 @@ export function RunLifecycleCard({
     null,
   );
   const [cancelReason, setCancelReason] = useState("user requested");
+  // Q23-#5: Save-as-template flow uses two extra local state
+  // slots for the in-flight spinner + a 5s "saved!" toast so the
+  // operator gets visual confirmation that the new template
+  // row exists. Kept at the top with the other useStates so
+  // hook ordering is stable.
+  const [savingAsTemplate, setSavingAsTemplate] = useState(false);
+  const [savedTemplateName, setSavedTemplateName] = useState<string | null>(
+    null,
+  );
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const canStart = hasRole(meRole, CAN_START);
@@ -186,6 +203,11 @@ export function RunLifecycleCard({
     canCancel &&
     run !== null &&
     (meRole !== "red" || run.started_by === meSub);
+  // Q23-#2 + #5: restart + save-as-template gates. Restart
+  // re-uses POST /drills so it shares Start's role list;
+  // save-as-template is admin-only on the API side.
+  const canRestart = hasRole(meRole, CAN_RESTART);
+  const canSaveAsTemplate = hasRole(meRole, CAN_SAVE_AS_TEMPLATE);
 
   function clearPoll() {
     if (pollRef.current !== null) {
@@ -285,6 +307,82 @@ export function RunLifecycleCard({
       setError(detailFromError(e));
     } finally {
       setLoading(false);
+    }
+  }
+
+  /**
+   * Q23-#2: Restart = start a new drill with the same scenario.
+   *
+   * Useful for retakes. The new drill gets a fresh run_id, fresh
+   * VM clones, fresh audit timeline. The previous run is left
+   * alone (it's terminal; visible in History).
+   *
+   * RBAC: same as Start (admin / lead / red). The server doesn't
+   * have a dedicated /restart endpoint; this re-uses POST /drills
+   * with the scenario_id of the just-finished run. We could call
+   * the explicit /drills/{id}/restart endpoint if/when one ships.
+   */
+  async function onRestart() {
+    if (run === null || scenario === null) return;
+    setLoading(true);
+    setError(null);
+    setErrorKind(null);
+    try {
+      const created = await api.post<RunDetail>("/api/v1/drills", {
+        scenario_id: run.scenario_id ?? scenario.id,
+      });
+      setRun(created);
+      if (!TERMINAL_STATUSES.has(created.status)) {
+        startPoll(created.run_id);
+      }
+    } catch (e: unknown) {
+      const structured = parseErrorKind(e);
+      setErrorKind(
+        structured.kind === "rate_limited" ? "rate_limited" : "generic",
+      );
+      setError(structured.message ?? detailFromError(e));
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  /**
+   * Q23-#5: Save the just-finished run as a reusable template.
+   *
+   * The endpoint (POST /drills/{id}/save-as-template) supports
+   * both live and terminal runs -- the operator's "bookmark"
+   * button while a drill is still running. The current run row
+   * is unchanged; a new template is created and bound.
+   *
+   * RBAC: admin-only on the API side.
+   */
+  async function onSaveAsTemplate() {
+    if (run === null) return;
+    const name = window.prompt(
+      "Template name (used as the file-safe identifier):",
+      `tpl-from-run-${run.run_id}`,
+    );
+    if (name === null) return;
+    const title = window.prompt(
+      "Template title (shown in the template picker):",
+      `Captured from run #${run.run_id}`,
+    );
+    if (title === null) return;
+    setSavingAsTemplate(true);
+    setError(null);
+    try {
+      const out = await api.post<{ template_id?: number; id?: number }>(
+        `/api/v1/drills/${run.run_id}/save-as-template`,
+        { name, title },
+      );
+      setSavedTemplateName(name);
+      // Keep the confirmation visible until the next interaction.
+      setTimeout(() => setSavedTemplateName(null), 5000);
+      console.log("[Q23] template saved", out);
+    } catch (e: unknown) {
+      setError(detailFromError(e));
+    } finally {
+      setSavingAsTemplate(false);
     }
   }
 
@@ -470,6 +568,60 @@ export function RunLifecycleCard({
                 <RefreshCw className="h-4 w-4" />
               </Button>
             </div>
+
+            {/* Q23-#2 + #5: post-run actions.
+                Visible only when the run is terminal -- Restart
+                starts a new drill with the same scenario_id; Save
+                bookmarks the run as a reusable template. */}
+            {TERMINAL_STATUSES.has(run.status) && (
+              <div
+                className="flex flex-wrap items-center gap-2"
+                data-testid="lifecycle-post-run-actions"
+              >
+                {canRestart && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={onRestart}
+                    disabled={loading}
+                    data-testid="lifecycle-restart"
+                    title="Start a new drill with the same scenario. The current run is left as-is."
+                  >
+                    {loading ? (
+                      <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                    ) : (
+                      <RotateCw className="mr-1 h-3 w-3" />
+                    )}
+                    Restart drill
+                  </Button>
+                )}
+                {canSaveAsTemplate && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={onSaveAsTemplate}
+                    disabled={loading || savingAsTemplate}
+                    data-testid="lifecycle-save-as-template"
+                    title="Bookmark this run as a reusable template."
+                  >
+                    {savingAsTemplate ? (
+                      <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                    ) : (
+                      <BookMarked className="mr-1 h-3 w-3" />
+                    )}
+                    Save as template
+                  </Button>
+                )}
+                {savedTemplateName !== null && (
+                  <span
+                    className="text-xs text-emerald-300"
+                    data-testid="lifecycle-saved-toast"
+                  >
+                    Saved as &quot;{savedTemplateName}&quot;.
+                  </span>
+                )}
+              </div>
+            )}
 
             {run.assets && run.assets.length > 0 && (
               <div>
