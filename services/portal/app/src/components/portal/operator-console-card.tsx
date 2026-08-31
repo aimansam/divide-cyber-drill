@@ -334,7 +334,7 @@ export function OperatorConsoleCard() {
             {live.map((r) => (
               <li
                 key={r.run_id}
-                className={`flex flex-col gap-2 px-3 py-2 text-sm transition-colors cursor-pointer ${
+                className={`flex items-center gap-2 px-3 py-2 text-sm transition-colors cursor-pointer ${
                   selectedRowId === r.run_id
                     ? "bg-accent/50"
                     : "hover:bg-muted/30"
@@ -349,79 +349,77 @@ export function OperatorConsoleCard() {
                 role="button"
                 aria-expanded={selectedRowId === r.run_id}
               >
-                {/* Row content */}
-                <div className="flex items-center gap-2">
-                  <span className="font-mono text-xs">#{r.run_id}</span>
-                  <StatusPill status={r.status} />
-                  {r.scenario_id && scenarioNames[r.scenario_id] && (
-                    <span className="text-xs text-muted-foreground max-w-[120px] truncate">
-                      {scenarioNames[r.scenario_id]}
+                <span className="font-mono text-xs">#{r.run_id}</span>
+                <StatusPill status={r.status} />
+                {r.scenario_id && scenarioNames[r.scenario_id] && (
+                  <span className="text-xs text-muted-foreground max-w-[120px] truncate">
+                    {scenarioNames[r.scenario_id]}
+                  </span>
+                )}
+                <span className="text-muted-foreground">
+                  {r.started_by ?? "—"}
+                </span>
+                <time
+                  className="text-xs text-muted-foreground"
+                  dateTime={r.started_at ?? undefined}
+                  title={
+                    r.started_at
+                      ? new Date(r.started_at).toLocaleString()
+                      : undefined
+                  }
+                >
+                  {formatRelative(r.started_at)}
+                </time>
+                <div className="ml-auto">
+                  {selectedRowId === r.run_id ? (
+                    <div
+                      className="flex items-center gap-1"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <Button
+                        size="sm"
+                        variant="destructive"
+                        onClick={() => stop(r.run_id)}
+                        disabled={pending === r.run_id}
+                        data-testid="operator-stop"
+                      >
+                        <CircleStop className="mr-1 h-3 w-3" />
+                        {pending === r.run_id ? "Stopping…" : "Stop"}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => reset(r.run_id)}
+                        disabled={pending === r.run_id}
+                        data-testid="operator-reset"
+                      >
+                        <RotateCcw className="mr-1 h-3 w-3" />
+                        {pending === r.run_id ? "Resetting…" : "Reset"}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => setInjectForRun(r.run_id)}
+                        data-testid="operator-inject"
+                      >
+                        <Siren className="mr-1 h-3 w-3" />
+                        Inject
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => load()}
+                      >
+                        <RefreshCw className="mr-1 h-3 w-3" />
+                        Refresh
+                      </Button>
+                    </div>
+                  ) : (
+                    <span className="text-xs text-muted-foreground">
+                      Click for actions
                     </span>
                   )}
-                  <span className="text-muted-foreground">
-                    {r.started_by ?? "—"}
-                  </span>
-                  <time
-                    className="text-xs text-muted-foreground"
-                    dateTime={r.started_at ?? undefined}
-                    title={
-                      r.started_at
-                        ? new Date(r.started_at).toLocaleString()
-                        : undefined
-                    }
-                  >
-                    {formatRelative(r.started_at)}
-                  </time>
-                  <div className="ml-auto text-xs text-muted-foreground">
-                    {selectedRowId === r.run_id ? "Click to hide actions" : "Click for actions"}
-                  </div>
                 </div>
-
-                {/* Q27: Inline action buttons - only show when row is selected */}
-                {selectedRowId === r.run_id && (
-                  <div
-                    className="flex items-center gap-2 pl-6 border-t border-border pt-2"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <Button
-                      size="sm"
-                      variant="destructive"
-                      onClick={() => stop(r.run_id)}
-                      disabled={pending === r.run_id}
-                      data-testid="operator-stop"
-                    >
-                      <CircleStop className="mr-1 h-3 w-3" />
-                      {pending === r.run_id ? "Stopping…" : "Stop"}
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => reset(r.run_id)}
-                      disabled={pending === r.run_id}
-                      data-testid="operator-reset"
-                    >
-                      <RotateCcw className="mr-1 h-3 w-3" />
-                      {pending === r.run_id ? "Resetting…" : "Reset"}
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => setInjectForRun(r.run_id)}
-                      data-testid="operator-inject"
-                    >
-                      <Siren className="mr-1 h-3 w-3" />
-                      Inject
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => load()}
-                    >
-                      <RefreshCw className="mr-1 h-3 w-3" />
-                      Refresh
-                    </Button>
-                  </div>
-                )}
               </li>
             ))}
           </ul>
