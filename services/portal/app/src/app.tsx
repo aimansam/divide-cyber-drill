@@ -253,11 +253,6 @@ export default function App() {
                         onNavigateToConfig={() => setActiveView("config")}
                       />
                     </div>
-                    <MyRunsCard
-                      meRole={me.role}
-                      pickedRunId={pickedRun?.run_id ?? null}
-                      onPick={setPickedRun}
-                    />
                   </>
                 );
               case "observe":
