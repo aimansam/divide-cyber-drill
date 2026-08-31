@@ -256,7 +256,8 @@ class RealProxmoxAdapter(ProxmoxAdapter):
         # cloud-init on `local` storage (which doesn't support `images`
         # content type), the cloned VM won't start. Move cloud-init
         # drives from `local` to `local-lvm` after cloning.
-        await self._fix_cloud_init_storage(new_vmid, node)
+        # Q27: Temporarily disabled cloud-init fix to debug VM boot issue
+        # await self._fix_cloud_init_storage(new_vmid, node)
 
         return ClonedVM(vmid=new_vmid, node=node, name=spec.name)
 
