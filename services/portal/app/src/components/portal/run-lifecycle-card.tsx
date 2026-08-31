@@ -60,6 +60,7 @@ import { hasRole, type Role } from "@/lib/roles";
 import type { Scenario } from "@/components/portal/scenarios-card";
 import { StatusPill } from "./status-pill";
 import { type AuditRow, tone, actionLabel, relativeTime } from "./audit-explorer-card";
+import { useToasts } from "./toast";
 
 /**
  * Shape of a structured error response from the API.
@@ -197,7 +198,9 @@ export function RunLifecycleCard({
     null,
   );
   const [latestAudit, setLatestAudit] = useState<AuditRow | null>(null);
+  const toasts = useToasts();
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const prevStatusRef = useRef<string | null>(null);
 
   const canStart = hasRole(meRole, CAN_START);
   const canCancel = hasRole(meRole, CAN_CANCEL);
@@ -252,8 +255,26 @@ export function RunLifecycleCard({
     pollRef.current = setInterval(() => {
       void fetchRun(id).then((r) => {
         void fetchLatestAudit(id);
-        if (r && TERMINAL_STATUSES.has(r.status)) {
-          clearPoll();
+        if (r) {
+          // Detect status transitions and show toasts
+          const prevStatus = prevStatusRef.current;
+          if (prevStatus && prevStatus !== r.status && TERMINAL_STATUSES.has(r.status)) {
+            if (r.status === "succeeded" || r.status === "completed") {
+              toasts.success(`Drill #${r.run_id} completed successfully`);
+            } else if (r.status === "failed") {
+              toasts.error(`Drill #${r.run_id} failed`);
+            } else if (r.status === "timeout") {
+              toasts.error(`Drill #${r.run_id} timed out`);
+            } else if (r.status === "stopped") {
+              toasts.info(`Drill #${r.run_id} stopped`);
+            } else if (r.status === "cancelled" || r.status === "canceled") {
+              toasts.info(`Drill #${r.run_id} cancelled`);
+            }
+          }
+          prevStatusRef.current = r.status;
+          if (TERMINAL_STATUSES.has(r.status)) {
+            clearPoll();
+          }
         }
       });
     }, 2000);
@@ -272,8 +293,11 @@ export function RunLifecycleCard({
     fetchRun(pickedRunId)
       .then((r) => {
         void fetchLatestAudit(pickedRunId);
-        if (r && !TERMINAL_STATUSES.has(r.status)) {
-          startPoll(r.run_id);
+        if (r) {
+          prevStatusRef.current = r.status;
+          if (!TERMINAL_STATUSES.has(r.status)) {
+            startPoll(r.run_id);
+          }
         }
       })
       .finally(() => setLoading(false));
@@ -290,6 +314,7 @@ export function RunLifecycleCard({
         scenario_id: scenario.id,
       });
       setRun(created);
+      toasts.success(`Drill #${created.run_id} started successfully`);
       if (!TERMINAL_STATUSES.has(created.status)) {
         startPoll(created.run_id);
       }
@@ -332,9 +357,11 @@ export function RunLifecycleCard({
         { reason: cancelReason, actor: meSub },
       );
       setRun(updated);
+      toasts.success(`Drill #${run.run_id} cancelled`);
       clearPoll();
     } catch (e: unknown) {
       setError(detailFromError(e));
+      toasts.error(`Failed to cancel drill: ${detailFromError(e)}`);
     } finally {
       setLoading(false);
     }
@@ -377,6 +404,7 @@ export function RunLifecycleCard({
         scenario_id: run.scenario_id ?? scenario.id,
       });
       setRun(created);
+      toasts.success(`Drill #${created.run_id} restarted`);
       if (!TERMINAL_STATUSES.has(created.status)) {
         startPoll(created.run_id);
       }
@@ -386,6 +414,7 @@ export function RunLifecycleCard({
         structured.kind === "rate_limited" ? "rate_limited" : "generic",
       );
       setError(structured.message ?? detailFromError(e));
+      toasts.error(`Failed to restart drill`);
     } finally {
       setLoading(false);
     }
@@ -421,11 +450,13 @@ export function RunLifecycleCard({
         { name, title },
       );
       setSavedTemplateName(name);
+      toasts.success(`Saved as template "${name}"`);
       // Keep the confirmation visible until the next interaction.
       setTimeout(() => setSavedTemplateName(null), 5000);
       console.log("[Q23] template saved", out);
     } catch (e: unknown) {
       setError(detailFromError(e));
+      toasts.error(`Failed to save template`);
     } finally {
       setSavingAsTemplate(false);
     }
@@ -461,10 +492,12 @@ export function RunLifecycleCard({
         `/api/v1/drills/${run.run_id}/stop`,
       );
       setRun(updated);
+      toasts.success(`Drill #${run.run_id} stopped`);
     } catch (e: unknown) {
       // Revert and surface the error.
       setRun(prevRun);
       setError(detailFromError(e));
+      toasts.error(`Failed to stop drill`);
       // Re-sync in case the server actually did succeed (network blip).
       void fetchRun(prevRun.run_id);
     } finally {

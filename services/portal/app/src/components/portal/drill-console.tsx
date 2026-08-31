@@ -33,7 +33,7 @@
  * post-drill hand-off lives in the same surface.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Activity, Download, FileText, Loader2, RefreshCw } from "lucide-react";
 import { api, detailFromError, getToken } from "@/lib/api";
 import { formatDuration } from "@/lib/format";
@@ -41,6 +41,7 @@ import { AssetsCard } from "./assets-card";
 import { AuditExplorerCard } from "./audit-explorer-card";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "./empty-state";
+import { useToasts } from "./toast";
 import { StatusPill } from "./status-pill";
 import { TopologyGraph, type TopologyAsset } from "./topology-graph";
 import { LeaderboardCard } from "./leaderboard-card";
@@ -58,6 +59,8 @@ export function DrillConsole({ pickedRunId, scenarioName }: DrillConsoleProps) {
   const [error, setError] = useState<string | null>(null);
   const [reportPending, setReportPending] = useState(false);
   const [tick, setTick] = useState(0); // re-renders the duration timer
+  const toasts = useToasts();
+  const prevStatusRef = useRef<string | null>(null);
   const isLive =
     !!run && (run.status === "running" || run.status === "pending");
 
@@ -71,6 +74,26 @@ export function DrillConsole({ pickedRunId, scenarioName }: DrillConsoleProps) {
     try {
       const r = await api.get<RunDetail>(`/api/v1/drills/${pickedRunId}`);
       setRun(r);
+      
+      // Detect status transitions and show toasts
+      const prevStatus = prevStatusRef.current;
+      if (prevStatus && prevStatus !== r.status) {
+        const terminalStatuses = ["succeeded", "completed", "failed", "timeout", "stopped", "cancelled", "canceled"];
+        if (terminalStatuses.includes(r.status)) {
+          if (r.status === "succeeded" || r.status === "completed") {
+            toasts.success(`Drill #${r.run_id} completed successfully`);
+          } else if (r.status === "failed") {
+            toasts.error(`Drill #${r.run_id} failed`);
+          } else if (r.status === "timeout") {
+            toasts.error(`Drill #${r.run_id} timed out`);
+          } else if (r.status === "stopped") {
+            toasts.info(`Drill #${r.run_id} stopped`);
+          } else if (r.status === "cancelled" || r.status === "canceled") {
+            toasts.info(`Drill #${r.run_id} cancelled`);
+          }
+        }
+      }
+      prevStatusRef.current = r.status;
     } catch (e: unknown) {
       setError(detailFromError(e));
       setRun(null);
@@ -123,9 +146,11 @@ export function DrillConsole({ pickedRunId, scenarioName }: DrillConsoleProps) {
       a.click();
       a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
+      toasts.success(`Report downloaded for drill #${pickedRunId}`);
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : String(e);
       setError(`report download failed: ${msg}`);
+      toasts.error(`Failed to download report`);
     } finally {
       setReportPending(false);
     }
