@@ -257,10 +257,17 @@ export default function App() {
                 );
               case "observe":
                 return (
-                  <DrillConsole
-                    pickedRunId={pickedRun?.run_id ?? null}
-                    scenarioName={pickedScenario?.title ?? pickedScenario?.name}
-                  />
+                  <>
+                    <MyRunsCard
+                      meRole={me.role}
+                      pickedRunId={pickedRun?.run_id ?? null}
+                      onPick={setPickedRun}
+                    />
+                    <DrillConsole
+                      pickedRunId={pickedRun?.run_id ?? null}
+                      scenarioName={pickedScenario?.title ?? pickedScenario?.name}
+                    />
+                  </>
                 );
               case "admin":
                 return (
