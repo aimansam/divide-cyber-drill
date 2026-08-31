@@ -240,17 +240,19 @@ export default function App() {
               case "operate":
                 return (
                   <>
-                    <ScenariosCard
-                      pickedId={pickedScenario?.id ?? null}
-                      onPick={setPickedScenario}
-                    />
-                    <RunLifecycleCard
-                      meSub={me.sub}
-                      meRole={me.role}
-                      scenario={pickedScenario}
-                      pickedRunId={pickedRun?.run_id ?? null}
-                      onNavigateToConfig={() => setActiveView("config")}
-                    />
+                    <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+                      <ScenariosCard
+                        pickedId={pickedScenario?.id ?? null}
+                        onPick={setPickedScenario}
+                      />
+                      <RunLifecycleCard
+                        meSub={me.sub}
+                        meRole={me.role}
+                        scenario={pickedScenario}
+                        pickedRunId={pickedRun?.run_id ?? null}
+                        onNavigateToConfig={() => setActiveView("config")}
+                      />
+                    </div>
                     <MyRunsCard
                       meRole={me.role}
                       pickedRunId={pickedRun?.run_id ?? null}
