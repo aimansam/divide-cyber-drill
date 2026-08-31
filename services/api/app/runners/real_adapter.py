@@ -251,13 +251,11 @@ class RealProxmoxAdapter(ProxmoxAdapter):
 
             await self._call(_resize)
 
-        # Q27: Fix cloud-init drive storage migration.
-        # PVE clones copy disk references as-is. If the template has
-        # cloud-init on `local` storage (which doesn't support `images`
-        # content type), the cloned VM won't start. Move cloud-init
-        # drives from `local` to `local-lvm` after cloning.
-        # Q27: Temporarily disabled cloud-init fix to debug VM boot issue
-        # await self._fix_cloud_init_storage(new_vmid, node)
+        # Q27: Fix cloud-init drive and ensure boot order.
+        # PVE clones copy disk references as-is. The template has
+        # ide2="local:cloudinit" which becomes a broken reference after clone.
+        # Remove the cloud-init drive and ensure boot order is scsi0.
+        await self._fix_cloud_init_storage(new_vmid, node)
 
         return ClonedVM(vmid=new_vmid, node=node, name=spec.name)
 
@@ -383,6 +381,13 @@ class RealProxmoxAdapter(ProxmoxAdapter):
         
         config = await self._call(_get_config)
         
+        # Log the full config for debugging
+        log.info(
+            "pve_runner.vm_config_after_clone vmid=%s config=%s",
+            vmid,
+            {k: v for k, v in config.items() if k in ["boot", "ide0", "ide1", "ide2", "ide3", "scsi0", "scsi1", "scsi2", "scsi3"]},
+        )
+        
         # Check for cloud-init drives on local storage
         drives_to_remove = []
         for key, value in config.items():
@@ -391,7 +396,16 @@ class RealProxmoxAdapter(ProxmoxAdapter):
                 if "local:" in value and "cloudinit" in value.lower():
                     drives_to_remove.append(key)
         
-        if not drives_to_remove:
+        # Always set boot order, even if no drives to remove
+        current_boot = config.get("boot", "")
+        log.info(
+            "pve_runner.current_boot_order vmid=%s boot=%s",
+            vmid,
+            current_boot,
+        )
+        
+        if not drives_to_remove and "scsi0" in current_boot:
+            # Nothing to fix
             return
         
         log.info(
@@ -402,13 +416,10 @@ class RealProxmoxAdapter(ProxmoxAdapter):
         
         # Delete cloud-init drive references and set boot order to scsi0
         def _delete_drives_and_set_boot() -> None:
-            delete_list = ",".join(drives_to_remove)
-            self._get_client().nodes(node).qemu(vmid).config.post(
-                **{
-                    "delete": delete_list,
-                    "boot": "order=scsi0"  # Boot from first SCSI disk
-                }
-            )
+            params = {"boot": "order=scsi0"}
+            if drives_to_remove:
+                params["delete"] = ",".join(drives_to_remove)
+            self._get_client().nodes(node).qemu(vmid).config.post(**params)
         
         await self._call(_delete_drives_and_set_boot)
         
