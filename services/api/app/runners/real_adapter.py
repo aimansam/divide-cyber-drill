@@ -264,7 +264,7 @@ class RealProxmoxAdapter(ProxmoxAdapter):
 
             await self._call(_resize)
 
-        # Q27: Fix cloud-init drive and ensure boot order.
+        # Q27: Recreate cloud-init drive for cloned VM
         await self._fix_cloud_init_storage(new_vmid, node)
 
         # Final config check
@@ -314,6 +314,29 @@ class RealProxmoxAdapter(ProxmoxAdapter):
             raise ProxmoxAPIError(
                 f"VM {vmid} failed to start: status={status.get('status')}, "
                 f"qmpstatus={status.get('qmpstatus')}"
+            )
+        
+        # Wait 5 seconds and check if VM stays running
+        import time
+        log.info("pve_runner.waiting_5s_to_verify vmid=%s", vmid)
+        time.sleep(5)
+        
+        def _check_again() -> dict:
+            return self._get_client().nodes(node).qemu(vmid).status.current.get()
+        
+        status_after_wait = await self._call(_check_again)
+        log.info(
+            "pve_runner.vm_status_after_5s vmid=%s status=%s qmpstatus=%s",
+            vmid,
+            status_after_wait.get("status"),
+            status_after_wait.get("qmpstatus"),
+        )
+        
+        if status_after_wait.get("status") != "running":
+            log.error(
+                "pve_runner.vm_shutdown_after_start vmid=%s status=%s",
+                vmid,
+                status_after_wait.get("status"),
             )
 
     async def stop_vm(self, vmid: int, node: str, force: bool = False) -> None:
@@ -394,74 +417,65 @@ class RealProxmoxAdapter(ProxmoxAdapter):
         await self._call(_do)
 
     async def _fix_cloud_init_storage(self, vmid: int, node: str) -> None:
-        """Q27: Remove cloud-init drives from cloned VMs.
+        """Q27: Recreate cloud-init drive for cloned VM.
         
-        PVE clones copy disk references as-is. If the template has cloud-init
-        on `local` storage (which doesn't support `images` content type), the
-        cloned VM won't start because the cloud-init disk image doesn't exist
-        at the referenced location.
+        PVE clones copy disk references as-is. The template has ide2="local:cloudinit"
+        which becomes a broken reference after clone (points to template's disk).
         
-        Solution: Simply remove the cloud-init drive reference from the VM
-        config. The cloned VMs are already configured from the template and
-        don't need cloud-init to boot.
+        Solution: Remove the broken reference and create a NEW cloud-init drive
+        for this specific VM using PVE's cloud-init creation syntax.
         
-        Cloud-init drives are typically on ide2 (CD-ROM) with naming pattern:
-        local:VMID/vm-VMID-cloudinit.qcow2
-        
-        Also updates boot order to ensure VM boots from hard disk (scsi0)
-        instead of trying to boot from removed CD-ROM.
+        This ensures:
+        1. VM has a valid cloud-init drive (OS expects it)
+        2. Boot order is set to scsi0 (boot from hard disk)
+        3. Cloud-init can run properly on first boot
         """
         def _get_config() -> dict:
             return self._get_client().nodes(node).qemu(vmid).config.get()
         
         config = await self._call(_get_config)
         
-        # Log the full config for debugging
-        log.info(
-            "pve_runner.vm_config_after_clone vmid=%s config=%s",
-            vmid,
-            {k: v for k, v in config.items() if k in ["boot", "ide0", "ide1", "ide2", "ide3", "scsi0", "scsi1", "scsi2", "scsi3"]},
-        )
-        
-        # Check for cloud-init drives on local storage
-        drives_to_remove = []
+        # Check for broken cloud-init drives
+        broken_drives = []
         for key, value in config.items():
             if key.startswith("ide") and isinstance(value, str):
-                # Check if it's a cloud-init drive on local storage
-                if "local:" in value and "cloudinit" in value.lower():
-                    drives_to_remove.append(key)
-        
-        # Always set boot order, even if no drives to remove
-        current_boot = config.get("boot", "")
-        log.info(
-            "pve_runner.current_boot_order vmid=%s boot=%s",
-            vmid,
-            current_boot,
-        )
-        
-        if not drives_to_remove and "scsi0" in current_boot:
-            # Nothing to fix
-            return
+                if "cloudinit" in value.lower():
+                    broken_drives.append(key)
         
         log.info(
-            "pve_runner.removing_cloud_init_drives vmid=%s drives=%s",
+            "pve_runner.checking_cloud_init vmid=%s broken_drives=%s",
             vmid,
-            drives_to_remove,
+            broken_drives,
         )
         
-        # Delete cloud-init drive references and set boot order to scsi0
-        def _delete_drives_and_set_boot() -> None:
+        # Remove broken drives and create new cloud-init drive
+        def _recreate_cloud_init() -> None:
             params = {"boot": "order=scsi0"}
-            if drives_to_remove:
-                params["delete"] = ",".join(drives_to_remove)
+            
+            # Remove broken drives
+            if broken_drives:
+                params["delete"] = ",".join(broken_drives)
+            
+            # Create new cloud-init drive on local-lvm (or local if that's what template used)
+            # Use the same storage as the template's cloud-init drive
+            if broken_drives:
+                old_drive = config.get(broken_drives[0], "")
+                # Extract storage from old drive (e.g., "local:105/vm-105-cloudinit.qcow2" -> "local")
+                storage = old_drive.split(":")[0] if ":" in old_drive else "local"
+            else:
+                storage = "local"
+            
+            # Create new cloud-init drive: storage:vm-VMID-cloudinit,media=cdrom
+            params["ide2"] = f"{storage}:vm-{vmid}-cloudinit,media=cdrom"
+            
             self._get_client().nodes(node).qemu(vmid).config.post(**params)
         
-        await self._call(_delete_drives_and_set_boot)
+        await self._call(_recreate_cloud_init)
         
         log.info(
-            "pve_runner.cloud_init_removed vmid=%s drives=%s boot=scsi0",
+            "pve_runner.cloud_init_recreated vmid=%s boot=scsi0 ide2=local:vm-%s-cloudinit",
             vmid,
-            drives_to_remove,
+            vmid,
         )
 
     async def get_vm_state(self, vmid: int, node: str) -> VmState:
