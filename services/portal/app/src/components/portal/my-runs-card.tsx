@@ -126,22 +126,28 @@ export function MyRunsCard({
             className="mt-2 flex flex-wrap items-center gap-1"
             data-testid="my-runs-filter"
           >
-            {FILTER_OPTIONS.map((opt) => (
-              <button
-                key={opt}
-                type="button"
-                onClick={() => setStatusFilter(opt)}
-                data-active={statusFilter === opt ? "true" : "false"}
-                data-testid={`my-runs-filter-${opt}`}
-                className={
-                  statusFilter === opt
-                    ? "rounded bg-primary/15 px-2 py-0.5 text-xs text-primary ring-1 ring-primary/30"
-                    : "rounded bg-secondary/40 px-2 py-0.5 text-xs text-secondary-foreground hover:bg-secondary"
-                }
-              >
-                {opt}
-              </button>
-            ))}
+            {FILTER_OPTIONS.map((opt) => {
+              const count =
+                opt === "all"
+                  ? items.length
+                  : items.filter((r) => r.status === opt).length;
+              return (
+                <button
+                  key={opt}
+                  type="button"
+                  onClick={() => setStatusFilter(opt)}
+                  data-active={statusFilter === opt ? "true" : "false"}
+                  data-testid={`my-runs-filter-${opt}`}
+                  className={
+                    statusFilter === opt
+                      ? "rounded bg-primary/15 px-2 py-0.5 text-xs text-primary ring-1 ring-primary/30"
+                      : "rounded bg-secondary/40 px-2 py-0.5 text-xs text-secondary-foreground hover:bg-secondary"
+                  }
+                >
+                  {opt} ({count})
+                </button>
+              );
+            })}
           </div>
         </div>
         <Button variant="ghost" size="icon" onClick={load} aria-label="Refresh">
@@ -163,7 +169,7 @@ export function MyRunsCard({
               : `No runs match the ${statusFilter} filter.`}
           </div>
         )}
-        <ul className="divide-y divide-border">
+        <ul className="divide-y divide-border max-h-96 overflow-y-auto">
           {filtered.map((r) => {
             const isPicked = r.run_id === pickedRunId;
             return (

@@ -157,6 +157,11 @@ export function OperatorConsoleCard() {
   }, [recentlyStopped]);
 
   async function stop(id: number) {
+    // Q25-P1: confirm before force-stopping a live drill.
+    const confirmed = window.confirm(
+      `Force-stop drill #${id}? This will immediately kill all running VMs.`,
+    );
+    if (!confirmed) return;
     setPending(id);
     setError(null);
     setSuccess(null);
@@ -177,6 +182,11 @@ export function OperatorConsoleCard() {
   }
 
   async function reset(id: number) {
+    // Q25-P1: confirm before resetting a drill.
+    const confirmed = window.confirm(
+      `Reset drill #${id}? This will restart the drill from the beginning.`,
+    );
+    if (!confirmed) return;
     setPending(id);
     // Q23-B6: clear any stale success banner from a previous
     // inject. Pre-fix, hitting Reset right after an Inject left

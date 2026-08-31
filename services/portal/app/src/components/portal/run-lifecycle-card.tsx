@@ -117,6 +117,9 @@ const TERMINAL_STATUSES = new Set([
   "stopped",
   "failed",
   "timeout",
+  "succeeded", // Q25: the wire status for a cleanly-finished drill; without
+               // this the card treats succeeded as live and shows Cancel/Stop
+               // buttons, and hides the post-run Restart/Save-as-template block.
 ]);
 
 export interface RunAsset {
@@ -294,6 +297,11 @@ export function RunLifecycleCard({
 
   async function onCancel() {
     if (run === null || !canCancelThis) return;
+    // Q25-P1: confirm before killing a live drill.
+    const confirmed = window.confirm(
+      `Cancel drill #${run.run_id}? This will stop all running VMs and mark the drill as cancelled.`,
+    );
+    if (!confirmed) return;
     setLoading(true);
     setError(null);
     try {
@@ -324,6 +332,11 @@ export function RunLifecycleCard({
    */
   async function onRestart() {
     if (run === null || scenario === null) return;
+    // Q25-P1: confirm before starting a new drill (allocates new VMs).
+    const confirmed = window.confirm(
+      `Restart drill with scenario "${scenario.name}"? A new run will be created with fresh VMs.`,
+    );
+    if (!confirmed) return;
     setLoading(true);
     setError(null);
     setErrorKind(null);
@@ -400,6 +413,11 @@ export function RunLifecycleCard({
    */
   async function onStop() {
     if (run === null || !canStop || !hasLiveRun) return;
+    // Q25-P1: confirm before force-stopping a live drill.
+    const confirmed = window.confirm(
+      `Force-stop drill #${run.run_id}? This will immediately kill all running VMs.`,
+    );
+    if (!confirmed) return;
     setLoading(true);
     setError(null);
     // Optimistic state.
