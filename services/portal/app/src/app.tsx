@@ -257,17 +257,18 @@ export default function App() {
                 );
               case "observe":
                 return (
-                  <>
+                  <div className="grid grid-cols-1 gap-6 lg:grid-cols-[280px_1fr]">
                     <MyRunsCard
                       meRole={me.role}
                       pickedRunId={pickedRun?.run_id ?? null}
                       onPick={setPickedRun}
+                      compact
                     />
                     <DrillConsole
                       pickedRunId={pickedRun?.run_id ?? null}
                       scenarioName={pickedScenario?.title ?? pickedScenario?.name}
                     />
-                  </>
+                  </div>
                 );
               case "admin":
                 return (

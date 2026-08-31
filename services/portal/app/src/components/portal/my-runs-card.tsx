@@ -80,10 +80,12 @@ export function MyRunsCard({
   meRole,
   pickedRunId,
   onPick,
+  compact = false,
 }: {
   meRole: Role;
   pickedRunId: number | null;
   onPick: (r: RunRow) => void;
+  compact?: boolean;
 }) {
   const [items, setItems] = useState<RunRow[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -195,16 +197,18 @@ export function MyRunsCard({
   }, [items, statusFilter]);
 
   return (
-    <Card>
-      <CardHeader className="flex-row items-center justify-between space-y-0">
+    <Card className={compact ? "h-full" : ""}>
+      <CardHeader className={compact ? "px-3 py-2" : "flex-row items-center justify-between space-y-0"}>
         <div>
-          <CardTitle>{isAllView ? "All runs" : "My runs"}</CardTitle>
-          <CardDescription>
-            {items.length} run{items.length === 1 ? "" : "s"} visible to you ·
-            click one to inspect it
-          </CardDescription>
+          <CardTitle className={compact ? "text-sm" : ""}>{isAllView ? "All runs" : "My runs"}</CardTitle>
+          {!compact && (
+            <CardDescription>
+              {items.length} run{items.length === 1 ? "" : "s"} visible to you ·
+              click one to inspect it
+            </CardDescription>
+          )}
           <div
-            className="mt-2 flex flex-wrap items-center gap-1"
+            className={compact ? "mt-1 flex flex-wrap items-center gap-0.5" : "mt-2 flex flex-wrap items-center gap-1"}
             data-testid="my-runs-filter"
           >
             {FILTER_OPTIONS.map((opt) => {
@@ -223,10 +227,10 @@ export function MyRunsCard({
                   disabled={isEmpty}
                   className={
                     statusFilter === opt
-                      ? "rounded bg-primary/15 px-2 py-0.5 text-xs text-primary ring-1 ring-primary/30"
+                      ? "rounded bg-primary/15 px-1.5 py-0.25 text-[10px] text-primary ring-1 ring-primary/30"
                       : isEmpty
-                        ? "rounded bg-secondary/10 px-2 py-0.5 text-xs text-muted-foreground/40 cursor-not-allowed"
-                        : "rounded bg-secondary/40 px-2 py-0.5 text-xs text-secondary-foreground hover:bg-secondary"
+                        ? "rounded bg-secondary/10 px-1.5 py-0.25 text-[10px] text-muted-foreground/40 cursor-not-allowed"
+                        : "rounded bg-secondary/40 px-1.5 py-0.25 text-[10px] text-secondary-foreground hover:bg-secondary"
                   }
                 >
                   {opt} ({count})
@@ -255,7 +259,7 @@ export function MyRunsCard({
         )}
         <ul
           ref={listRef}
-          className="divide-y divide-border max-h-96 overflow-y-auto"
+          className={compact ? "divide-y divide-border max-h-[calc(100vh-200px)] overflow-y-auto" : "divide-y divide-border max-h-96 overflow-y-auto"}
           aria-live="polite"
         >
           {filtered.map((r) => {
@@ -298,8 +302,8 @@ export function MyRunsCard({
                       </div>
                     </div>
 
-                    {/* Q27: inline action buttons */}
-                    {isSelected && (
+                    {/* Q27: inline action buttons - hidden in compact mode */}
+                    {!compact && isSelected && (
                       <div
                         className="flex items-center gap-1 ml-2"
                         onClick={(e) => e.stopPropagation()}
