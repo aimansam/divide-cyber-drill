@@ -28,33 +28,6 @@ import {
   RotateCcw,
   Siren,
 } from "lucide-react";
-
-/**
- * Q23: relative-time formatter for run rows.
- *
- * Mirrors the pattern set by Q21 in ``audit-explorer-card.tsx``
- * and ``global-audit-card.tsx`` so the operator console reads
- * consistently with the audit panels on the same admin tab.
- *
- * Buckets:
- *   * < 60s   -> "Ns ago"
- *   * < 60m   -> "Nm ago"
- *   * < 24h   -> "Nh ago"
- *   * else    -> locale string fallback
- */
-function formatRelative(iso: string | null | undefined): string {
-  if (!iso) return "—";
-  const t = Date.parse(iso);
-  if (Number.isNaN(t)) return iso;
-  const deltaMs = Date.now() - t;
-  const sec = Math.max(0, Math.floor(deltaMs / 1000));
-  if (sec < 60) return `${sec}s ago`;
-  const min = Math.floor(sec / 60);
-  if (min < 60) return `${min}m ago`;
-  const hr = Math.floor(min / 60);
-  if (hr < 24) return `${hr}h ago`;
-  return new Date(t).toLocaleString();
-}
 import {
   Card,
   CardContent,
@@ -67,6 +40,7 @@ import { EmptyState } from "./empty-state";
 import { StatusPill } from "./status-pill";
 import { InjectEventModal } from "./inject-event-modal";
 import { api, ApiError, detailFromError } from "@/lib/api";
+import { formatRelative } from "@/lib/format";
 
 interface LiveRun {
   /**
@@ -270,7 +244,7 @@ export function OperatorConsoleCard() {
           />
         )}
         {!error && !loading && live.length > 0 && (
-          <ul className="divide-y divide-border" data-testid="operator-live-list">
+          <ul className="divide-y divide-border" data-testid="operator-live-list" aria-live="polite">
             {live.map((r) => (
               <li
                 key={r.run_id}

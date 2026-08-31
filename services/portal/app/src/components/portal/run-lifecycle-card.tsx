@@ -55,6 +55,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { api, detailFromError } from "@/lib/api";
+import { formatDuration, formatRelative } from "@/lib/format";
 import { hasRole, type Role } from "@/lib/roles";
 import type { Scenario } from "@/components/portal/scenarios-card";
 
@@ -247,6 +248,9 @@ export function RunLifecycleCard({
       clearPoll();
       return;
     }
+    // Q25: reset cancel reason when switching runs so the operator
+    // doesn't accidentally cancel a different run with a stale reason.
+    setCancelReason("user requested");
     setLoading(true);
     fetchRun(pickedRunId)
       .then((r) => {
@@ -331,7 +335,17 @@ export function RunLifecycleCard({
    * the explicit /drills/{id}/restart endpoint if/when one ships.
    */
   async function onRestart() {
-    if (run === null || scenario === null) return;
+    if (run === null) {
+      setError("No run selected.");
+      return;
+    }
+    if (scenario === null) {
+      // Q25: surface a hint instead of silently returning. Pre-fix,
+      // clicking Restart with no scenario picked did nothing and the
+      // operator had no feedback.
+      setError("Pick a scenario first, then restart.");
+      return;
+    }
     // Q25-P1: confirm before starting a new drill (allocates new VMs).
     const confirmed = window.confirm(
       `Restart drill with scenario "${scenario.name}"? A new run will be created with fresh VMs.`,
@@ -568,12 +582,12 @@ export function RunLifecycleCard({
               )}
               {run.started_at && (
                 <span className="text-muted-foreground">
-                  started {new Date(run.started_at).toLocaleString()}
+                  started {formatRelative(run.started_at)}
                 </span>
               )}
               {run.duration_sec !== null && run.duration_sec !== undefined && (
                 <span className="text-muted-foreground">
-                  duration {Math.round(run.duration_sec)}s
+                  duration {formatDuration(run.duration_sec)}
                 </span>
               )}
               <Button
@@ -673,7 +687,7 @@ export function RunLifecycleCard({
 
             {/* VPN config download — shown while a drill is live or just finished */}
             {run && (
-              <VpnDownloadButton runStatus={run.status} />
+              <VpnDownloadButton runStatus={run.status} endedAt={run.ended_at} />
             )}
 
             {canCancelThis && hasLiveRun && (
@@ -711,7 +725,13 @@ export function RunLifecycleCard({
 // triggers a browser download. The button is self-contained so it
 // can be added to other cards later without prop-drilling.
 
-function VpnDownloadButton({ runStatus }: { runStatus: string }) {
+function VpnDownloadButton({
+  runStatus,
+  endedAt,
+}: {
+  runStatus: string;
+  endedAt?: string | null;
+}) {
   const [downloading, setDownloading] = useState(false);
   const [vpnIp, setVpnIp] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -722,6 +742,17 @@ function VpnDownloadButton({ runStatus }: { runStatus: string }) {
     "failed", "timeout", "cancelled", "canceled",
   ]);
   if (!SHOW_STATUSES.has(runStatus)) return null;
+
+  // Q25: hide VPN card for terminal runs older than 30 minutes.
+  // The VMs are long gone and the config is stale; showing the
+  // button confuses operators browsing old drills.
+  if (endedAt && TERMINAL_STATUSES.has(runStatus)) {
+    const endedMs = Date.parse(endedAt);
+    if (!Number.isNaN(endedMs)) {
+      const ageMin = (Date.now() - endedMs) / 60_000;
+      if (ageMin > 30) return null;
+    }
+  }
 
   async function download() {
     setDownloading(true);

@@ -36,6 +36,7 @@
 import { useEffect, useState } from "react";
 import { Activity, Download, FileText, Loader2, RefreshCw } from "lucide-react";
 import { api, detailFromError, getToken } from "@/lib/api";
+import { formatDuration } from "@/lib/format";
 import { AssetsCard } from "./assets-card";
 import { AuditExplorerCard } from "./audit-explorer-card";
 import { Button } from "@/components/ui/button";
@@ -49,16 +50,6 @@ import type { RunDetail } from "./run-lifecycle-card";
 interface DrillConsoleProps {
   pickedRunId: number | null;
   scenarioName?: string;
-}
-
-function formatDuration(seconds: number): string {
-  if (seconds < 0) return "—";
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  const s = seconds % 60;
-  if (h > 0) return `${h}h ${m}m ${s}s`;
-  if (m > 0) return `${m}m ${s}s`;
-  return `${s}s`;
 }
 
 export function DrillConsole({ pickedRunId, scenarioName }: DrillConsoleProps) {

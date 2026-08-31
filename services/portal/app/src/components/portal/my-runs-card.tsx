@@ -18,7 +18,6 @@
  */
 
 import { useEffect, useMemo, useState } from "react";
-import { Loader2, RefreshCw } from "lucide-react";
 import {
   Card,
   CardContent,
@@ -26,8 +25,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import { api, detailFromError } from "@/lib/api";
+import { formatRelative } from "@/lib/format";
 import { StatusPill } from "./status-pill";
 import type { Role } from "@/lib/roles";
 
@@ -150,13 +149,6 @@ export function MyRunsCard({
             })}
           </div>
         </div>
-        <Button variant="ghost" size="icon" onClick={load} aria-label="Refresh">
-          {loading ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <RefreshCw className="h-4 w-4" />
-          )}
-        </Button>
       </CardHeader>
       <CardContent>
         {error && <div className="text-sm text-destructive">{error}</div>}
@@ -169,7 +161,7 @@ export function MyRunsCard({
               : `No runs match the ${statusFilter} filter.`}
           </div>
         )}
-        <ul className="divide-y divide-border max-h-96 overflow-y-auto">
+        <ul className="divide-y divide-border max-h-96 overflow-y-auto" aria-live="polite">
           {filtered.map((r) => {
             const isPicked = r.run_id === pickedRunId;
             return (
@@ -199,7 +191,7 @@ export function MyRunsCard({
                     <StatusPill status={r.status} />
                     {r.started_at ? (
                       <span className="text-xs text-muted-foreground">
-                        {new Date(r.started_at).toLocaleString()}
+                        {formatRelative(r.started_at)}
                       </span>
                     ) : null}
                   </div>
