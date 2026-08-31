@@ -98,6 +98,10 @@ class AuditAction(str, enum.Enum):
     # and the PVE row was released. Distinct from asset.orphaned
     # so operators can answer "did this orphan ever get resolved?".
     ASSET_CLEANED = "asset.cleaned"
+    # Q26: DB asset.status synced with PVE actual state. Written
+    # when the sync endpoint detects drift between what we think
+    # the VM is doing and what PVE reports.
+    ASSET_STATUS_SYNCED = "asset.status_synced"
     # F5: runner logged the planting intent for a flag
     # declared in spec.flags[]. The actual filesystem write
     # happens via cloud-init user_data (see docs/F5-SCORING.md);

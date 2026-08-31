@@ -17,7 +17,7 @@
  */
 
 import { useEffect, useState } from "react";
-import { Clipboard, ClipboardCheck, Server } from "lucide-react";
+import { Clipboard, ClipboardCheck, RefreshCw, Server, CheckCircle2, AlertCircle, XCircle } from "lucide-react";
 import {
   Card,
   CardContent,
@@ -36,6 +36,16 @@ interface RunPayload {
   assets?: RunAsset[];
 }
 
+interface AssetSyncStatus {
+  asset_id: number;
+  db_status: string;
+  pve_status: string;
+  synced: boolean;
+  drifted: boolean;
+  cleaned_at: string | null;
+  pve_ip: string | null;
+}
+
 export function AssetsCard({
   pickedRunId,
   compact = false,
@@ -47,6 +57,9 @@ export function AssetsCard({
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [copiedVmid, setCopiedVmid] = useState<number | null>(null);
+  // Q26: per-asset sync state. Keyed by asset_id.
+  const [syncStatuses, setSyncStatuses] = useState<Record<number, AssetSyncStatus>>({});
+  const [syncingAssetId, setSyncingAssetId] = useState<number | null>(null);
 
   useEffect(() => {
     if (pickedRunId === null) {
@@ -97,6 +110,29 @@ export function AssetsCard({
       // Don't toast — the button just stays in its idle state. The
       // user can try again; clipboard permissions are flaky.
       void e;
+    }
+  }
+
+  // Q26: sync a single asset's status with PVE.
+  async function syncAsset(assetId: number) {
+    if (pickedRunId === null) return;
+    setSyncingAssetId(assetId);
+    try {
+      const status = await api.post<AssetSyncStatus>(
+        `/api/v1/drills/${pickedRunId}/assets/${assetId}/sync-status`,
+      );
+      setSyncStatuses((prev) => ({ ...prev, [assetId]: status }));
+      // If drifted, refresh the asset list to show updated status.
+      if (status.drifted) {
+        const r = await api.get<RunPayload>(`/api/v1/drills/${pickedRunId}`);
+        setAssets(r.assets ?? []);
+      }
+    } catch (e: unknown) {
+      // Don't toast — the button stays in its idle state. Operator
+      // can retry. The error is visible in the audit log.
+      void e;
+    } finally {
+      setSyncingAssetId(null);
     }
   }
 
@@ -168,6 +204,17 @@ export function AssetsCard({
                   <span className="font-mono text-xs text-muted-foreground">
                     {a.status ?? "?"}
                   </span>
+                  {/* Q26: sync status badge */}
+                  {syncStatuses[a.asset_id ?? 0] && (() => {
+                    const s = syncStatuses[a.asset_id ?? 0];
+                    if (s.pve_status === "missing") {
+                      return <span title="VM deleted from PVE"><XCircle className="h-3.5 w-3.5 text-red-400" /></span>;
+                    }
+                    if (s.drifted) {
+                      return <span title="DB status differs from PVE"><AlertCircle className="h-3.5 w-3.5 text-amber-400" /></span>;
+                    }
+                    return <span title="Synced with PVE"><CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" /></span>;
+                  })()}
                   <Button
                     variant="ghost"
                     size="icon"
@@ -183,6 +230,16 @@ export function AssetsCard({
                     ) : (
                       <Clipboard className="h-4 w-4" />
                     )}
+                  </Button>
+                  {/* Q26: sync button */}
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    aria-label="sync status with PVE"
+                    onClick={() => syncAsset(a.asset_id ?? 0)}
+                    disabled={syncingAssetId === a.asset_id}
+                  >
+                    <RefreshCw className={`h-3.5 w-3.5 ${syncingAssetId === a.asset_id ? "animate-spin" : ""}`} />
                   </Button>
                 </div>
               </li>

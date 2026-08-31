@@ -24,6 +24,8 @@ table is the source of truth for ``docs/USER-REQUIREMENTS.md`` §2.
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -588,6 +590,113 @@ async def get_drill(
             }
             for a in run.assets
         ],
+    }
+
+
+@router.post(
+    "/{run_id}/assets/{asset_id}/sync-status",
+    summary="Sync asset status with actual PVE state",
+    dependencies=[Depends(require_role(
+        Role.ADMIN, Role.LEAD,
+    ))],
+)
+async def sync_asset_status(
+    run_id: int,
+    asset_id: int,
+    session: AsyncSession = Depends(get_session),
+    token=Depends(current_token),
+) -> dict:
+    """Query PVE for the actual VM state and update the DB if drifted.
+
+    Returns ``{ db_status, pve_status, synced, cleaned_at }`` where
+    ``synced`` is True if the DB already matched PVE (no write), False
+    if we updated the row.
+
+    Operators use this to answer "is this VM really running or did it
+    die/crash/get-deleted outside our control?".
+    """
+    # Q26: fetch the asset row, verify it belongs to this run.
+    asset = await session.get(db_models.Asset, asset_id)
+    if asset is None:
+        raise HTTPException(status_code=404, detail=f"asset id={asset_id} not found")
+    if asset.run_id != run_id:
+        raise HTTPException(
+            status_code=404,
+            detail=f"asset id={asset_id} does not belong to run id={run_id}",
+        )
+    # If no VMID was ever allocated (clone failed), nothing to sync.
+    if asset.pve_vmid is None or asset.pve_node is None:
+        return {
+            "asset_id": asset.id,
+            "db_status": asset.status.value,
+            "pve_status": None,
+            "synced": True,
+            "cleaned_at": asset.cleaned_at.isoformat() if asset.cleaned_at else None,
+            "note": "no VMID allocated; nothing to sync",
+        }
+
+    # Q26: call PVE for the actual state.
+    runner = _get_runner()
+    try:
+        state = await runner._adapter.get_vm_state(asset.pve_vmid, asset.pve_node)
+        pve_status = state.status  # "running" or "stopped"
+        pve_missing = False
+    except Exception as e:
+        # PVE reports missing VM as HTTP 500 with "does not exist" in body.
+        # real_adapter.get_vm_state raises on non-200; treat as missing.
+        err_str = str(e).lower()
+        if "does not exist" in err_str or "not found" in err_str or "500" in str(e):
+            pve_status = "missing"
+            pve_missing = True
+        else:
+            raise HTTPException(
+                status_code=502,
+                detail=f"PVE query failed: {e}",
+            )
+
+    # Q26: map PVE status to AssetStatus.
+    pve_to_asset = {
+        "running": db_models.AssetStatus.RUNNING,
+        "stopped": db_models.AssetStatus.STOPPED,
+        "missing": db_models.AssetStatus.STOPPED,  # treat missing as stopped
+    }
+    mapped_status = pve_to_asset.get(pve_status)
+
+    # Q26: detect drift and update if needed.
+    drifted = mapped_status is not None and asset.status != mapped_status
+    if drifted:
+        old_status = asset.status
+        asset.status = mapped_status
+        # If PVE says missing, stamp cleaned_at so the janitor skips it.
+        if pve_missing and asset.cleaned_at is None:
+            asset.cleaned_at = datetime.now(timezone.utc)
+        await session.flush()
+
+        # Q26: write audit row.
+        from app.db.models import AuditAction
+        audit = db_models.AuditLog(
+            run_id=run_id,
+            asset_id=asset.id,
+            action=AuditAction.ASSET_STATUS_SYNCED,
+            actor=token.sub,
+            detail={
+                "old_status": old_status.value,
+                "new_status": mapped_status.value,
+                "pve_status": pve_status,
+                "pve_missing": pve_missing,
+            },
+        )
+        session.add(audit)
+        await session.flush()
+
+    return {
+        "asset_id": asset.id,
+        "db_status": asset.status.value,
+        "pve_status": pve_status,
+        "synced": not drifted,
+        "drifted": drifted,
+        "cleaned_at": asset.cleaned_at.isoformat() if asset.cleaned_at else None,
+        "pve_ip": state.ip if not pve_missing else None,
     }
 
 
