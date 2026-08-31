@@ -217,18 +217,16 @@ class RealProxmoxAdapter(ProxmoxAdapter):
         #   * Disk resize goes via ``PUT /qemu/{vmid}/resize`` with
         #     ``disk=scsi0&size=+XG`` -- ``config.post`` rejects ``disk``
         #     on PVE 9 with ``property is not defined in schema``.
-        clone_params: dict[str, Any] = {"name": spec.name}
-        if spec.new_vmid is not None:
-            clone_params["newid"] = spec.new_vmid
+        
+        # Allocate VMID BEFORE cloning to ensure we know the exact VMID
+        new_vmid = int(spec.new_vmid) if spec.new_vmid is not None else await self.allocate_vmid()
+        
+        clone_params: dict[str, Any] = {"name": spec.name, "newid": new_vmid}
 
         def _do() -> None:
             self._get_client().nodes(node).qemu(spec.source_vmid).clone.post(**clone_params)
 
         await self._call(_do)
-        # If we passed newid, we know it; otherwise allocate via nextid.
-        new_vmid = (
-            int(spec.new_vmid) if spec.new_vmid is not None else await self.allocate_vmid()
-        )
 
         config_overrides: dict[str, Any] = {}
         if spec.cores is not None:
