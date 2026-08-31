@@ -480,6 +480,30 @@ class RealProxmoxAdapter(ProxmoxAdapter):
 
         return await self._call(_do)
 
+    async def create_sdn_vnet(self, bridge: str, zone: str = "divide") -> None:
+        """Create an SDN VNet in the specified zone.
+
+        This ensures the bridge exists in the SDN zone before the runner
+        tries to use it. Idempotent: if the VNet already exists, this is
+        a no-op.
+        """
+        def _do() -> None:
+            client = self._get_client()
+            # Check if VNet already exists
+            vnets = client.cluster.sdn.vnets.get()
+            existing = [v["vnet"] for v in vnets if v.get("zone") == zone]
+            if bridge in existing:
+                return  # Already exists, no-op
+            
+            # Create the VNet
+            client.cluster.sdn.vnets.post(
+                vnet=bridge,
+                zone=zone,
+            )
+            log.info("pve_runner.sdn_vnet_created bridge=%s zone=%s", bridge, zone)
+
+        await self._call(_do)
+
 
     async def create_bridge(self, spec: NetworkSpec) -> None:
         """Create a Linux bridge on every node in the cluster.

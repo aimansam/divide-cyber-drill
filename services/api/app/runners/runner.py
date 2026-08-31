@@ -124,6 +124,21 @@ class Runner:
         
         # Query SDN zone for available bridges instead of hardcoding
         sdn_bridges = await self._adapter.get_sdn_bridges(zone="divide")
+        
+        # Auto-create SDN VNets if they don't exist (permanent fix)
+        if not sdn_bridges:
+            log.warning("runner.networks.no_sdn_bridges auto-creating VNets")
+            for idx, net_spec in enumerate(networks_spec):
+                bridge = f"vmbr{100 + idx}"
+                await self._adapter.create_sdn_vnet(bridge=bridge, zone="divide")
+            
+            # Wait for PVE to process the VNet creation
+            import asyncio
+            await asyncio.sleep(2)
+            
+            # Re-query to get the newly created bridges
+            sdn_bridges = await self._adapter.get_sdn_bridges(zone="divide")
+        
         if not sdn_bridges:
             raise RunnerError("no SDN bridges found in 'divide' zone -- run wizard Step 0")
         
@@ -376,23 +391,15 @@ class Runner:
                 run.id, planted_count, len(flags_spec),
             )
 
-        # 5. All assets up — flip run to SUCCEEDED.
-        run.status = RunStatus.SUCCEEDED
-        run.ended_at = datetime.now(timezone.utc)
-        # F3: tear down bridges we created. The drill is over; the
-        # topology it was building is gone. Best-effort, matching
-        # the failure path above. Real-PVE remove_bridge is no-op;
-        # mock removes them.
-        for br in bridges_created:
-            try:
-                await self._adapter.remove_bridge(br)
-            except Exception as exc:  # noqa: BLE001
-                log.warning(
-                    "runner.networks.remove_bridge_failed bridge=%s err=%s",
-                    br, exc,
-                )
-        # Q17: tear down the spawned VMs too. The drill is over;
-        inc_run_terminal(outcome="succeeded", adapter=_adapter_label(self._adapter))
+        # 5. All assets up — keep run in RUNNING state.
+        # The watchdog will timeout after drill_timeout_min, or the user
+        # can manually stop/cancel the drill.
+        # Bridges stay active for the duration of the drill.
+        # They will be cleaned up by:
+        # 1. Watchdog timeout (fires after drill_timeout_min)
+        # 2. Manual stop/cancel by user
+        # 3. Failure path above (already handled)
+        # Run stays in RUNNING state until watchdog timeout or manual stop.
         await self._audit(
             session,
             action=AuditAction.RUN_COMPLETED,
@@ -545,7 +552,6 @@ class Runner:
                 asset.status = AssetStatus.STOPPED
 
         run.status = RunStatus.SUCCEEDED
-        run.ended_at = datetime.now(timezone.utc)
         inc_run_terminal(outcome="succeeded", adapter=_adapter_label(self._adapter))
         # Q17: distinguish operator-initiated stop from trainee
         # cancel. ``/stop`` writes RUN_STOPPED; ``/cancel`` still

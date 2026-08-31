@@ -136,6 +136,13 @@ class MockProxmoxAdapter(ProxmoxAdapter):
         # Return vmbr103 and vmbr104 as if they're in the divide zone
         return ["vmbr103", "vmbr104"]
 
+    async def create_sdn_vnet(self, bridge: str, zone: str = "divide") -> None:
+        """Mock: track SDN VNet creation."""
+        if not hasattr(self, 'sdn_vnets'):
+            self.sdn_vnets = []
+        if bridge not in self.sdn_vnets:
+            self.sdn_vnets.append(bridge)
+
     async def attach_network(
         self, vmid: int, node: str, bridge: str, nic_id: int
     ) -> None:
