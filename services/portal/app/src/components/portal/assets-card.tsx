@@ -17,7 +17,7 @@
  */
 
 import { useEffect, useState } from "react";
-import { Clipboard, ClipboardCheck, RefreshCw, Server, CheckCircle2, AlertCircle, XCircle } from "lucide-react";
+import { Clipboard, ClipboardCheck, RefreshCw, Server, CheckCircle2, AlertCircle, XCircle, Trash2 } from "lucide-react";
 import {
   Card,
   CardContent,
@@ -63,6 +63,9 @@ export function AssetsCard({
   const [syncingAssetId, setSyncingAssetId] = useState<number | null>(null);
   const [syncingAll, setSyncingAll] = useState(false);
   const [syncError, setSyncError] = useState<string | null>(null);
+  // Q27: per-asset delete state.
+  const [deletingAssetId, setDeletingAssetId] = useState<number | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   useEffect(() => {
     if (pickedRunId === null) {
@@ -168,6 +171,43 @@ export function AssetsCard({
     return () => window.clearInterval(id);
   }, [pickedRunId, assets.length]);
 
+  // Q27: delete a single asset's VM from PVE.
+  async function deleteAsset(assetId: number) {
+    if (pickedRunId === null) return;
+    const confirmed = window.confirm(
+      `Delete VM ${assetId} from PVE? This cannot be undone.`,
+    );
+    if (!confirmed) return;
+
+    setDeletingAssetId(assetId);
+    setDeleteError(null);
+    try {
+      const res = await api.post<{pve_vmid: number; pve_node: string; cleaned_at: string}>(`/runs/${pickedRunId}/assets/${assetId}/delete`, {
+        confirm: true,
+      });
+      // Q27: update sync status to show as cleaned.
+      setSyncStatuses((prev) => ({
+        ...prev,
+        [assetId]: {
+          asset_id: assetId,
+          db_status: "stopped",
+          pve_vmid: res.pve_vmid,
+          pve_node: res.pve_node,
+          synced: true,
+          drifted: false,
+          pve_status: "stopped",
+          cleaned_at: res.cleaned_at,
+          pve_ip: null,
+          last_synced_at: new Date().toISOString(),
+        },
+      }));
+    } catch (e) {
+      setDeleteError(detailFromError(e));
+    } finally {
+      setDeletingAssetId(null);
+    }
+  }
+
   // Q26: format "synced X ago" for display.
   function formatSyncAgo(iso: string): string {
     const t = Date.parse(iso);
@@ -221,6 +261,12 @@ export function AssetsCard({
         {syncError && (
           <div className="mb-2 rounded-md border border-amber-700 bg-amber-950/40 px-3 py-2 text-sm text-amber-200">
             {syncError}
+          </div>
+        )}
+        {/* Q27: delete error display */}
+        {deleteError && (
+          <div className="mb-2 rounded-md border border-red-700 bg-red-950/40 px-3 py-2 text-sm text-red-200">
+            {deleteError}
           </div>
         )}
         {!loading && !error && assets.length === 0 && pickedRunId !== null && (
@@ -316,6 +362,16 @@ export function AssetsCard({
                     disabled={syncingAssetId === a.asset_id}
                   >
                     <RefreshCw className={`h-3.5 w-3.5 ${syncingAssetId === a.asset_id ? "animate-spin" : ""}`} />
+                  </Button>
+                  {/* Q27: delete button */}
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    aria-label="delete VM from PVE"
+                    onClick={() => deleteAsset(a.asset_id ?? 0)}
+                    disabled={deletingAssetId === a.asset_id || !a.pve_vmid}
+                  >
+                    <Trash2 className={`h-3.5 w-3.5 ${deletingAssetId === a.asset_id ? "animate-pulse" : ""}`} />
                   </Button>
                 </div>
               </li>

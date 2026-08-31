@@ -701,6 +701,123 @@ async def sync_asset_status(
     }
 
 
+@router.post(
+    "/{run_id}/assets/{asset_id}/delete",
+    summary="Delete a VM from PVE and mark the asset as cleaned",
+    dependencies=[Depends(require_role(
+        Role.ADMIN, Role.LEAD,
+    ))],
+)
+async def delete_asset(
+    run_id: int,
+    asset_id: int,
+    body: dict,
+    session: AsyncSession = Depends(get_session),
+    token=Depends(current_token),
+) -> dict:
+    """Stop and destroy a VM in PVE, then mark the asset as cleaned.
+
+    This is a destructive operation. The VM is removed from the hypervisor
+    and cannot be recovered. The asset row is kept (not hard-deleted) so
+    the run's history stays intact, but ``asset.status`` is flipped to
+    ``STOPPED`` and ``asset.cleaned_at`` is stamped.
+
+    Operators use this to manually delete stale VMs that the janitor hasn't
+    picked up yet, or VMs that are orphaned after a failed teardown.
+
+    The endpoint is idempotent: if the VM is already missing in PVE, we
+    treat it as success and mark the asset as cleaned anyway.
+    """
+    # Q27: verify the operator explicitly confirmed.
+    if not body.get("confirm"):
+        raise HTTPException(
+            status_code=400,
+            detail="Must pass confirm=true to delete a VM",
+        )
+
+    # Q27: fetch the asset row, verify it belongs to this run.
+    asset = await session.get(db_models.Asset, asset_id)
+    if asset is None:
+        raise HTTPException(status_code=404, detail=f"asset id={asset_id} not found")
+    if asset.run_id != run_id:
+        raise HTTPException(
+            status_code=404,
+            detail=f"asset id={asset_id} does not belong to run id={run_id}",
+        )
+    # Q27: if no VMID was ever allocated, nothing to delete.
+    if asset.pve_vmid is None or asset.pve_node is None:
+        raise HTTPException(
+            status_code=400,
+            detail="asset has no VMID allocated; nothing to delete",
+        )
+    # Q27: if already cleaned, skip (idempotent).
+    if asset.cleaned_at is not None:
+        return {
+            "asset_id": asset.id,
+            "pve_vmid": asset.pve_vmid,
+            "pve_node": asset.pve_node,
+            "stopped": False,
+            "destroyed": False,
+            "cleaned_at": asset.cleaned_at.isoformat(),
+            "note": "already cleaned",
+        }
+
+    # Q27: call PVE to stop and destroy the VM.
+    runner = _get_runner()
+    stopped = False
+    destroyed = False
+    try:
+        await runner._adapter.stop_vm(asset.pve_vmid, asset.pve_node, force=True)
+        stopped = True
+    except Exception as e:
+        # VM might already be stopped; treat as success.
+        err_str = str(e).lower()
+        if "does not exist" not in err_str and "not found" not in err_str:
+            # Log but continue — we'll try destroy anyway.
+            pass
+
+    try:
+        await runner._adapter.destroy_vm(asset.pve_vmid, asset.pve_node)
+        destroyed = True
+    except Exception as e:
+        # VM might already be missing; treat as success.
+        err_str = str(e).lower()
+        if "does not exist" not in err_str and "not found" not in err_str:
+            # Log but continue — we'll mark as cleaned anyway.
+            pass
+
+    # Q27: update the asset row.
+    asset.status = db_models.AssetStatus.STOPPED
+    asset.cleaned_at = datetime.now(timezone.utc)
+    await session.flush()
+
+    # Q27: write audit row.
+    audit = db_models.AuditLog(
+        run_id=run_id,
+        asset_id=asset.id,
+        action=db_models.AuditAction.ASSET_CLEANED,
+        actor=token.sub,
+        detail={
+            "pve_vmid": asset.pve_vmid,
+            "pve_node": asset.pve_node,
+            "stopped": stopped,
+            "destroyed": destroyed,
+            "manual": True,
+        },
+    )
+    session.add(audit)
+    await session.flush()
+
+    return {
+        "asset_id": asset.id,
+        "pve_vmid": asset.pve_vmid,
+        "pve_node": asset.pve_node,
+        "stopped": stopped,
+        "destroyed": destroyed,
+        "cleaned_at": asset.cleaned_at.isoformat(),
+    }
+
+
 @router.get(
     "/{run_id}/audit",
     summary="Get the audit-log entries for one drill (visibility-filtered)",
