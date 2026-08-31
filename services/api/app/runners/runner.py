@@ -121,9 +121,15 @@ class Runner:
         # collide with operator-managed vmbr0 / vmbr1.
         networks_spec = spec.get("networks") or []
         bridges_by_name: dict[str, str] = {}
+        
+        # Query SDN zone for available bridges instead of hardcoding
+        sdn_bridges = await self._adapter.get_sdn_bridges(zone="divide")
+        if not sdn_bridges:
+            raise RunnerError("no SDN bridges found in 'divide' zone -- run wizard Step 0")
+        
         for idx, net_spec in enumerate(networks_spec):
-            # 100+offset keeps us out of PVE's well-known vmbr0..vmbr99.
-            bridge = f"vmbr{100 + idx}"
+            # Use bridges from SDN zone, cycling if we have more networks than bridges
+            bridge = sdn_bridges[idx % len(sdn_bridges)]
             bridges_by_name[net_spec["name"]] = bridge
             await self._adapter.create_bridge(
                 NetworkSpec(

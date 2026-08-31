@@ -131,6 +131,11 @@ class MockProxmoxAdapter(ProxmoxAdapter):
         self.bridges_removed.append(bridge)
         self._bridges.discard(bridge)
 
+    async def get_sdn_bridges(self, zone: str = "divide") -> list[str]:
+        """Return mock SDN bridges for testing."""
+        # Return vmbr103 and vmbr104 as if they're in the divide zone
+        return ["vmbr103", "vmbr104"]
+
     async def attach_network(
         self, vmid: int, node: str, bridge: str, nic_id: int
     ) -> None:

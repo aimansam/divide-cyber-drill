@@ -451,6 +451,21 @@ class RealProxmoxAdapter(ProxmoxAdapter):
 
     # --- F3 multi-VM networks -----------------------------------------
 
+
+    async def get_sdn_bridges(self, zone: str = "divide") -> list[str]:
+        """Query SDN VNets in the specified zone and return bridge names.
+
+        This allows the runner to use bridges that are already configured
+        in the SDN zone instead of hardcoding bridge names.
+        """
+        def _do() -> list[str]:
+            client = self._get_client()
+            vnets = client.cluster.sdn.vnets.get()
+            return [v["vnet"] for v in vnets if v.get("zone") == zone]
+
+        return await self._call(_do)
+
+
     async def create_bridge(self, spec: NetworkSpec) -> None:
         """Create a Linux bridge on every node in the cluster.
 
