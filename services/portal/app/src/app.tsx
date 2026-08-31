@@ -263,6 +263,7 @@ export default function App() {
                       pickedRunId={pickedRun?.run_id ?? null}
                       onPick={setPickedRun}
                       compact
+                      liveOnly
                     />
                     <DrillConsole
                       pickedRunId={pickedRun?.run_id ?? null}

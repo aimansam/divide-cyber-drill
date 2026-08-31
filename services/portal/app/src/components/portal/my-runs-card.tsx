@@ -81,11 +81,13 @@ export function MyRunsCard({
   pickedRunId,
   onPick,
   compact = false,
+  liveOnly = false,
 }: {
   meRole: Role;
   pickedRunId: number | null;
   onPick: (r: RunRow) => void;
   compact?: boolean;
+  liveOnly?: boolean;
 }) {
   const [items, setItems] = useState<RunRow[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -192,21 +194,26 @@ export function MyRunsCard({
   }
 
   const filtered = useMemo(() => {
-    if (statusFilter === "all") return items;
-    return items.filter((r) => r.status === statusFilter);
-  }, [items, statusFilter]);
+    let result = items;
+    if (liveOnly) {
+      result = result.filter((r) => r.status === "running" || r.status === "pending");
+    }
+    if (statusFilter === "all") return result;
+    return result.filter((r) => r.status === statusFilter);
+  }, [items, statusFilter, liveOnly]);
 
   return (
     <Card className={compact ? "h-full" : ""}>
       <CardHeader className={compact ? "px-3 py-2" : "flex-row items-center justify-between space-y-0"}>
         <div>
-          <CardTitle className={compact ? "text-sm" : ""}>{isAllView ? "All runs" : "My runs"}</CardTitle>
+          <CardTitle className={compact ? "text-sm" : ""}>{liveOnly ? "Live drills" : isAllView ? "All runs" : "My runs"}</CardTitle>
           {!compact && (
             <CardDescription>
               {items.length} run{items.length === 1 ? "" : "s"} visible to you ·
               click one to inspect it
             </CardDescription>
           )}
+          {!liveOnly && (
           <div
             className={compact ? "mt-1 flex flex-wrap items-center gap-0.5" : "mt-2 flex flex-wrap items-center gap-1"}
             data-testid="my-runs-filter"
@@ -238,6 +245,7 @@ export function MyRunsCard({
               );
             })}
           </div>
+          )}
         </div>
       </CardHeader>
       <CardContent>
@@ -250,11 +258,13 @@ export function MyRunsCard({
         )}
         {!error && !loading && filtered.length === 0 && (
           <div className="text-sm italic text-muted-foreground">
-            {statusFilter === "all"
-              ? isAllView
-                ? "No drills on record. Start one from the scenario list."
-                : "You haven't started any drills yet. Pick a scenario above to run one."
-              : `No runs match the ${statusFilter} filter.`}
+            {liveOnly
+              ? "No live drills running right now."
+              : statusFilter === "all"
+                ? isAllView
+                  ? "No drills on record. Start one from the scenario list."
+                  : "You haven't started any drills yet. Pick a scenario above to run one."
+                : `No runs match the ${statusFilter} filter.`}
           </div>
         )}
         <ul
