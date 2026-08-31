@@ -270,8 +270,10 @@ export default function App() {
               case "admin":
                 return (
                   <>
-                    <OperatorConsoleCard />
-                    <PveOpsCard />
+                    <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+                      <OperatorConsoleCard />
+                      <PveOpsCard />
+                    </div>
                     {/* Q21: cross-run audit search. Pinned at the top
                         of the admin tab so it doesn't get buried
                         below the longer scenario + user CRUD cards. */}
