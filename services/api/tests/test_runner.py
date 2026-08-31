@@ -83,26 +83,29 @@ async def test_start_run_creates_run_and_assets(session: AsyncSession) -> None:
     result = await runner.start_run(
         RunRequest(scenario_id=s.id, started_by="alice"), session
     )
-    assert result.status == RunStatus.SUCCEEDED
+    # Run stays in RUNNING state until watchdog timeout or manual stop
+    assert result.status == RunStatus.RUNNING
 
     runs = (await session.execute(select(models.Run))).scalars().all()
     assert len(runs) == 1
     run = runs[0]
-    assert run.status == RunStatus.SUCCEEDED
+    # Run stays in RUNNING state until watchdog timeout or manual stop
+    assert run.status == RunStatus.RUNNING
     assert run.started_by == "alice"
     assert run.started_at is not None
-    assert run.ended_at is not None
-    assert run.duration_sec is not None and run.duration_sec >= 0
+    # ended_at and duration_sec are NULL while run is still active
+    assert run.ended_at is None
+    assert run.duration_sec is None
 
     assets = (await session.execute(select(models.Asset))).scalars().all()
     assert len(assets) == 2
     roles = sorted(a.role for a in assets)
     assert roles == ["red_attacker", "victim_workstation"]
-    # Q17: a successful ``start_run`` now also tears down the
-    # spawned VMs (matches ``stop_run``/``cancel_run`` behaviour
-    # and keeps PVE clean). Assets end up STOPPED, not RUNNING.
+    # Assets stay RUNNING after start_run — VMs are not torn down
+    # immediately. They remain active until watchdog timeout or
+    # manual stop/cancel.
     for a in assets:
-        assert a.status == AssetStatus.STOPPED
+        assert a.status == AssetStatus.RUNNING
         assert a.pve_vmid is not None
         assert a.pve_node == "pve"
         assert a.pve_ip is not None
@@ -126,7 +129,8 @@ async def test_start_run_records_audit_log(session: AsyncSession) -> None:
     actions = [log.action for log in logs]
     assert AuditAction.RUN_STARTED in actions
     assert AuditAction.ASSET_SPAWNED in actions
-    assert AuditAction.RUN_COMPLETED in actions
+    # RUN_COMPLETED is NOT emitted here — run stays RUNNING until
+    # watchdog timeout or manual stop
 
 
 @pytest.mark.asyncio
@@ -148,7 +152,8 @@ async def test_start_run_asset_spawned_audit_records_actor(session: AsyncSession
     result = await runner.start_run(
         RunRequest(scenario_id=s.id, started_by="alice"), session
     )
-    assert result.status == RunStatus.SUCCEEDED
+    # Run stays in RUNNING state until watchdog timeout or manual stop
+    assert result.status == RunStatus.RUNNING
 
     spawn_audits = (
         await session.execute(

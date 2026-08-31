@@ -109,8 +109,36 @@ class Runner:
         if scenario is None:
             raise RunnerError(f"scenario id={req.scenario_id} not found")
 
+        # F7: if template_id is provided, use the template's snapshot
+        # instead of the scenario's live spec. This lets operators
+        # replay a frozen state (assets, flags, networks) rather than
+        # re-deriving from the scenario YAML.
+        if req.template_id is not None:
+            template = (
+                await session.execute(
+                    select(models.Template).where(models.Template.id == req.template_id)
+                )
+            ).scalar_one_or_none()
+            if template is None:
+                raise RunnerError(f"template id={req.template_id} not found")
+            snapshot = template.snapshot or {}
+            assets_spec = snapshot.get("assets") or []
+            if not assets_spec:
+                raise RunnerError("template snapshot has no assets")
+            # Use snapshot networks if present, otherwise fall back to scenario
+            networks_spec_from_snapshot = snapshot.get("networks")
+            log.info(
+                "runner.template.snapshot_used template_id=%s assets=%s",
+                req.template_id, len(assets_spec),
+            )
+        else:
+            snapshot = {}
+            assets_spec = []
+
+        # Load scenario spec for networks/flags if not overridden by template
         spec = scenario.spec.get("spec") or scenario.spec
-        assets_spec = spec.get("assets") or []
+        if not assets_spec:
+            assets_spec = spec.get("assets") or []
         if not assets_spec:
             raise RunnerError("scenario has no assets")
 
@@ -119,7 +147,11 @@ class Runner:
         # each asset to the bridges its ``spec.networks[]`` array names.
         # Bridges are sequential (vmbr100, vmbr101, …) so they don't
         # collide with operator-managed vmbr0 / vmbr1.
-        networks_spec = spec.get("networks") or []
+        # F7: use template snapshot networks if available
+        if req.template_id is not None and networks_spec_from_snapshot is not None:
+            networks_spec = networks_spec_from_snapshot
+        else:
+            networks_spec = spec.get("networks") or []
         bridges_by_name: dict[str, str] = {}
         
         # Query SDN zone for available bridges instead of hardcoding
@@ -351,7 +383,11 @@ class Runner:
         # for free when scenarios author a user_data snippet
         # referencing spec.flags[].id. See docs/F5-SCORING.md §3
         # for the user_data recipe.
-        flags_spec = spec.get("flags") or []
+        # F7: use template snapshot flags if available
+        if req.template_id is not None and snapshot.get("flags") is not None:
+            flags_spec = snapshot.get("flags") or []
+        else:
+            flags_spec = spec.get("flags") or []
         planted_count = 0
         for flag_spec in flags_spec:
             planted_role = flag_spec.get("planted_on_role")
@@ -400,28 +436,8 @@ class Runner:
         # 2. Manual stop/cancel by user
         # 3. Failure path above (already handled)
         # Run stays in RUNNING state until watchdog timeout or manual stop.
-        await self._audit(
-            session,
-            action=AuditAction.RUN_COMPLETED,
-            actor=req.started_by,
-            run_id=run.id,
-            scenario_id=scenario.id,
-            details={"asset_count": len(assets_spec)},
-        )
-        # F8: emit run.completed event (BEFORE the final commit so
-        # the row is part of the same transaction).
-        await _record_event(
-            session,
-            run_id=run.id,
-            kind="run.completed",
-            source="runner",
-            severity=_TS.INFO,
-            payload={
-                "scenario_id": scenario.id,
-                "asset_count": len(assets_spec),
-                "duration_sec": run.duration_sec,
-            },
-        )
+        # No RUN_COMPLETED audit here — that fires when the watchdog
+        # or operator actually stops the drill.
 
         await session.commit()
 
