@@ -9,7 +9,7 @@ import { SignInCard } from "@/components/portal/sign-in-card";
 import { ResetPasswordCard } from "@/components/portal/reset-password-card";
 import { OnboardingWizard } from "@/components/portal/onboarding-wizard";
 import { TopNav, type ViewKey } from "@/components/portal/top-nav";
-import { DashboardCard } from "@/components/portal/dashboard-card";
+import { CommandCenterCard } from "@/components/portal/command-center-card";
 import { DrillConsole } from "@/components/portal/drill-console";
 import { OperatorConsoleCard } from "@/components/portal/operator-console-card";
 import { GlobalAuditCard } from "@/components/portal/global-audit-card";
@@ -153,8 +153,8 @@ export default function App() {
   }
 
   function onPickRunFromDashboard(runId: number) {
-    // The Dashboard's "Recent runs" list jumps the operator
-    // directly into Observe for that run.
+    // Q27: kept for backward compatibility but no longer used by CommandCenterCard.
+    // The Command Center passes the full run row to onPickRun.
     const fake: RunRow = {
       run_id: runId,
       scenario_id: pickedScenario?.id,
@@ -163,6 +163,7 @@ export default function App() {
     setPickedRun(fake);
     setActiveView("observe");
   }
+  void onPickRunFromDashboard; // suppress unused warning
 
   return (
     <ToastHost>
@@ -226,10 +227,14 @@ export default function App() {
             switch (activeView) {
               case "dashboard":
                 return (
-                  <DashboardCard
+                  <CommandCenterCard
                     meRole={me.role}
                     meSub={me.sub}
-                    onPickRun={onPickRunFromDashboard}
+                    onNavigate={(view) => setActiveView(view)}
+                    onPickRun={(run) => {
+                      setPickedRun({ run_id: run.run_id, status: run.status });
+                      setActiveView("observe");
+                    }}
                   />
                 );
               case "operate":

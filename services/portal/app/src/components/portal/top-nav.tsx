@@ -57,7 +57,7 @@ interface TabSpec {
 const TABS: readonly TabSpec[] = [
   {
     key: "dashboard",
-    label: "Dashboard",
+    label: "Command Center",
     icon: Gauge,
     roles: [], // all roles
   },
