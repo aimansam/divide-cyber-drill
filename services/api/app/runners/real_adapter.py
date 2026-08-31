@@ -362,18 +362,19 @@ class RealProxmoxAdapter(ProxmoxAdapter):
         await self._call(_do)
 
     async def _fix_cloud_init_storage(self, vmid: int, node: str) -> None:
-        """Q27: Move cloud-init drives from `local` to `local-lvm` storage.
+        """Q27: Remove cloud-init drives from cloned VMs.
         
         PVE clones copy disk references as-is. If the template has cloud-init
         on `local` storage (which doesn't support `images` content type), the
-        cloned VM won't start. This method detects cloud-init drives on wrong
-        storage and moves them to `local-lvm`.
+        cloned VM won't start because the cloud-init disk image doesn't exist
+        at the referenced location.
+        
+        Solution: Simply remove the cloud-init drive reference from the VM
+        config. The cloned VMs are already configured from the template and
+        don't need cloud-init to boot.
         
         Cloud-init drives are typically on ide2 (CD-ROM) with naming pattern:
         local:VMID/vm-VMID-cloudinit.qcow2
-        
-        We move them to:
-        local-lvm:vm-VMID-cloudinit,media=cdrom
         """
         def _get_config() -> dict:
             return self._get_client().nodes(node).qemu(vmid).config.get()
@@ -381,50 +382,36 @@ class RealProxmoxAdapter(ProxmoxAdapter):
         config = await self._call(_get_config)
         
         # Check for cloud-init drives on local storage
-        drives_to_fix = []
+        drives_to_remove = []
         for key, value in config.items():
             if key.startswith("ide") and isinstance(value, str):
                 # Check if it's a cloud-init drive on local storage
                 if "local:" in value and "cloudinit" in value.lower():
-                    # Extract the drive letter (ide0, ide1, ide2, etc.)
-                    drives_to_fix.append((key, value))
+                    drives_to_remove.append(key)
         
-        if not drives_to_fix:
+        if not drives_to_remove:
             return
         
         log.info(
-            "pve_runner.fixing_cloud_init_storage vmid=%s drives=%s",
+            "pve_runner.removing_cloud_init_drives vmid=%s drives=%s",
             vmid,
-            [d[0] for d in drives_to_fix],
+            drives_to_remove,
         )
         
-        for drive_key, drive_value in drives_to_fix:
-            # Delete the old drive
-            def _delete_drive() -> None:
-                self._get_client().nodes(node).qemu(vmid).config.post(
-                    **{"delete": drive_key}
-                )
-            
-            await self._call(_delete_drive)
-            
-            # Add new drive on local-lvm
-            # Format: local-lvm:vm-VMID-cloudinit,media=cdrom
-            new_drive_value = f"local-lvm:vm-{vmid}-cloudinit,media=cdrom"
-            
-            def _add_drive() -> None:
-                self._get_client().nodes(node).qemu(vmid).config.post(
-                    **{drive_key: new_drive_value}
-                )
-            
-            await self._call(_add_drive)
-            
-            log.info(
-                "pve_runner.moved_cloud_init vmid=%s drive=%s from=%s to=%s",
-                vmid,
-                drive_key,
-                drive_value,
-                new_drive_value,
+        # Delete cloud-init drive references
+        def _delete_drives() -> None:
+            delete_list = ",".join(drives_to_remove)
+            self._get_client().nodes(node).qemu(vmid).config.post(
+                **{"delete": delete_list}
             )
+        
+        await self._call(_delete_drives)
+        
+        log.info(
+            "pve_runner.cloud_init_removed vmid=%s drives=%s",
+            vmid,
+            drives_to_remove,
+        )
 
     async def get_vm_state(self, vmid: int, node: str) -> VmState:
         """Return current state. PVE returns 'running'|'stopped'|'paused'|...
