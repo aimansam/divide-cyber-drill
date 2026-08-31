@@ -21,7 +21,9 @@
 
 import { useEffect, useMemo, useState } from "react";
 import {
+  Activity,
   CircleStop,
+  Clock,
   Loader2,
   MoreVertical,
   Power,
@@ -89,6 +91,10 @@ export function OperatorConsoleCard() {
   const [injectForRun, setInjectForRun] = useState<number | null>(null);
   // Q27: track which run's action menu is open.
   const [openMenuId, setOpenMenuId] = useState<number | null>(null);
+  // Q27: track last refresh time for stats bar
+  const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
+  // Q27: cache scenario names for display
+  const [scenarioNames, setScenarioNames] = useState<Record<number, string>>({});
 
   async function load(opts: { initial?: boolean } = {}) {
     if (opts.initial) setLoading(true);
@@ -97,6 +103,20 @@ export function OperatorConsoleCard() {
     try {
       const data = await api.get<RunsPayload>("/api/v1/drills");
       setRuns(data.items ?? []);
+      setLastRefresh(new Date());
+
+      // Q27: fetch scenario names for display (cache them)
+      const uniqueScenarioIds = [...new Set((data.items ?? []).map(r => r.scenario_id).filter(Boolean))];
+      if (uniqueScenarioIds.length > 0) {
+        try {
+          const scenarios = await api.get<{ id: number; name: string }[]>("/api/v1/scenarios");
+          const nameMap: Record<number, string> = {};
+          scenarios.forEach(s => { nameMap[s.id] = s.name; });
+          setScenarioNames(prev => ({ ...prev, ...nameMap }));
+        } catch {
+          // Silently ignore - scenario names are optional
+        }
+      }
     } catch (e: unknown) {
       setError(detailFromError(e));
       setRuns([]);
@@ -132,6 +152,13 @@ export function OperatorConsoleCard() {
       .sort((a, b) => b.stopped_at - a.stopped_at)
       .slice(0, 10);
   }, [recentlyStopped]);
+
+  // Q27: compute stats for the stats bar
+  const stats = useMemo(() => {
+    const running = runs.filter(r => r.status === "running").length;
+    const pending = runs.filter(r => r.status === "pending").length;
+    return { running, pending };
+  }, [runs]);
 
   async function stop(id: number) {
     // Q25-P1: confirm before force-stopping a live drill.
@@ -227,7 +254,46 @@ export function OperatorConsoleCard() {
           )}
         </Button>
       </CardHeader>
+      {/* Q27: Stats bar showing live counts and last refresh time */}
+      {!loading && runs.length > 0 && (
+        <div className="flex items-center gap-4 border-t border-border bg-muted/30 px-6 py-2 text-xs">
+          <div className="flex items-center gap-1.5">
+            <Activity className="h-3.5 w-3.5 text-emerald-500" />
+            <span className="font-medium">{stats.running}</span>
+            <span className="text-muted-foreground">running</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <Clock className="h-3.5 w-3.5 text-amber-500" />
+            <span className="font-medium">{stats.pending}</span>
+            <span className="text-muted-foreground">pending</span>
+          </div>
+          {lastRefresh && (
+            <div className="ml-auto text-muted-foreground">
+              Last updated: {formatRelative(lastRefresh.toISOString())}
+            </div>
+          )}
+        </div>
+      )}
       <CardContent>
+        {/* Q27: Move success/error banners inside CardContent for better visual flow */}
+        {success !== null && (
+          <div
+            role="status"
+            className="mb-3 rounded-md border border-emerald-700 bg-emerald-950/30 px-3 py-2 text-sm text-emerald-200"
+            data-testid="operator-success"
+          >
+            {success}
+          </div>
+        )}
+        {error && (
+          <div
+            role="alert"
+            className="mb-3 rounded-md border border-red-700 bg-red-950/30 px-3 py-2 text-sm text-red-200"
+            data-testid="operator-error"
+          >
+            {error}
+          </div>
+        )}
         {error && (
           <div
             role="alert"
@@ -257,6 +323,11 @@ export function OperatorConsoleCard() {
               >
                 <span className="font-mono text-xs">#{r.run_id}</span>
                 <StatusPill status={r.status} />
+                {r.scenario_id && scenarioNames[r.scenario_id] && (
+                  <span className="text-xs text-muted-foreground max-w-[120px] truncate">
+                    {scenarioNames[r.scenario_id]}
+                  </span>
+                )}
                 <span className="text-muted-foreground">
                   {r.started_by ?? "—"}
                 </span>
@@ -376,18 +447,6 @@ export function OperatorConsoleCard() {
           </div>
         )}
       </CardContent>
-      {/* F9.4: success + error banners above the modal so the
-          operator gets confirmation feedback when the modal
-          closes on a successful inject. */}
-      {success !== null && (
-        <div
-          role="status"
-          className="mx-6 mb-4 rounded-md border border-emerald-700 bg-emerald-950/30 px-3 py-2 text-sm text-emerald-200"
-          data-testid="operator-success"
-        >
-          {success}
-        </div>
-      )}
       {/* F9.4: Inject modal -- mounts only while a target run is
           selected. Closes on backdrop click + Escape key. */}
       {injectForRun !== null && (
