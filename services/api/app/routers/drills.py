@@ -697,6 +697,7 @@ async def sync_asset_status(
         "drifted": drifted,
         "cleaned_at": asset.cleaned_at.isoformat() if asset.cleaned_at else None,
         "pve_ip": state.ip if not pve_missing else None,
+        "last_synced_at": datetime.now(timezone.utc).isoformat(),
     }
 
 

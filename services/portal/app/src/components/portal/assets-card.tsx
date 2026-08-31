@@ -44,6 +44,7 @@ interface AssetSyncStatus {
   drifted: boolean;
   cleaned_at: string | null;
   pve_ip: string | null;
+  last_synced_at: string;
 }
 
 export function AssetsCard({
@@ -60,6 +61,8 @@ export function AssetsCard({
   // Q26: per-asset sync state. Keyed by asset_id.
   const [syncStatuses, setSyncStatuses] = useState<Record<number, AssetSyncStatus>>({});
   const [syncingAssetId, setSyncingAssetId] = useState<number | null>(null);
+  const [syncingAll, setSyncingAll] = useState(false);
+  const [syncError, setSyncError] = useState<string | null>(null);
 
   useEffect(() => {
     if (pickedRunId === null) {
@@ -117,6 +120,7 @@ export function AssetsCard({
   async function syncAsset(assetId: number) {
     if (pickedRunId === null) return;
     setSyncingAssetId(assetId);
+    setSyncError(null);
     try {
       const status = await api.post<AssetSyncStatus>(
         `/api/v1/drills/${pickedRunId}/assets/${assetId}/sync-status`,
@@ -128,24 +132,82 @@ export function AssetsCard({
         setAssets(r.assets ?? []);
       }
     } catch (e: unknown) {
-      // Don't toast — the button stays in its idle state. Operator
-      // can retry. The error is visible in the audit log.
-      void e;
+      const msg = detailFromError(e);
+      setSyncError(`Sync failed for asset ${assetId}: ${msg}`);
     } finally {
       setSyncingAssetId(null);
     }
+  }
+
+  // Q26: sync all assets in parallel.
+  async function syncAll() {
+    if (pickedRunId === null || assets.length === 0) return;
+    setSyncingAll(true);
+    setSyncError(null);
+    try {
+      const promises = assets
+        .filter((a) => a.asset_id !== undefined)
+        .map((a) => syncAsset(a.asset_id!));
+      await Promise.allSettled(promises);
+    } finally {
+      setSyncingAll(false);
+    }
+  }
+
+  // Q26: auto-refresh sync status for live runs every 30s.
+  useEffect(() => {
+    if (pickedRunId === null || assets.length === 0) return;
+    // Only auto-sync for live runs (running/pending).
+    const runStatus = assets[0]?.status;
+    const isLive = runStatus === "running" || runStatus === "pending" || runStatus === "booting";
+    if (!isLive) return;
+
+    const id = window.setInterval(() => {
+      void syncAll();
+    }, 30000);
+    return () => window.clearInterval(id);
+  }, [pickedRunId, assets.length]);
+
+  // Q26: format "synced X ago" for display.
+  function formatSyncAgo(iso: string): string {
+    const t = Date.parse(iso);
+    if (Number.isNaN(t)) return "";
+    const deltaMs = Date.now() - t;
+    const sec = Math.floor(deltaMs / 1000);
+    if (sec < 60) return `${sec}s ago`;
+    const min = Math.floor(sec / 60);
+    if (min < 60) return `${min}m ago`;
+    const hr = Math.floor(min / 60);
+    return `${hr}h ago`;
   }
 
   return (
     <Card>
       {!compact && (
         <CardHeader>
-          <CardTitle>Assets</CardTitle>
-          <CardDescription>
-            {pickedRunId === null
-              ? "Click a run in My runs / All runs to see its assets."
-              : `Run #${pickedRunId} — ${assets.length} asset${assets.length === 1 ? "" : "s"}`}
-          </CardDescription>
+          <div className="flex items-center justify-between">
+            <div>
+              <CardTitle>Assets</CardTitle>
+              <CardDescription>
+                {pickedRunId === null
+                  ? "Click a run in My runs / All runs to see its assets."
+                  : `Run #${pickedRunId} — ${assets.length} asset${assets.length === 1 ? "" : "s"}`}
+              </CardDescription>
+            </div>
+            {/* Q26: Sync All button */}
+            {pickedRunId !== null && assets.length > 0 && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={syncAll}
+                disabled={syncingAll}
+                aria-label="sync all assets with PVE"
+              >
+                <RefreshCw className={`mr-1 h-3.5 w-3.5 ${syncingAll ? "animate-spin" : ""}`} />
+                {syncingAll ? "Syncing…" : "Sync all"}
+              </Button>
+            )}
+          </div>
         </CardHeader>
       )}
       <CardContent>
@@ -154,6 +216,12 @@ export function AssetsCard({
         )}
         {error && (
           <div className="text-sm text-destructive">{error}</div>
+        )}
+        {/* Q26: sync error display */}
+        {syncError && (
+          <div className="mb-2 rounded-md border border-amber-700 bg-amber-950/40 px-3 py-2 text-sm text-amber-200">
+            {syncError}
+          </div>
         )}
         {!loading && !error && assets.length === 0 && pickedRunId !== null && (
           <div className="text-sm italic text-muted-foreground">
@@ -201,9 +269,17 @@ export function AssetsCard({
                   </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className="font-mono text-xs text-muted-foreground">
-                    {a.status ?? "?"}
-                  </span>
+                  <div className="flex flex-col items-end gap-0.5">
+                    <span className="font-mono text-xs text-muted-foreground">
+                      {a.status ?? "?"}
+                    </span>
+                    {/* Q26: last synced timestamp */}
+                    {syncStatuses[a.asset_id ?? 0]?.last_synced_at && (
+                      <span className="text-[10px] text-muted-foreground/60">
+                        synced {formatSyncAgo(syncStatuses[a.asset_id ?? 0].last_synced_at)}
+                      </span>
+                    )}
+                  </div>
                   {/* Q26: sync status badge */}
                   {syncStatuses[a.asset_id ?? 0] && (() => {
                     const s = syncStatuses[a.asset_id ?? 0];
