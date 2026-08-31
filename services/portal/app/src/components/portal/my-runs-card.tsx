@@ -17,8 +17,14 @@
  *   admin, lead, observer: shown as "All runs"
  */
 
-import { useEffect, useMemo, useState } from "react";
-import { Loader2 } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  Download,
+  Loader2,
+  RotateCcw,
+  Eye,
+  CircleStop,
+} from "lucide-react";
 import {
   Card,
   CardContent,
@@ -26,7 +32,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { api, detailFromError } from "@/lib/api";
+import { Button } from "@/components/ui/button";
+import { api, detailFromError, getToken } from "@/lib/api";
 import { formatRelative } from "@/lib/format";
 import { StatusPill } from "./status-pill";
 import type { Role } from "@/lib/roles";
@@ -84,6 +91,15 @@ export function MyRunsCard({
   const [statusFilter, setStatusFilter] = useState<(typeof FILTER_OPTIONS)[number]>(
     "all",
   );
+  // Q27: track which row is selected for inline action buttons
+  const [selectedRowId, setSelectedRowId] = useState<number | null>(null);
+  // Q27: track in-flight action to show spinner
+  const [actionPending, setActionPending] = useState<{
+    runId: number;
+    action: string;
+  } | null>(null);
+  // Q27: ref for click-outside-to-deselect
+  const listRef = useRef<HTMLUListElement>(null);
   const isAllView = ALL_RUNS_ROLES.includes(meRole);
 
   async function load() {
@@ -107,6 +123,71 @@ export function MyRunsCard({
     const id = window.setInterval(load, 5000);
     return () => window.clearInterval(id);
   }, []);
+
+  // Q27: click-outside-to-deselect
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (listRef.current && !listRef.current.contains(event.target as Node)) {
+        setSelectedRowId(null);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  // Q27: action handlers
+  async function handleStop(runId: number) {
+    setActionPending({ runId, action: "stop" });
+    try {
+      await api.post(`/api/v1/drills/${runId}/stop`);
+      await load(); // refresh list
+    } catch (e: unknown) {
+      setError(`Stop failed: ${detailFromError(e)}`);
+    } finally {
+      setActionPending(null);
+    }
+  }
+
+  async function handleRestart(run: RunRow) {
+    if (!run.scenario_id) {
+      setError("Cannot restart: no scenario_id on this run");
+      return;
+    }
+    setActionPending({ runId: run.run_id, action: "restart" });
+    try {
+      await api.post("/api/v1/drills", { scenario_id: run.scenario_id });
+      await load(); // refresh list
+    } catch (e: unknown) {
+      setError(`Restart failed: ${detailFromError(e)}`);
+    } finally {
+      setActionPending(null);
+    }
+  }
+
+  async function handleReport(runId: number) {
+    setActionPending({ runId, action: "report" });
+    try {
+      const tok = getToken();
+      const headers = new Headers();
+      if (tok) headers.set("X-Divide-Token", tok);
+      const r = await fetch(`/api/v1/drills/${runId}/report`, { headers });
+      if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`);
+      const blob = await r.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `drill-${runId}-report.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setError(`Report download failed: ${msg}`);
+    } finally {
+      setActionPending(null);
+    }
+  }
 
   const filtered = useMemo(() => {
     if (statusFilter === "all") return items;
@@ -172,31 +253,131 @@ export function MyRunsCard({
               : `No runs match the ${statusFilter} filter.`}
           </div>
         )}
-        <ul className="divide-y divide-border max-h-96 overflow-y-auto" aria-live="polite">
+        <ul
+          ref={listRef}
+          className="divide-y divide-border max-h-96 overflow-y-auto"
+          aria-live="polite"
+        >
           {filtered.map((r) => {
             const isPicked = r.run_id === pickedRunId;
+            const isSelected = selectedRowId === r.run_id;
+            const isPending = actionPending?.runId === r.run_id;
+            const isLive = r.status === "running" || r.status === "pending";
+            const isTerminal = [
+              "succeeded", "completed", "failed", "timeout",
+              "stopped", "cancelled", "canceled",
+            ].includes(r.status);
+
             return (
               <li key={r.run_id}>
                 <button
-                  onClick={() => onPick(r)}
+                  type="button"
+                  onClick={() =>
+                    setSelectedRowId((prev) =>
+                      prev === r.run_id ? null : r.run_id,
+                    )
+                  }
                   className={
                     "flex w-full items-center justify-between gap-3 px-2 py-3 text-left transition-colors hover:bg-accent " +
                     (isPicked ? "bg-accent" : "")
                   }
                 >
-                  <div>
-                    <div className="font-mono text-sm">
-                      run #{r.run_id}
-                      {r.scenario_id !== undefined ? (
-                        <span className="text-muted-foreground">
-                          {" "}
-                          · scenario {r.scenario_id}
-                        </span>
-                      ) : null}
+                  <div className="flex items-center gap-2 flex-1 min-w-0">
+                    <div className="min-w-0">
+                      <div className="font-mono text-sm">
+                        run #{r.run_id}
+                        {r.scenario_id !== undefined ? (
+                          <span className="text-muted-foreground">
+                            {" "}
+                            · scenario {r.scenario_id}
+                          </span>
+                        ) : null}
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        {r.started_by ?? "—"}
+                      </div>
                     </div>
-                    <div className="text-xs text-muted-foreground">
-                      {r.started_by ?? "—"}
-                    </div>
+
+                    {/* Q27: inline action buttons */}
+                    {isSelected && (
+                      <div
+                        className="flex items-center gap-1 ml-2"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        {isLive && (
+                          <>
+                            <Button
+                              size="sm"
+                              variant="destructive"
+                              onClick={() => handleStop(r.run_id)}
+                              disabled={isPending}
+                              title="Stop this drill"
+                            >
+                              {isPending && actionPending?.action === "stop" ? (
+                                <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                              ) : (
+                                <CircleStop className="mr-1 h-3 w-3" />
+                              )}
+                              Stop
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => onPick(r)}
+                              title="View in Observe tab"
+                            >
+                              <Eye className="mr-1 h-3 w-3" />
+                              View
+                            </Button>
+                          </>
+                        )}
+                        {isTerminal && (
+                          <>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => onPick(r)}
+                              title="View in Observe tab"
+                            >
+                              <Eye className="mr-1 h-3 w-3" />
+                              View
+                            </Button>
+                            {["succeeded", "completed", "failed", "stopped"].includes(r.status) && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => handleRestart(r)}
+                                disabled={isPending}
+                                title="Restart with same scenario"
+                              >
+                                {isPending && actionPending?.action === "restart" ? (
+                                  <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                                ) : (
+                                  <RotateCcw className="mr-1 h-3 w-3" />
+                                )}
+                                Restart
+                              </Button>
+                            )}
+                            {["succeeded", "completed"].includes(r.status) && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => handleReport(r.run_id)}
+                                disabled={isPending}
+                                title="Download report"
+                              >
+                                {isPending && actionPending?.action === "report" ? (
+                                  <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                                ) : (
+                                  <Download className="mr-1 h-3 w-3" />
+                                )}
+                                Report
+                              </Button>
+                            )}
+                          </>
+                        )}
+                      </div>
+                    )}
                   </div>
                   <div className="flex flex-col items-end gap-1">
                     <StatusPill status={r.status} />
