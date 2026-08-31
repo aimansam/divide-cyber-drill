@@ -36,6 +36,7 @@ import {
   BookMarked,
   Download,
   Loader2,
+  MoreVertical,
   Play,
   RefreshCw,
   RotateCw,
@@ -195,6 +196,8 @@ export function RunLifecycleCard({
   const [savedTemplateName, setSavedTemplateName] = useState<string | null>(
     null,
   );
+  // Q27: track whether the post-run actions menu is open.
+  const [openPostRunMenu, setOpenPostRunMenu] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const canStart = hasRole(meRole, CAN_START);
@@ -597,48 +600,71 @@ export function RunLifecycleCard({
                 Visible only when the run is terminal -- Restart
                 starts a new drill with the same scenario_id; Save
                 bookmarks the run as a reusable template. */}
-            {TERMINAL_STATUSES.has(run.status) && (
-              <div
-                className="flex flex-wrap items-center gap-2"
-                data-testid="lifecycle-post-run-actions"
-              >
-                {canRestart && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={onRestart}
-                    disabled={loading}
-                    data-testid="lifecycle-restart"
-                    title="Start a new drill with the same scenario. The current run is left as-is."
-                  >
-                    {loading ? (
-                      <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-                    ) : (
-                      <RotateCw className="mr-1 h-3 w-3" />
-                    )}
-                    Restart drill
-                  </Button>
-                )}
-                {canSaveAsTemplate && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={onSaveAsTemplate}
-                    disabled={loading || savingAsTemplate}
-                    data-testid="lifecycle-save-as-template"
-                    title="Bookmark this run as a reusable template."
-                  >
-                    {savingAsTemplate ? (
-                      <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-                    ) : (
-                      <BookMarked className="mr-1 h-3 w-3" />
-                    )}
-                    Save as template
-                  </Button>
+            {TERMINAL_STATUSES.has(run.status) && (canRestart || canSaveAsTemplate) && (
+              <div className="relative" data-testid="lifecycle-post-run-actions">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setOpenPostRunMenu(!openPostRunMenu)}
+                  disabled={loading}
+                  aria-label="open post-run actions menu"
+                >
+                  <MoreVertical className="mr-1 h-3 w-3" />
+                  Actions
+                </Button>
+                {openPostRunMenu && (
+                  <>
+                    <div
+                      className="fixed inset-0 z-10"
+                      onClick={() => setOpenPostRunMenu(false)}
+                    />
+                    <div className="absolute left-0 top-full z-20 mt-1 w-56 rounded-md border border-border bg-background shadow-lg">
+                      <div className="py-1">
+                        {canRestart && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              onRestart();
+                              setOpenPostRunMenu(false);
+                            }}
+                            disabled={loading}
+                            className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-accent disabled:opacity-50"
+                            title="Start a new drill with the same scenario. The current run is left as-is."
+                          >
+                            {loading ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <RotateCw className="h-4 w-4" />
+                            )}
+                            <span>Restart drill</span>
+                          </button>
+                        )}
+                        {canSaveAsTemplate && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              onSaveAsTemplate();
+                              setOpenPostRunMenu(false);
+                            }}
+                            disabled={loading || savingAsTemplate}
+                            className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-accent disabled:opacity-50"
+                            title="Bookmark this run as a reusable template."
+                          >
+                            {savingAsTemplate ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <BookMarked className="h-4 w-4" />
+                            )}
+                            <span>Save as template</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </>
                 )}
                 {savedTemplateName !== null && (
                   <span
-                    className="text-xs text-emerald-300"
+                    className="ml-2 text-xs text-emerald-300"
                     data-testid="lifecycle-saved-toast"
                   >
                     Saved as &quot;{savedTemplateName}&quot;.

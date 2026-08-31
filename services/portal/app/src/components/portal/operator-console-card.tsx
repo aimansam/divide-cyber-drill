@@ -23,6 +23,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   CircleStop,
   Loader2,
+  MoreVertical,
   Power,
   RefreshCw,
   RotateCcw,
@@ -86,6 +87,8 @@ export function OperatorConsoleCard() {
   // The Inject button opens a modal focused on one run. We
   // store the target runId (or null when closed).
   const [injectForRun, setInjectForRun] = useState<number | null>(null);
+  // Q27: track which run's action menu is open.
+  const [openMenuId, setOpenMenuId] = useState<number | null>(null);
 
   async function load(opts: { initial?: boolean } = {}) {
     if (opts.initial) setLoading(true);
@@ -268,36 +271,78 @@ export function OperatorConsoleCard() {
                 >
                   {formatRelative(r.started_at)}
                 </time>
-                <div className="ml-auto flex items-center gap-1">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => stop(r.run_id)}
-                    disabled={pending === r.run_id}
-                    data-testid="operator-stop"
-                  >
-                    <CircleStop className="mr-1 h-3 w-3" />
-                    {pending === r.run_id ? "Stopping…" : "Stop"}
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => reset(r.run_id)}
-                    disabled={pending === r.run_id}
-                    data-testid="operator-reset"
-                  >
-                    <RotateCcw className="mr-1 h-3 w-3" />
-                    {pending === r.run_id ? "Resetting…" : "Reset"}
-                  </Button>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setInjectForRun(r.run_id)}
-                    data-testid="operator-inject"
-                  >
-                    <Siren className="mr-1 h-3 w-3" />
-                    Inject
-                  </Button>
+                <div className="ml-auto">
+                  {/* Q27: action menu dropdown */}
+                  <div className="relative">
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => setOpenMenuId(openMenuId === r.run_id ? null : r.run_id)}
+                      aria-label="open action menu"
+                    >
+                      <MoreVertical className="h-4 w-4" />
+                    </Button>
+                    {openMenuId === r.run_id && (
+                      <>
+                        {/* Backdrop to close menu on outside click */}
+                        <div
+                          className="fixed inset-0 z-10"
+                          onClick={() => setOpenMenuId(null)}
+                        />
+                        <div className="absolute right-0 top-full z-20 mt-1 w-48 rounded-md border border-border bg-background shadow-lg">
+                          <div className="py-1">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                stop(r.run_id);
+                                setOpenMenuId(null);
+                              }}
+                              disabled={pending === r.run_id}
+                              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-accent disabled:opacity-50"
+                            >
+                              <CircleStop className="h-4 w-4" />
+                              <span>{pending === r.run_id ? "Stopping…" : "Stop"}</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                reset(r.run_id);
+                                setOpenMenuId(null);
+                              }}
+                              disabled={pending === r.run_id}
+                              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-accent disabled:opacity-50"
+                            >
+                              <RotateCcw className="h-4 w-4" />
+                              <span>{pending === r.run_id ? "Resetting…" : "Reset"}</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setInjectForRun(r.run_id);
+                                setOpenMenuId(null);
+                              }}
+                              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-accent"
+                            >
+                              <Siren className="h-4 w-4" />
+                              <span>Inject</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                // Q26: sync asset status - for now just refresh the list
+                                load();
+                                setOpenMenuId(null);
+                              }}
+                              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-accent"
+                            >
+                              <RefreshCw className="h-4 w-4" />
+                              <span>Refresh</span>
+                            </button>
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </div>
                 </div>
               </li>
             ))}
