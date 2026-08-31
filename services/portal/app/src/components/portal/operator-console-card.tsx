@@ -19,13 +19,12 @@
  * RangeForce, Cyberbit, and Immersive Labs all have one."
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
   CircleStop,
   Clock,
   Loader2,
-  MoreVertical,
   Power,
   RefreshCw,
   RotateCcw,
@@ -89,8 +88,10 @@ export function OperatorConsoleCard() {
   // The Inject button opens a modal focused on one run. We
   // store the target runId (or null when closed).
   const [injectForRun, setInjectForRun] = useState<number | null>(null);
-  // Q27: track which run's action menu is open.
-  const [openMenuId, setOpenMenuId] = useState<number | null>(null);
+  // Q27: track which run row is selected (click-to-reveal actions).
+  const [selectedRowId, setSelectedRowId] = useState<number | null>(null);
+  // Q27: ref for click-outside-to-deselect.
+  const listRef = useRef<HTMLUListElement>(null);
   // Q27: track last refresh time for stats bar
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
   // Q27: cache scenario names for display
@@ -130,6 +131,17 @@ export function OperatorConsoleCard() {
     load({ initial: true });
     const id = window.setInterval(() => load(), 5000);
     return () => window.clearInterval(id);
+  }, []);
+
+  // Q27: click-outside-to-deselect for the action buttons.
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (listRef.current && !listRef.current.contains(event.target as Node)) {
+        setSelectedRowId(null);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
   const live = useMemo(
@@ -313,108 +325,103 @@ export function OperatorConsoleCard() {
           />
         )}
         {!error && !loading && live.length > 0 && (
-          <ul className="divide-y divide-border" data-testid="operator-live-list" aria-live="polite">
+          <ul
+            ref={listRef}
+            className="divide-y divide-border"
+            data-testid="operator-live-list"
+            aria-live="polite"
+          >
             {live.map((r) => (
               <li
                 key={r.run_id}
-                className="flex items-center gap-2 px-3 py-2 text-sm"
+                className={`flex flex-col gap-2 px-3 py-2 text-sm transition-colors cursor-pointer ${
+                  selectedRowId === r.run_id
+                    ? "bg-accent/50"
+                    : "hover:bg-muted/30"
+                }`}
                 data-testid="operator-row"
                 data-run-id={r.run_id}
+                onClick={() =>
+                  setSelectedRowId((prev) =>
+                    prev === r.run_id ? null : r.run_id,
+                  )
+                }
+                role="button"
+                aria-expanded={selectedRowId === r.run_id}
               >
-                <span className="font-mono text-xs">#{r.run_id}</span>
-                <StatusPill status={r.status} />
-                {r.scenario_id && scenarioNames[r.scenario_id] && (
-                  <span className="text-xs text-muted-foreground max-w-[120px] truncate">
-                    {scenarioNames[r.scenario_id]}
+                {/* Row content */}
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-xs">#{r.run_id}</span>
+                  <StatusPill status={r.status} />
+                  {r.scenario_id && scenarioNames[r.scenario_id] && (
+                    <span className="text-xs text-muted-foreground max-w-[120px] truncate">
+                      {scenarioNames[r.scenario_id]}
+                    </span>
+                  )}
+                  <span className="text-muted-foreground">
+                    {r.started_by ?? "—"}
                   </span>
-                )}
-                <span className="text-muted-foreground">
-                  {r.started_by ?? "—"}
-                </span>
-                <time
-                  className="text-xs text-muted-foreground"
-                  dateTime={r.started_at ?? undefined}
-                  title={
-                    r.started_at
-                      ? new Date(r.started_at).toLocaleString()
-                      : undefined
-                  }
-                >
-                  {formatRelative(r.started_at)}
-                </time>
-                <div className="ml-auto">
-                  {/* Q27: action menu dropdown */}
-                  <div className="relative">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => setOpenMenuId(openMenuId === r.run_id ? null : r.run_id)}
-                      aria-label="open action menu"
-                    >
-                      <MoreVertical className="h-4 w-4" />
-                    </Button>
-                    {openMenuId === r.run_id && (
-                      <>
-                        {/* Backdrop to close menu on outside click */}
-                        <div
-                          className="fixed inset-0 z-10"
-                          onClick={() => setOpenMenuId(null)}
-                        />
-                        <div className="absolute right-0 top-full z-20 mt-1 w-48 rounded-md border border-border bg-background shadow-lg">
-                          <div className="py-1">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                stop(r.run_id);
-                                setOpenMenuId(null);
-                              }}
-                              disabled={pending === r.run_id}
-                              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-accent disabled:opacity-50"
-                            >
-                              <CircleStop className="h-4 w-4" />
-                              <span>{pending === r.run_id ? "Stopping…" : "Stop"}</span>
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                reset(r.run_id);
-                                setOpenMenuId(null);
-                              }}
-                              disabled={pending === r.run_id}
-                              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-accent disabled:opacity-50"
-                            >
-                              <RotateCcw className="h-4 w-4" />
-                              <span>{pending === r.run_id ? "Resetting…" : "Reset"}</span>
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setInjectForRun(r.run_id);
-                                setOpenMenuId(null);
-                              }}
-                              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-accent"
-                            >
-                              <Siren className="h-4 w-4" />
-                              <span>Inject</span>
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                // Q26: sync asset status - for now just refresh the list
-                                load();
-                                setOpenMenuId(null);
-                              }}
-                              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-accent"
-                            >
-                              <RefreshCw className="h-4 w-4" />
-                              <span>Refresh</span>
-                            </button>
-                          </div>
-                        </div>
-                      </>
-                    )}
+                  <time
+                    className="text-xs text-muted-foreground"
+                    dateTime={r.started_at ?? undefined}
+                    title={
+                      r.started_at
+                        ? new Date(r.started_at).toLocaleString()
+                        : undefined
+                    }
+                  >
+                    {formatRelative(r.started_at)}
+                  </time>
+                  <div className="ml-auto text-xs text-muted-foreground">
+                    {selectedRowId === r.run_id ? "Click to hide actions" : "Click for actions"}
                   </div>
                 </div>
+
+                {/* Q27: Inline action buttons - only show when row is selected */}
+                {selectedRowId === r.run_id && (
+                  <div
+                    className="flex items-center gap-2 pl-6 border-t border-border pt-2"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      onClick={() => stop(r.run_id)}
+                      disabled={pending === r.run_id}
+                      data-testid="operator-stop"
+                    >
+                      <CircleStop className="mr-1 h-3 w-3" />
+                      {pending === r.run_id ? "Stopping…" : "Stop"}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => reset(r.run_id)}
+                      disabled={pending === r.run_id}
+                      data-testid="operator-reset"
+                    >
+                      <RotateCcw className="mr-1 h-3 w-3" />
+                      {pending === r.run_id ? "Resetting…" : "Reset"}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setInjectForRun(r.run_id)}
+                      data-testid="operator-inject"
+                    >
+                      <Siren className="mr-1 h-3 w-3" />
+                      Inject
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => load()}
+                    >
+                      <RefreshCw className="mr-1 h-3 w-3" />
+                      Refresh
+                    </Button>
+                  </div>
+                )}
               </li>
             ))}
           </ul>
