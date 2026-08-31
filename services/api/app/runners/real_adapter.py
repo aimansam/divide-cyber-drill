@@ -210,14 +210,11 @@ class RealProxmoxAdapter(ProxmoxAdapter):
         if not node:
             raise ProxmoxAPIError("clone_vm requires a target node")
 
-        # PVE 9 split clone + post-clone config:
-        #   * ``clone.post`` only accepts clone-time params (name, newid).
-        #   * Per-resource overrides (cores, sockets, memory) go via
-        #     ``config.post`` on the new VMID.
-        #   * Disk resize goes via ``PUT /qemu/{vmid}/resize`` with
-        #     ``disk=scsi0&size=+XG`` -- ``config.post`` rejects ``disk``
-        #     on PVE 9 with ``property is not defined in schema``.
-        
+        log.info(
+            "pve_runner.clone_start source_vmid=%s new_vmid=%s node=%s name=%s",
+            spec.source_vmid, spec.new_vmid, node, spec.name,
+        )
+
         # Allocate VMID BEFORE cloning to ensure we know the exact VMID
         new_vmid = int(spec.new_vmid) if spec.new_vmid is not None else await self.allocate_vmid()
         
@@ -227,6 +224,20 @@ class RealProxmoxAdapter(ProxmoxAdapter):
             self._get_client().nodes(node).qemu(spec.source_vmid).clone.post(**clone_params)
 
         await self._call(_do)
+        log.info("pve_runner.clone_complete new_vmid=%s", new_vmid)
+
+        # Log config after clone
+        def _get_config_after_clone() -> dict:
+            return self._get_client().nodes(node).qemu(new_vmid).config.get()
+        
+        config_after_clone = await self._call(_get_config_after_clone)
+        log.info(
+            "pve_runner.config_after_clone vmid=%s boot=%s scsi0=%s ide2=%s",
+            new_vmid,
+            config_after_clone.get("boot"),
+            config_after_clone.get("scsi0"),
+            config_after_clone.get("ide2"),
+        )
 
         config_overrides: dict[str, Any] = {}
         if spec.cores is not None:
@@ -237,12 +248,14 @@ class RealProxmoxAdapter(ProxmoxAdapter):
             config_overrides["memory"] = spec.ram_mb
 
         if config_overrides:
+            log.info("pve_runner.applying_config_overrides vmid=%s overrides=%s", new_vmid, config_overrides)
             def _config() -> None:
                 self._get_client().nodes(node).qemu(new_vmid).config.post(**config_overrides)
 
             await self._call(_config)
 
         if spec.disk_gb is not None:
+            log.info("pve_runner.resizing_disk vmid=%s size=+%sG", new_vmid, spec.disk_gb)
             def _resize() -> None:
                 self._get_client().nodes(node).qemu(new_vmid).resize.put(
                     disk="scsi0",
@@ -252,18 +265,33 @@ class RealProxmoxAdapter(ProxmoxAdapter):
             await self._call(_resize)
 
         # Q27: Fix cloud-init drive and ensure boot order.
-        # PVE clones copy disk references as-is. The template has
-        # ide2="local:cloudinit" which becomes a broken reference after clone.
-        # Remove the cloud-init drive and ensure boot order is scsi0.
         await self._fix_cloud_init_storage(new_vmid, node)
+
+        # Final config check
+        def _get_final_config() -> dict:
+            return self._get_client().nodes(node).qemu(new_vmid).config.get()
+        
+        final_config = await self._call(_get_final_config)
+        log.info(
+            "pve_runner.final_config vmid=%s boot=%s scsi0=%s ide2=%s cores=%s memory=%s",
+            new_vmid,
+            final_config.get("boot"),
+            final_config.get("scsi0"),
+            final_config.get("ide2"),
+            final_config.get("cores"),
+            final_config.get("memory"),
+        )
 
         return ClonedVM(vmid=new_vmid, node=node, name=spec.name)
 
     async def start_vm(self, vmid: int, node: str) -> None:
+        log.info("pve_runner.starting_vm vmid=%s node=%s", vmid, node)
+        
         def _do() -> None:
             self._get_client().nodes(node).qemu(vmid).status.start.post()
 
         await self._call(_do)
+        log.info("pve_runner.start_command_sent vmid=%s", vmid)
 
         # Q27: Verify VM actually started. PVE may accept the start
         # command but the VM could fail to boot (e.g., storage issues).
@@ -275,6 +303,13 @@ class RealProxmoxAdapter(ProxmoxAdapter):
             return self._get_client().nodes(node).qemu(vmid).status.current.get()
         
         status = await self._call(_check)
+        log.info(
+            "pve_runner.vm_status_after_start vmid=%s status=%s qmpstatus=%s",
+            vmid,
+            status.get("status"),
+            status.get("qmpstatus"),
+        )
+        
         if status.get("status") != "running":
             raise ProxmoxAPIError(
                 f"VM {vmid} failed to start: status={status.get('status')}, "

@@ -659,14 +659,22 @@ class Runner:
         node: str,
         actor: str | None = None,
     ) -> None:
+        log.info(
+            "runner.spawn_asset_start role=%s template=%s run_id=%s",
+            asset.role, asset.template, asset.run_id,
+        )
+        
         template_vmid = await self._adapter.find_template(asset.template)
         if template_vmid is None:
             raise RunnerError(
                 f"template {asset.template!r} not found on PVE "
                 f"(role={asset.role!r})"
             )
+        log.info("runner.template_found role=%s template_vmid=%s", asset.role, template_vmid)
 
         new_vmid = await self._adapter.allocate_vmid()
+        log.info("runner.vmid_allocated role=%s new_vmid=%s", asset.role, new_vmid)
+        
         resources = asset_spec.get("resources") or {}
         # PVE 9 enforces strict DNS-1123 names on the clone VMID; underscores
         # in the role (e.g. ``drill_vm``) violate that. We strip them from
@@ -687,14 +695,24 @@ class Runner:
         asset.status = AssetStatus.CLONING
         await session.flush()
 
+        log.info("runner.cloning_vm role=%s new_vmid=%s", asset.role, new_vmid)
         result = await self._adapter.clone_vm(clone)
         asset.pve_vmid = result.vmid
         asset.pve_node = result.node
         asset.status = AssetStatus.BOOTING
         await session.flush()
+        log.info("runner.clone_complete role=%s vmid=%s", asset.role, result.vmid)
 
+        log.info("runner.starting_vm role=%s vmid=%s", asset.role, result.vmid)
         await self._adapter.start_vm(result.vmid, result.node)
+        log.info("runner.vm_started role=%s vmid=%s", asset.role, result.vmid)
+        
         state = await self._adapter.get_vm_state(result.vmid, result.node)
+        log.info(
+            "runner.vm_state role=%s vmid=%s status=%s ip=%s",
+            asset.role, result.vmid, state.status, state.ip,
+        )
+        
         asset.pve_ip = state.ip
         asset.status = (
             AssetStatus.RUNNING if state.status == "running" else AssetStatus.STOPPED
