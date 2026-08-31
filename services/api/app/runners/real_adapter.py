@@ -375,6 +375,9 @@ class RealProxmoxAdapter(ProxmoxAdapter):
         
         Cloud-init drives are typically on ide2 (CD-ROM) with naming pattern:
         local:VMID/vm-VMID-cloudinit.qcow2
+        
+        Also updates boot order to ensure VM boots from hard disk (scsi0)
+        instead of trying to boot from removed CD-ROM.
         """
         def _get_config() -> dict:
             return self._get_client().nodes(node).qemu(vmid).config.get()
@@ -398,17 +401,20 @@ class RealProxmoxAdapter(ProxmoxAdapter):
             drives_to_remove,
         )
         
-        # Delete cloud-init drive references
-        def _delete_drives() -> None:
+        # Delete cloud-init drive references and set boot order to scsi0
+        def _delete_drives_and_set_boot() -> None:
             delete_list = ",".join(drives_to_remove)
             self._get_client().nodes(node).qemu(vmid).config.post(
-                **{"delete": delete_list}
+                **{
+                    "delete": delete_list,
+                    "boot": "order=scsi0"  # Boot from first SCSI disk
+                }
             )
         
-        await self._call(_delete_drives)
+        await self._call(_delete_drives_and_set_boot)
         
         log.info(
-            "pve_runner.cloud_init_removed vmid=%s drives=%s",
+            "pve_runner.cloud_init_removed vmid=%s drives=%s boot=scsi0",
             vmid,
             drives_to_remove,
         )
