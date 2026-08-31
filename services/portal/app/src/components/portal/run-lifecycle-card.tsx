@@ -58,6 +58,7 @@ import { api, detailFromError } from "@/lib/api";
 import { formatDuration, formatRelative } from "@/lib/format";
 import { hasRole, type Role } from "@/lib/roles";
 import type { Scenario } from "@/components/portal/scenarios-card";
+import { StatusPill } from "./status-pill";
 
 /**
  * Shape of a structured error response from the API.
@@ -567,16 +568,7 @@ export function RunLifecycleCard({
         {run !== null && (
           <>
             <div className="flex flex-wrap items-center gap-3 text-sm">
-              <span
-                className={
-                  "inline-block rounded px-2 py-0.5 font-mono text-xs " +
-                  (TERMINAL_STATUSES.has(run.status)
-                    ? "bg-emerald-900/40 text-emerald-200"
-                    : "bg-amber-900/40 text-amber-200")
-                }
-              >
-                {run.status}
-              </span>
+              <StatusPill status={run.status} />
               {run.started_by && (
                 <span className="text-muted-foreground">by {run.started_by}</span>
               )}
@@ -696,6 +688,7 @@ export function RunLifecycleCard({
                   placeholder="cancel reason"
                   value={cancelReason}
                   onChange={(e) => setCancelReason(e.target.value)}
+                  maxLength={120}
                   className="max-w-xs"
                 />
                 <Button variant="destructive" onClick={onCancel} disabled={loading}>

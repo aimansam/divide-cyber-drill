@@ -18,6 +18,7 @@
  */
 
 import { useEffect, useMemo, useState } from "react";
+import { Loader2 } from "lucide-react";
 import {
   Card,
   CardContent,
@@ -130,6 +131,7 @@ export function MyRunsCard({
                 opt === "all"
                   ? items.length
                   : items.filter((r) => r.status === opt).length;
+              const isEmpty = count === 0 && opt !== "all";
               return (
                 <button
                   key={opt}
@@ -137,10 +139,13 @@ export function MyRunsCard({
                   onClick={() => setStatusFilter(opt)}
                   data-active={statusFilter === opt ? "true" : "false"}
                   data-testid={`my-runs-filter-${opt}`}
+                  disabled={isEmpty}
                   className={
                     statusFilter === opt
                       ? "rounded bg-primary/15 px-2 py-0.5 text-xs text-primary ring-1 ring-primary/30"
-                      : "rounded bg-secondary/40 px-2 py-0.5 text-xs text-secondary-foreground hover:bg-secondary"
+                      : isEmpty
+                        ? "rounded bg-secondary/10 px-2 py-0.5 text-xs text-muted-foreground/40 cursor-not-allowed"
+                        : "rounded bg-secondary/40 px-2 py-0.5 text-xs text-secondary-foreground hover:bg-secondary"
                   }
                 >
                   {opt} ({count})
@@ -152,6 +157,12 @@ export function MyRunsCard({
       </CardHeader>
       <CardContent>
         {error && <div className="text-sm text-destructive">{error}</div>}
+        {loading && items.length === 0 && (
+          <div className="flex items-center justify-center py-8 text-sm text-muted-foreground">
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            Loading runs…
+          </div>
+        )}
         {!error && !loading && filtered.length === 0 && (
           <div className="text-sm italic text-muted-foreground">
             {statusFilter === "all"

@@ -314,11 +314,6 @@ export function OperatorConsoleCard() {
             </div>
             <ul className="space-y-1">
               {recentlyStoppedList.map(({ run_id, stopped_at }) => {
-                const agoMs = Date.now() - stopped_at;
-                const agoLabel =
-                  agoMs < 60_000
-                    ? `${Math.floor(agoMs / 1000)}s ago`
-                    : `${Math.floor(agoMs / 60_000)}m ago`;
                 return (
                   <li
                     key={run_id}
@@ -328,7 +323,7 @@ export function OperatorConsoleCard() {
                   >
                     <span className="font-mono">#{run_id}</span>
                     <StatusPill status="stopped" />
-                    <span>stopped {agoLabel}</span>
+                    <span>stopped {formatRelative(new Date(stopped_at).toISOString())}</span>
                   </li>
                 );
               })}
