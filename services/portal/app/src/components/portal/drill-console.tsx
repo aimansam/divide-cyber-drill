@@ -333,72 +333,86 @@ export function DrillConsole({ pickedRunId, scenarioName }: DrillConsoleProps) {
         </div>
       )}
 
-      <section aria-label="Topology">
-        <h3 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-          Network topology
-        </h3>
-        <TopologyGraph assets={topologyAssets} />
-      </section>
-
-      <section aria-label="Assets">
-        <h3 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-          Assets
-        </h3>
-        <AssetsCard
-          pickedRunId={pickedRunId}
-          compact
-          onOpenConsole={onOpenConsole}
-        />
-      </section>
-
-      {pickedAsset && (
-        <section aria-label="VM Console">
-          <ConsoleCard
-            pickedRunId={pickedRunId}
-            pickedAsset={pickedAsset}
-            onClose={() => setPickedAsset(null)}
-          />
-        </section>
-      )}
-
-      <section aria-label="Audit feed">
-        <h3 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-          Audit feed
-        </h3>
-        <AuditExplorerCard pickedRunId={pickedRunId} compact isLive={isLive} />
-      </section>
-
       {/*
-        F9.1: For multi-team Runs (run.exercise_id !== null), the
-        Observe tab becomes the single live-drill screen -- leaderboard
-        + live SOC stream render inline below the audit feed so the
-        operator never has to flip tabs during a drill. For
-        legacy single-team Runs (exercise_id === null) these sections
-        stay hidden; the Admin tab is still the right place for the
-        leaderboard in that flow.
+        Two-column dashboard layout on desktop (lg+):
+          Left:  Topology + Assets + VM Console
+          Right: Audit Feed (primary) + Leaderboard + SOC
+        Stacks to single column on mobile/tablet.
       */}
-      {run && run.exercise_id != null ? (
-        <>
-          <section aria-label="Leaderboard" data-testid="drill-leaderboard">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        {/* Left column: topology + assets + console */}
+        <div className="space-y-6">
+          <section aria-label="Topology">
             <h3 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-              Leaderboard
+              Network topology
             </h3>
-            {/* F9.2: poll-mode (5s) so the leaderboard ticks live
-                alongside the SOC stream. The Admin tab keeps the
-                fetch-once-on-mount default (pollIntervalMs=0). */}
-            <LeaderboardCard
-              exerciseId={run.exercise_id}
-              pollIntervalMs={5000}
+            <TopologyGraph assets={topologyAssets} />
+          </section>
+
+          <section aria-label="Assets">
+            <h3 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+              Assets
+            </h3>
+            <AssetsCard
+              pickedRunId={pickedRunId}
+              compact
+              onOpenConsole={onOpenConsole}
             />
           </section>
-          <section aria-label="Live SOC" data-testid="drill-soc">
+
+          {pickedAsset && (
+            <section aria-label="VM Console">
+              <ConsoleCard
+                pickedRunId={pickedRunId}
+                pickedAsset={pickedAsset}
+                onClose={() => setPickedAsset(null)}
+              />
+            </section>
+          )}
+        </div>
+
+        {/* Right column: audit feed + leaderboard + SOC */}
+        <div className="space-y-6">
+          <section aria-label="Audit feed">
             <h3 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-              Live SOC stream
+              Audit feed
             </h3>
-            <SocViewCard runId={pickedRunId} authToken={getToken()} />
+            <AuditExplorerCard pickedRunId={pickedRunId} compact isLive={isLive} />
           </section>
-        </>
-      ) : null}
+
+          {/*
+            F9.1: For multi-team Runs (run.exercise_id !== null), the
+            Observe tab becomes the single live-drill screen -- leaderboard
+            + live SOC stream render inline below the audit feed so the
+            operator never has to flip tabs during a drill. For
+            legacy single-team Runs (exercise_id === null) these sections
+            stay hidden; the Admin tab is still the right place for the
+            leaderboard in that flow.
+          */}
+          {run && run.exercise_id != null ? (
+            <>
+              <section aria-label="Leaderboard" data-testid="drill-leaderboard">
+                <h3 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                  Leaderboard
+                </h3>
+                {/* F9.2: poll-mode (5s) so the leaderboard ticks live
+                    alongside the SOC stream. The Admin tab keeps the
+                    fetch-once-on-mount default (pollIntervalMs=0). */}
+                <LeaderboardCard
+                  exerciseId={run.exercise_id}
+                  pollIntervalMs={5000}
+                />
+              </section>
+              <section aria-label="Live SOC" data-testid="drill-soc">
+                <h3 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+                  Live SOC stream
+                </h3>
+                <SocViewCard runId={pickedRunId} authToken={getToken()} />
+              </section>
+            </>
+          ) : null}
+        </div>
+      </div>
     </div>
   );
 }
