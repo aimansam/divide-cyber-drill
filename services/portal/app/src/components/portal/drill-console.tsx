@@ -322,7 +322,7 @@ export function DrillConsole({ pickedRunId, scenarioName }: DrillConsoleProps) {
         <h3 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
           Audit feed
         </h3>
-        <AuditExplorerCard pickedRunId={pickedRunId} compact />
+        <AuditExplorerCard pickedRunId={pickedRunId} compact isLive={isLive} />
       </section>
 
       {/*

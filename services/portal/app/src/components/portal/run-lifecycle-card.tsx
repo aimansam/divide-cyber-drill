@@ -59,6 +59,7 @@ import { formatDuration, formatRelative } from "@/lib/format";
 import { hasRole, type Role } from "@/lib/roles";
 import type { Scenario } from "@/components/portal/scenarios-card";
 import { StatusPill } from "./status-pill";
+import { type AuditRow, tone, actionLabel, relativeTime } from "./audit-explorer-card";
 
 /**
  * Shape of a structured error response from the API.
@@ -192,9 +193,10 @@ export function RunLifecycleCard({
   // row exists. Kept at the top with the other useStates so
   // hook ordering is stable.
   const [savingAsTemplate, setSavingAsTemplate] = useState(false);
-  const [savedTemplateName, setSavedTemplateName] = useState<string | null>(
+    const [savedTemplateName, setSavedTemplateName] = useState<string | null>(
     null,
   );
+  const [latestAudit, setLatestAudit] = useState<AuditRow | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const canStart = hasRole(meRole, CAN_START);
@@ -221,6 +223,19 @@ export function RunLifecycleCard({
     }
   }
 
+  async function fetchLatestAudit(id: number) {
+    try {
+      const data = await api.get<{ items?: AuditRow[] }>(`/api/v1/drills/${id}/audit`);
+      if (data && data.items && data.items.length > 0) {
+        setLatestAudit(data.items[data.items.length - 1]);
+      } else {
+        setLatestAudit(null);
+      }
+    } catch {
+      // Non-blocking
+    }
+  }
+
   async function fetchRun(id: number): Promise<RunDetail | null> {
     try {
       const data = await api.get<RunDetail>(`/api/v1/drills/${id}`);
@@ -236,6 +251,7 @@ export function RunLifecycleCard({
     clearPoll();
     pollRef.current = setInterval(() => {
       void fetchRun(id).then((r) => {
+        void fetchLatestAudit(id);
         if (r && TERMINAL_STATUSES.has(r.status)) {
           clearPoll();
         }
@@ -255,6 +271,7 @@ export function RunLifecycleCard({
     setLoading(true);
     fetchRun(pickedRunId)
       .then((r) => {
+        void fetchLatestAudit(pickedRunId);
         if (r && !TERMINAL_STATUSES.has(r.status)) {
           startPoll(r.run_id);
         }
@@ -458,6 +475,7 @@ export function RunLifecycleCard({
   async function onRefresh() {
     if (run === null) return;
     setLoading(true);
+    void fetchLatestAudit(run.run_id);
     try {
       const r = await fetchRun(run.run_id);
       if (r && !TERMINAL_STATUSES.has(r.status)) {
@@ -610,6 +628,24 @@ export function RunLifecycleCard({
                   <RefreshCw className="h-3.5 w-3.5" />
                 </Button>
               </div>
+              {latestAudit && (
+                <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-border/40 pt-1.5 text-xs">
+                  <span className="text-[11px] font-medium text-muted-foreground">Latest event:</span>
+                  <span
+                    className={`inline-block rounded border px-1.5 py-0.2 font-mono text-[10px] font-semibold ${tone(
+                      latestAudit.action,
+                    )}`}
+                  >
+                    {actionLabel(latestAudit.action)}
+                  </span>
+                  <span className="font-mono text-[11px] text-muted-foreground">
+                    {relativeTime(latestAudit.at)}
+                  </span>
+                  {latestAudit.actor && (
+                    <span className="text-muted-foreground">by {latestAudit.actor}</span>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Q27: Post-run actions as inline buttons instead of kebab menu.
