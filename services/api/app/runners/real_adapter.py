@@ -307,6 +307,21 @@ class RealProxmoxAdapter(ProxmoxAdapter):
 
         await self._call(_do)
 
+        # Q27: Wait for VM to actually stop before returning.
+        # PVE stop command is async - it returns immediately but
+        # the VM may still be shutting down. Without this wait,
+        # destroy_vm can fail with "VM is running" error.
+        import time
+        for _ in range(30):  # Wait up to 30 seconds
+            time.sleep(1)
+            def _check() -> dict:
+                return self._get_client().nodes(node).qemu(vmid).status.current.get()
+            status = await self._call(_check)
+            if status.get("status") == "stopped":
+                break
+        else:
+            log.warning("stop_vm timeout waiting for vmid=%s to stop", vmid)
+
     async def destroy_vm(self, vmid: int, node: str) -> None:
         """Delete VM + purge disk. Idempotent: missing VM is a no-op.
 

@@ -392,14 +392,6 @@ class Runner:
                     br, exc,
                 )
         # Q17: tear down the spawned VMs too. The drill is over;
-        # without this loop every successful drill leaves a clone
-        # running on PVE forever (Q14 left 8 such orphans behind).
-        # Best-effort via the same helper the failure path uses:
-        # a flaky destroy here cannot roll back a successful run,
-        # and the per-asset ``status`` flips to ``ORPHANED`` so an
-        # operator + future janitor can clean up.
-        await self._best_effort_teardown(cloned_so_far)
-        await session.flush()
         inc_run_terminal(outcome="succeeded", adapter=_adapter_label(self._adapter))
         await self._audit(
             session,
