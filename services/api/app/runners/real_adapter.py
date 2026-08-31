@@ -253,6 +253,13 @@ class RealProxmoxAdapter(ProxmoxAdapter):
 
             await self._call(_resize)
 
+        # Q27: Fix cloud-init drive storage migration.
+        # PVE clones copy disk references as-is. If the template has
+        # cloud-init on `local` storage (which doesn't support `images`
+        # content type), the cloned VM won't start. Move cloud-init
+        # drives from `local` to `local-lvm` after cloning.
+        await self._fix_cloud_init_storage(new_vmid, node)
+
         return ClonedVM(vmid=new_vmid, node=node, name=spec.name)
 
     async def start_vm(self, vmid: int, node: str) -> None:
@@ -260,6 +267,22 @@ class RealProxmoxAdapter(ProxmoxAdapter):
             self._get_client().nodes(node).qemu(vmid).status.start.post()
 
         await self._call(_do)
+
+        # Q27: Verify VM actually started. PVE may accept the start
+        # command but the VM could fail to boot (e.g., storage issues).
+        # Wait briefly and check status.
+        import time
+        time.sleep(2)
+        
+        def _check() -> dict:
+            return self._get_client().nodes(node).qemu(vmid).status.current.get()
+        
+        status = await self._call(_check)
+        if status.get("status") != "running":
+            raise ProxmoxAPIError(
+                f"VM {vmid} failed to start: status={status.get('status')}, "
+                f"qmpstatus={status.get('qmpstatus')}"
+            )
 
     async def stop_vm(self, vmid: int, node: str, force: bool = False) -> None:
         """Stop a VM.
@@ -322,6 +345,71 @@ class RealProxmoxAdapter(ProxmoxAdapter):
                 raise
 
         await self._call(_do)
+
+    async def _fix_cloud_init_storage(self, vmid: int, node: str) -> None:
+        """Q27: Move cloud-init drives from `local` to `local-lvm` storage.
+        
+        PVE clones copy disk references as-is. If the template has cloud-init
+        on `local` storage (which doesn't support `images` content type), the
+        cloned VM won't start. This method detects cloud-init drives on wrong
+        storage and moves them to `local-lvm`.
+        
+        Cloud-init drives are typically on ide2 (CD-ROM) with naming pattern:
+        local:VMID/vm-VMID-cloudinit.qcow2
+        
+        We move them to:
+        local-lvm:vm-VMID-cloudinit,media=cdrom
+        """
+        def _get_config() -> dict:
+            return self._get_client().nodes(node).qemu(vmid).config.get()
+        
+        config = await self._call(_get_config)
+        
+        # Check for cloud-init drives on local storage
+        drives_to_fix = []
+        for key, value in config.items():
+            if key.startswith("ide") and isinstance(value, str):
+                # Check if it's a cloud-init drive on local storage
+                if "local:" in value and "cloudinit" in value.lower():
+                    # Extract the drive letter (ide0, ide1, ide2, etc.)
+                    drives_to_fix.append((key, value))
+        
+        if not drives_to_fix:
+            return
+        
+        log.info(
+            "pve_runner.fixing_cloud_init_storage vmid=%s drives=%s",
+            vmid,
+            [d[0] for d in drives_to_fix],
+        )
+        
+        for drive_key, drive_value in drives_to_fix:
+            # Delete the old drive
+            def _delete_drive() -> None:
+                self._get_client().nodes(node).qemu(vmid).config.post(
+                    **{"delete": drive_key}
+                )
+            
+            await self._call(_delete_drive)
+            
+            # Add new drive on local-lvm
+            # Format: local-lvm:vm-VMID-cloudinit,media=cdrom
+            new_drive_value = f"local-lvm:vm-{vmid}-cloudinit,media=cdrom"
+            
+            def _add_drive() -> None:
+                self._get_client().nodes(node).qemu(vmid).config.post(
+                    **{drive_key: new_drive_value}
+                )
+            
+            await self._call(_add_drive)
+            
+            log.info(
+                "pve_runner.moved_cloud_init vmid=%s drive=%s from=%s to=%s",
+                vmid,
+                drive_key,
+                drive_value,
+                new_drive_value,
+            )
 
     async def get_vm_state(self, vmid: int, node: str) -> VmState:
         """Return current state. PVE returns 'running'|'stopped'|'paused'|...
