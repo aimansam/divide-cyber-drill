@@ -44,6 +44,7 @@ import { EmptyState } from "./empty-state";
 import { useToasts } from "./toast";
 import { StatusPill } from "./status-pill";
 import { TopologyGraph, type TopologyAsset } from "./topology-graph";
+import { ConsoleCard, type AssetRef } from "./console-card";
 import { LeaderboardCard } from "./leaderboard-card";
 import { SocViewCard } from "./soc-view-card";
 import type { RunDetail } from "./run-lifecycle-card";
@@ -59,6 +60,7 @@ export function DrillConsole({ pickedRunId, scenarioName }: DrillConsoleProps) {
   const [error, setError] = useState<string | null>(null);
   const [reportPending, setReportPending] = useState(false);
   const [tick, setTick] = useState(0); // re-renders the duration timer
+  const [pickedAsset, setPickedAsset] = useState<AssetRef | null>(null);
   const toasts = useToasts();
   const prevStatusRef = useRef<string | null>(null);
   const isLive =
@@ -154,6 +156,11 @@ export function DrillConsole({ pickedRunId, scenarioName }: DrillConsoleProps) {
     } finally {
       setReportPending(false);
     }
+  }
+
+  function onOpenConsole(asset: AssetRef) {
+    setPickedAsset(asset);
+    toasts.info(`Opening console for ${asset.role || `asset #${asset.asset_id}`}`);
   }
 
   // F11.2: open the markdown debrief in a new browser tab. Modern
@@ -340,8 +347,19 @@ export function DrillConsole({ pickedRunId, scenarioName }: DrillConsoleProps) {
         <AssetsCard
           pickedRunId={pickedRunId}
           compact
+          onOpenConsole={onOpenConsole}
         />
       </section>
+
+      {pickedAsset && (
+        <section aria-label="VM Console">
+          <ConsoleCard
+            pickedRunId={pickedRunId}
+            pickedAsset={pickedAsset}
+            onClose={() => setPickedAsset(null)}
+          />
+        </section>
+      )}
 
       <section aria-label="Audit feed">
         <h3 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">

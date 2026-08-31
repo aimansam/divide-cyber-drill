@@ -257,6 +257,7 @@ make test-live-pg   # requires DIVIDE_TEST_LIVE_PG=1 + a reachable DB
 | [`docs/F8-SOC.md`](docs/F8-SOC.md) | Devs | F8 SOC view + SSE |
 | [`docs/PORTAL-APP.md`](docs/PORTAL-APP.md) | Frontend devs | Portal component inventory |
 | [`docs/PORTAL-UI.md`](docs/PORTAL-UI.md) | Designers | Visual layout + tab nav |
+| [`USER-REQUIREMENTS.md`](USER-REQUIREMENTS.md) | Everyone | User requirements + acceptance criteria |
 | [`docs/LIVE-DRILL-RUNBOOK.md`](docs/LIVE-DRILL-RUNBOOK.md) | Operators | Live drill command reference |
 | [`docs/DEMO.md`](docs/DEMO.md) | Operators | Demo flow notes |
 | [`docs/PROXMOX-SETUP.md`](docs/PROXMOX-SETUP.md) | Operators | Proxmox token + ACL setup |

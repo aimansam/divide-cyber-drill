@@ -17,7 +17,7 @@
  */
 
 import { useEffect, useState } from "react";
-import { Clipboard, ClipboardCheck, RefreshCw, Server, CheckCircle2, AlertCircle, XCircle, Trash2 } from "lucide-react";
+import { Clipboard, ClipboardCheck, RefreshCw, Server, CheckCircle2, AlertCircle, XCircle, Trash2, Terminal } from "lucide-react";
 import {
   Card,
   CardContent,
@@ -50,9 +50,11 @@ interface AssetSyncStatus {
 export function AssetsCard({
   pickedRunId,
   compact = false,
+  onOpenConsole,
 }: {
   pickedRunId: number | null;
   compact?: boolean;
+  onOpenConsole?: (asset: { asset_id: number; role?: string }) => void;
 }) {
   const [assets, setAssets] = useState<RunAsset[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -363,6 +365,17 @@ export function AssetsCard({
                   >
                     <RefreshCw className={`h-3.5 w-3.5 ${syncingAssetId === a.asset_id ? "animate-spin" : ""}`} />
                   </Button>
+                  {/* F4: Open console button - only for running VMs */}
+                  {onOpenConsole && a.status === "running" && a.pve_vmid && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      aria-label="open VM console"
+                      onClick={() => onOpenConsole({ asset_id: a.asset_id ?? 0, role: a.role })}
+                    >
+                      <Terminal className="h-3.5 w-3.5" />
+                    </Button>
+                  )}
                   {/* Q27: delete button */}
                   <Button
                     variant="ghost"

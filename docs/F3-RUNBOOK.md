@@ -46,6 +46,12 @@ pvesh get /nodes/pve/network | jq '.data[] | select(.iface=="vmbr100")'
 
 ## Why this needs a runbook
 
+**PVE does not expose a public bridge-creation API.** The Proxmox VE
+platform has no public API for creating Linux bridges on nodes — bridge
+configuration lives in `/etc/network/interfaces` and is managed by the
+operator. This is why the runner cannot auto-create bridges and must
+assert they exist instead.
+
 Bridges are managed via PVE's Software-Defined Networking stack
 (PVE 8.1+ / PVE 9): the runner no longer creates them through
 SSH or by editing `/etc/network/interfaces`. Instead, the wizard's
