@@ -322,7 +322,7 @@ def test_start_vm_raises_when_vm_fails_to_start():
 
 
 def test_fix_cloud_init_storage_moves_drives():
-    """Q27: Test that cloud-init drives on local storage are moved to local-lvm."""
+    """Q27: Test that broken cloud-init drives are deleted and boot order set."""
     a = RealProxmoxAdapter(
         host="pve", port=8006, user="u",
         token_id="u!t", token_secret="x",
@@ -338,17 +338,15 @@ def test_fix_cloud_init_storage_moves_drives():
     
     asyncio.run(a._fix_cloud_init_storage(108, "pve"))
     
-    # Verify delete was called
-    client.nodes("pve").qemu(108).config.post.assert_any_call(delete="ide2")
-    
-    # Verify new drive was added on local-lvm
-    client.nodes("pve").qemu(108).config.post.assert_any_call(
-        ide2="local-lvm:vm-108-cloudinit,media=cdrom"
+    # Verify delete and boot order were posted
+    client.nodes("pve").qemu(108).config.post.assert_called_once_with(
+        boot="order=scsi0",
+        delete="ide2",
     )
 
 
 def test_fix_cloud_init_storage_skips_when_no_cloud_init():
-    """Q27: Test that _fix_cloud_init_storage is a no-op when no cloud-init drives exist."""
+    """Q27: Test that _fix_cloud_init_storage is a no-op when no cloud-init drives exist and boot is scsi0."""
     a = RealProxmoxAdapter(
         host="pve", port=8006, user="u",
         token_id="u!t", token_secret="x",
@@ -356,9 +354,10 @@ def test_fix_cloud_init_storage_skips_when_no_cloud_init():
     client = _build_mock_client()
     _install_client(a, client)
     
-    # Mock config without cloud-init
+    # Mock config without cloud-init and with boot=order=scsi0
     client.nodes("pve").qemu(108).config.get.return_value = {
         "scsi0": "local-lvm:vm-108-disk-0,size=20G",
+        "boot": "order=scsi0",
     }
     
     asyncio.run(a._fix_cloud_init_storage(108, "pve"))
