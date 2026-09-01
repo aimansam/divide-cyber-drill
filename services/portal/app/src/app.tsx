@@ -275,7 +275,12 @@ export default function App() {
                 return (
                   <>
                     <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-                      <OperatorConsoleCard />
+                      <OperatorConsoleCard
+                        onNavigateToObserve={(runId) => {
+                          setPickedRun({ run_id: runId, status: "running" });
+                          setActiveView("observe");
+                        }}
+                      />
                       <PveOpsCard />
                     </div>
                     {/* Q21: cross-run audit search. Pinned at the top

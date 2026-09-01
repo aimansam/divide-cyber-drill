@@ -24,10 +24,12 @@ import {
   Activity,
   CircleStop,
   Clock,
+  Eye,
   Loader2,
   Power,
   RefreshCw,
   RotateCcw,
+  Server,
   Siren,
 } from "lucide-react";
 import {
@@ -41,8 +43,18 @@ import { Button } from "@/components/ui/button";
 import { EmptyState } from "./empty-state";
 import { StatusPill } from "./status-pill";
 import { InjectEventModal } from "./inject-event-modal";
+import { useToasts } from "./toast";
 import { api, ApiError, detailFromError } from "@/lib/api";
 import { formatRelative } from "@/lib/format";
+
+interface AssetSummary {
+  asset_id: number;
+  role: string;
+  kind?: string;
+  status: string;
+  pve_vmid?: number | null;
+  pve_ip?: string | null;
+}
 
 interface LiveRun {
   /**
@@ -59,24 +71,28 @@ interface LiveRun {
   status: string;
   started_by?: string | null;
   started_at?: string | null;
+  assets?: AssetSummary[];
 }
 
 interface RunsPayload {
   items?: LiveRun[];
 }
 
-export function OperatorConsoleCard() {
+interface OperatorConsoleCardProps {
+  onNavigateToObserve?: (runId: number) => void;
+}
+
+export function OperatorConsoleCard({ onNavigateToObserve }: OperatorConsoleCardProps = {}) {
   const [runs, setRuns] = useState<LiveRun[]>([]);
   // Q23-B4+B5: split "loading" (initial fetch -- show the
   // "Loading…" placeholder) from "refreshing" (background poll
   // -- keep the list rendered, just spin the Refresh icon).
-  // Pre-fix, every 5s poll set loading=true and unmounted the
-  // list for ~100ms which made the UI feel broken.
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [pending, setPending] = useState<number | null>(null);
+  const toasts = useToasts();
   /**
    * Q21: runs the operator has just stopped in this session.
    * Keyed by run_id, value is the timestamp of the stop.
@@ -96,6 +112,10 @@ export function OperatorConsoleCard() {
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
   // Q27: cache scenario names for display
   const [scenarioNames, setScenarioNames] = useState<Record<number, string>>({});
+  // Cache asset details per run
+  const [runAssets, setRunAssets] = useState<Record<number, AssetSummary[]>>({});
+  // Auto-refresh interval (in seconds: 5, 10, 30, or 0 for paused)
+  const [pollIntervalSec, setPollIntervalSec] = useState<number>(5);
 
   async function load(opts: { initial?: boolean } = {}) {
     if (opts.initial) setLoading(true);
@@ -103,11 +123,12 @@ export function OperatorConsoleCard() {
     setError(null);
     try {
       const data = await api.get<RunsPayload>("/api/v1/drills");
-      setRuns(data.items ?? []);
+      const fetchedRuns = data.items ?? [];
+      setRuns(fetchedRuns);
       setLastRefresh(new Date());
 
-      // Q27: fetch scenario names for display (cache them)
-      const uniqueScenarioIds = [...new Set((data.items ?? []).map(r => r.scenario_id).filter(Boolean))];
+      // Fetch scenario names for display (cache them)
+      const uniqueScenarioIds = [...new Set(fetchedRuns.map(r => r.scenario_id).filter(Boolean))];
       if (uniqueScenarioIds.length > 0) {
         try {
           const scenarios = await api.get<{ id: number; name: string }[]>("/api/v1/scenarios");
@@ -117,6 +138,30 @@ export function OperatorConsoleCard() {
         } catch {
           // Silently ignore - scenario names are optional
         }
+      }
+
+      // Fetch assets for active live runs so we can display VM IDs and IPs inline
+      const activeRuns = fetchedRuns.filter(r => r.status === "running" || r.status === "pending");
+      if (activeRuns.length > 0) {
+        Promise.all(
+          activeRuns.map(async (r) => {
+            try {
+              const drillData = await api.get<{ assets?: AssetSummary[] }>(`/api/v1/drills/${r.run_id}`);
+              if (drillData.assets) {
+                return { runId: r.run_id, assets: drillData.assets };
+              }
+            } catch {
+              // best-effort
+            }
+            return null;
+          }),
+        ).then((results) => {
+          const assetMap: Record<number, AssetSummary[]> = {};
+          results.forEach((res) => {
+            if (res) assetMap[res.runId] = res.assets;
+          });
+          setRunAssets((prev) => ({ ...prev, ...assetMap }));
+        });
       }
     } catch (e: unknown) {
       setError(detailFromError(e));
@@ -129,9 +174,12 @@ export function OperatorConsoleCard() {
 
   useEffect(() => {
     load({ initial: true });
-    const id = window.setInterval(() => load(), 5000);
+    // Default 5000ms polling interval (customizable via dropdown)
+    if (pollIntervalSec <= 0) return;
+    const intervalMs = pollIntervalSec === 5 ? 5000 : pollIntervalSec * 1000;
+    const id = window.setInterval(() => load(), intervalMs);
     return () => window.clearInterval(id);
-  }, []);
+  }, [pollIntervalSec]);
 
   // Q27: click-outside-to-deselect for the action buttons.
   useEffect(() => {
@@ -169,8 +217,9 @@ export function OperatorConsoleCard() {
   const stats = useMemo(() => {
     const running = runs.filter(r => r.status === "running").length;
     const pending = runs.filter(r => r.status === "pending").length;
-    return { running, pending };
-  }, [runs]);
+    const totalAssets = Object.values(runAssets).reduce((acc, list) => acc + list.length, 0);
+    return { running, pending, totalAssets };
+  }, [runs, runAssets]);
 
   async function stop(id: number) {
     // Q25-P1: confirm before force-stopping a live drill.
@@ -183,15 +232,14 @@ export function OperatorConsoleCard() {
     setSuccess(null);
     try {
       await api.post(`/api/v1/drills/${id}/stop`);
-      // Q21: surface success feedback. Previously the row
-      // silently vanished from the live filter and the operator
-      // had to trust that the stop worked. We pin the row in
-      // ``recentlyStopped`` so the operator gets visual confirmation
-      // and the row stays visible until the next poll cycle.
+      // Q21: surface success feedback.
       setRecentlyStopped((prev) => ({ ...prev, [id]: Date.now() }));
+      toasts.success(`Drill #${id} stopped successfully`);
       await load();
     } catch (e: unknown) {
-      setError(`stop failed: ${detailFromError(e)}`);
+      const msg = `stop failed: ${detailFromError(e)}`;
+      setError(msg);
+      toasts.error(msg);
     } finally {
       setPending(null);
     }
@@ -204,40 +252,35 @@ export function OperatorConsoleCard() {
     );
     if (!confirmed) return;
     setPending(id);
-    // Q23-B6: clear any stale success banner from a previous
-    // inject. Pre-fix, hitting Reset right after an Inject left
-    // the "event injected" banner sitting while the Reset
-    // failure rendered below it.
     setSuccess(null);
     try {
       await api.post(`/api/v1/drills/${id}/reset`);
+      toasts.success(`Drill #${id} reset initiated`);
       await load();
     } catch (e: unknown) {
-      // Q21: use the structured detail when available so the
-      // operator sees the actual error from the API instead of
-      // just an HTTP status. The Q23-B2 server-side guard
-      // returns 409 with detail "run id=X is live (...); stop
-      // it first" for active runs, which we surface verbatim.
       const status = e instanceof ApiError ? e.status : 0;
+      let msg = "";
       if (status === 409) {
-        setError(
-          `reset failed: ${detailFromError(e)} (save-as-template first if the run has no template)`,
-        );
+        msg = `reset failed: ${detailFromError(e)} (save-as-template first if the run has no template)`;
       } else {
-        setError(`reset failed: ${detailFromError(e)}`);
+        msg = `reset failed: ${detailFromError(e)}`;
       }
+      setError(msg);
+      toasts.error(msg);
     } finally {
       setPending(null);
     }
   }
 
   function onInjected(runId: number) {
-    setSuccess(`event injected into run #${runId}`);
+    const msg = `event injected into run #${runId}`;
+    setSuccess(msg);
+    toasts.success(msg);
   }
 
   return (
     <Card data-testid="operator-console-card">
-      <CardHeader className="flex-row items-center justify-between space-y-0">
+      <CardHeader className="flex-row items-center justify-between space-y-0 pb-3">
         <div>
           <CardTitle>
             <span className="inline-flex items-center gap-2">
@@ -248,27 +291,42 @@ export function OperatorConsoleCard() {
           <CardDescription>
             Live runs across the cyber range. Stop / Reset / Inject
             are all wired to their respective backend endpoints
-            (F2.5 / F7 / F8). Inject opens a small modal for
-            manual telemetry events.
+            (F2.5 / F7 / F8).
           </CardDescription>
         </div>
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={() => load()}
-          aria-label="Refresh"
-          disabled={loading || refreshing}
-        >
-          {loading || refreshing ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <RefreshCw className="h-4 w-4" />
-          )}
-        </Button>
+        <div className="flex items-center gap-2">
+          {/* Polling Interval Selector */}
+          <select
+            value={pollIntervalSec}
+            onChange={(e) => setPollIntervalSec(Number(e.target.value))}
+            className="rounded border border-border bg-background px-2 py-1 text-xs text-muted-foreground"
+            title="Auto-refresh interval"
+          >
+            <option value={2}>2s poll</option>
+            <option value={5}>5s poll</option>
+            <option value={15}>15s poll</option>
+            <option value={0}>Paused</option>
+          </select>
+
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={() => load()}
+            aria-label="Refresh"
+            disabled={loading || refreshing}
+          >
+            {loading || refreshing ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <RefreshCw className="h-4 w-4" />
+            )}
+          </Button>
+        </div>
       </CardHeader>
-      {/* Q27: Stats bar showing live counts and last refresh time */}
+
+      {/* Stats bar showing live counts and last refresh time */}
       {!loading && runs.length > 0 && (
-        <div className="flex items-center gap-4 border-t border-border bg-muted/30 px-6 py-2 text-xs">
+        <div className="flex flex-wrap items-center gap-4 border-t border-border bg-muted/30 px-6 py-2 text-xs">
           <div className="flex items-center gap-1.5">
             <Activity className="h-3.5 w-3.5 text-emerald-500" />
             <span className="font-medium">{stats.running}</span>
@@ -279,15 +337,23 @@ export function OperatorConsoleCard() {
             <span className="font-medium">{stats.pending}</span>
             <span className="text-muted-foreground">pending</span>
           </div>
+          {stats.totalAssets > 0 && (
+            <div className="flex items-center gap-1.5">
+              <Server className="h-3.5 w-3.5 text-sky-400" />
+              <span className="font-medium">{stats.totalAssets}</span>
+              <span className="text-muted-foreground">VMs active</span>
+            </div>
+          )}
           {lastRefresh && (
             <div className="ml-auto text-muted-foreground">
-              Last updated: {formatRelative(lastRefresh.toISOString())}
+              Updated {formatRelative(lastRefresh.toISOString())}
             </div>
           )}
         </div>
       )}
-      <CardContent>
-        {/* Q27: Move success/error banners inside CardContent for better visual flow */}
+
+      <CardContent className="pt-4">
+        {/* Success/Error banners */}
         {success !== null && (
           <div
             role="status"
@@ -300,17 +366,8 @@ export function OperatorConsoleCard() {
         {error && (
           <div
             role="alert"
-            className="mb-3 rounded-md border border-red-700 bg-red-950/30 px-3 py-2 text-sm text-red-200"
-            data-testid="operator-error"
-          >
-            {error}
-          </div>
-        )}
-        {error && (
-          <div
-            role="alert"
             data-testid="operator-console-message"
-            className="mb-3 rounded-md border border-amber-700 bg-amber-950/40 px-3 py-2 text-sm text-amber-200"
+            className="mb-3 rounded-md border border-red-700 bg-red-950/30 px-3 py-2 text-sm text-red-200"
           >
             {error}
           </div>
@@ -331,97 +388,149 @@ export function OperatorConsoleCard() {
             data-testid="operator-live-list"
             aria-live="polite"
           >
-            {live.map((r) => (
-              <li
-                key={r.run_id}
-                className={`flex items-center gap-2 px-3 py-2 text-sm transition-colors cursor-pointer ${
-                  selectedRowId === r.run_id
-                    ? "bg-accent/50"
-                    : "hover:bg-muted/30"
-                }`}
-                data-testid="operator-row"
-                data-run-id={r.run_id}
-                onClick={() =>
-                  setSelectedRowId((prev) =>
-                    prev === r.run_id ? null : r.run_id,
-                  )
-                }
-                role="button"
-                aria-expanded={selectedRowId === r.run_id}
-              >
-                <span className="font-mono text-xs">#{r.run_id}</span>
-                <StatusPill status={r.status} />
-                {r.scenario_id && scenarioNames[r.scenario_id] && (
-                  <span className="text-xs text-muted-foreground max-w-[120px] truncate">
-                    {scenarioNames[r.scenario_id]}
-                  </span>
-                )}
-                <span className="text-muted-foreground">
-                  {r.started_by ?? "—"}
-                </span>
-                <time
-                  className="text-xs text-muted-foreground"
-                  dateTime={r.started_at ?? undefined}
-                  title={
-                    r.started_at
-                      ? new Date(r.started_at).toLocaleString()
-                      : undefined
+            {live.map((r) => {
+              const assets = runAssets[r.run_id] || [];
+              const isSelected = selectedRowId === r.run_id;
+
+              return (
+                <li
+                  key={r.run_id}
+                  className={`flex flex-col gap-1.5 px-3 py-2.5 text-sm transition-colors cursor-pointer rounded-sm ${
+                    isSelected
+                      ? "bg-accent/50"
+                      : "hover:bg-muted/30"
+                  }`}
+                  data-testid="operator-row"
+                  data-run-id={r.run_id}
+                  onClick={() =>
+                    setSelectedRowId((prev) =>
+                      prev === r.run_id ? null : r.run_id,
+                    )
                   }
+                  role="button"
+                  aria-expanded={isSelected}
                 >
-                  {formatRelative(r.started_at)}
-                </time>
-                <div className="ml-auto">
-                  {selectedRowId === r.run_id ? (
-                    <div
-                      className="flex items-center gap-1"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <Button
-                        size="sm"
-                        variant="destructive"
-                        onClick={() => stop(r.run_id)}
-                        disabled={pending === r.run_id}
-                        data-testid="operator-stop"
-                      >
-                        <CircleStop className="mr-1 h-3 w-3" />
-                        {pending === r.run_id ? "Stopping…" : "Stop"}
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => reset(r.run_id)}
-                        disabled={pending === r.run_id}
-                        data-testid="operator-reset"
-                      >
-                        <RotateCcw className="mr-1 h-3 w-3" />
-                        {pending === r.run_id ? "Resetting…" : "Reset"}
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => setInjectForRun(r.run_id)}
-                        data-testid="operator-inject"
-                      >
-                        <Siren className="mr-1 h-3 w-3" />
-                        Inject
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => load()}
-                      >
-                        <RefreshCw className="mr-1 h-3 w-3" />
-                        Refresh
-                      </Button>
-                    </div>
-                  ) : (
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-xs font-semibold">#{r.run_id}</span>
+                    <StatusPill status={r.status} />
+                    {r.scenario_id && scenarioNames[r.scenario_id] && (
+                      <span className="text-xs font-medium text-foreground max-w-[150px] truncate">
+                        {scenarioNames[r.scenario_id]}
+                      </span>
+                    )}
                     <span className="text-xs text-muted-foreground">
-                      Click for actions
+                      by {r.started_by ?? "—"}
                     </span>
+                    <time
+                      className="text-xs text-muted-foreground ml-auto pr-1"
+                      dateTime={r.started_at ?? undefined}
+                      title={
+                        r.started_at
+                          ? new Date(r.started_at).toLocaleString()
+                          : undefined
+                      }
+                    >
+                      {formatRelative(r.started_at)}
+                    </time>
+                  </div>
+
+                  {/* Inline VM / Asset preview badges */}
+                  {assets.length > 0 && (
+                    <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+                      {assets.map((a) => (
+                        <span
+                          key={a.asset_id}
+                          className="inline-flex items-center gap-1 rounded bg-muted/60 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground"
+                          title={`Asset #${a.asset_id} (${a.role}): ${a.pve_ip || "No IP"} on VMID ${a.pve_vmid || "?"}`}
+                        >
+                          <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                          <span>{a.role}</span>
+                          {a.pve_vmid && <span className="opacity-75">:{a.pve_vmid}</span>}
+                          {a.pve_ip && <span className="text-sky-400">({a.pve_ip})</span>}
+                        </span>
+                      ))}
+                    </div>
                   )}
-                </div>
-              </li>
-            ))}
+
+                  <div className="w-full">
+                    {isSelected ? (
+                      <div
+                        className="mt-2 flex flex-wrap items-center gap-1.5 border-t border-border/50 pt-2"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        {onNavigateToObserve && (
+                          <Button
+                            size="sm"
+                            variant="default"
+                            className="h-7 text-xs"
+                            onClick={() => onNavigateToObserve(r.run_id)}
+                          >
+                            <Eye className="mr-1 h-3 w-3" />
+                            Observe
+                          </Button>
+                        )}
+                        <Button
+                          size="sm"
+                          variant="destructive"
+                          className="h-7 text-xs"
+                          onClick={() => stop(r.run_id)}
+                          disabled={pending === r.run_id}
+                          data-testid="operator-stop"
+                        >
+                          <CircleStop className="mr-1 h-3 w-3" />
+                          {pending === r.run_id ? "Stopping…" : "Stop"}
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-7 text-xs"
+                          onClick={() => reset(r.run_id)}
+                          disabled={pending === r.run_id}
+                          data-testid="operator-reset"
+                        >
+                          <RotateCcw className="mr-1 h-3 w-3" />
+                          {pending === r.run_id ? "Resetting…" : "Reset"}
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-7 text-xs"
+                          onClick={() => setInjectForRun(r.run_id)}
+                          data-testid="operator-inject"
+                        >
+                          <Siren className="mr-1 h-3 w-3" />
+                          Inject
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-7 text-xs"
+                          onClick={() => load()}
+                        >
+                          <RefreshCw className="mr-1 h-3 w-3" />
+                          Refresh
+                        </Button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center justify-between pt-0.5 text-[11px] text-muted-foreground/70">
+                        <span>Click to reveal actions</span>
+                        {onNavigateToObserve && (
+                          <span
+                            className="text-primary hover:underline"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onNavigateToObserve(r.run_id);
+                            }}
+                          >
+                            Jump to Observe →
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </li>
+              );
+            })}
           </ul>
         )}
         {/* Q21: "Recently stopped" panel below the live list.

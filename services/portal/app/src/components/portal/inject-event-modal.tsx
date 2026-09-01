@@ -59,6 +59,40 @@ export function InjectEventModal({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Quick Preset Injects for cyber drill scenarios
+  const presets = [
+    {
+      label: "Ransomware Encrypt",
+      kind: "ransomware.encrypt",
+      severity: "high" as Severity,
+      payload: '{\n  "message": "Files encrypted with .divide extension on target",\n  "stage": "impact",\n  "files_affected": 42\n}',
+    },
+    {
+      label: "SOC Alert / Detection",
+      kind: "soc.alert",
+      severity: "medium" as Severity,
+      payload: '{\n  "message": "Suspicious lateral movement detected via SMB",\n  "mitre_technique": "T1021.002",\n  "confidence": "high"\n}',
+    },
+    {
+      label: "Flag Planted",
+      kind: "flag.planted",
+      severity: "info" as Severity,
+      payload: '{\n  "message": "Manual secondary flag planted on asset",\n  "flag_id": "manual-bonus-flag",\n  "points": 50\n}',
+    },
+    {
+      label: "Network Latency / Spike",
+      kind: "telemetry.network.spike",
+      severity: "low" as Severity,
+      payload: '{\n  "message": "Simulated bandwidth degradation on drill_vlan",\n  "packet_loss_pct": 5,\n  "latency_ms": 120\n}',
+    },
+  ];
+
+  function applyPreset(p: typeof presets[0]) {
+    setKind(p.kind);
+    setSeverity(p.severity);
+    setPayloadRaw(p.payload);
+  }
+
   // Close on Escape. Mirrors the toast modal pattern.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -146,6 +180,25 @@ export function InjectEventModal({
           </Button>
         </CardHeader>
         <CardContent>
+          {/* Quick Preset Buttons */}
+          <div className="mb-3 space-y-1.5">
+            <label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+              Quick Injects / Presets
+            </label>
+            <div className="flex flex-wrap gap-1.5">
+              {presets.map((p) => (
+                <button
+                  key={p.label}
+                  type="button"
+                  onClick={() => applyPreset(p)}
+                  className="rounded-full border border-border bg-muted/40 px-2.5 py-1 text-xs font-medium text-foreground transition-colors hover:border-primary/50 hover:bg-muted"
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
           <form onSubmit={onSubmit} className="space-y-3">
             <div>
               <label
