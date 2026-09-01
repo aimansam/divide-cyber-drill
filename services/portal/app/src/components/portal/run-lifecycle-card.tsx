@@ -34,6 +34,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   BookMarked,
+  Clock,
   Download,
   Loader2,
   Play,
@@ -44,6 +45,7 @@ import {
   Square,
   CircleStop,
   AlertTriangle,
+  X,
 } from "lucide-react";
 import {
   Card,
@@ -146,12 +148,16 @@ export interface RunDetail {
   // uses this to decide whether to render the leaderboard +
   // live SOC stream inline.
   exercise_id?: number | null;
+  // F6: team name for multi-team exercises (red/blue/white).
+  team?: string | null;
   status: string;
   started_by?: string | null;
   started_at?: string | null;
   ended_at?: string | null;
   duration_sec?: number | null;
   timeout_sec?: number | null;
+  score_blue?: number | null;
+  score_red?: number | null;
   error?: string | null;
   assets?: RunAsset[];
 }
@@ -199,6 +205,9 @@ export function RunLifecycleCard({
     null,
   );
   const [latestAudit, setLatestAudit] = useState<AuditRow | null>(null);
+  // Countdown timer state for live drills.
+  const [timeLeftSec, setTimeLeftSec] = useState<number | null>(null);
+  const [extendingTimeout, setExtendingTimeout] = useState(false);
   const toasts = useToasts();
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const prevStatusRef = useRef<string | null>(null);
@@ -285,6 +294,7 @@ export function RunLifecycleCard({
     if (pickedRunId === null) {
       setRun(null);
       clearPoll();
+      setTimeLeftSec(null);
       return;
     }
     // Q25: reset cancel reason when switching runs so the operator
@@ -385,7 +395,8 @@ export function RunLifecycleCard({
       setError("No run selected.");
       return;
     }
-    if (scenario === null) {
+    // Allow restart if either scenario is picked OR run has scenario_id.
+    if (scenario === null && run.scenario_id === undefined) {
       // Q25: surface a hint instead of silently returning. Pre-fix,
       // clicking Restart with no scenario picked did nothing and the
       // operator had no feedback.
@@ -393,8 +404,9 @@ export function RunLifecycleCard({
       return;
     }
     // Q25-P1: confirm before starting a new drill (allocates new VMs).
+    const scenarioName = scenario?.name ?? (run.scenario_id !== undefined ? `scenario #${run.scenario_id}` : "unknown");
     const confirmed = window.confirm(
-      `Restart drill with scenario "${scenario.name}"? A new run will be created with fresh VMs.`,
+      `Restart drill with scenario "${scenarioName}"? A new run will be created with fresh VMs.`,
     );
     if (!confirmed) return;
     setLoading(true);
@@ -402,7 +414,7 @@ export function RunLifecycleCard({
     setErrorKind(null);
     try {
       const created = await api.post<RunDetail>("/api/v1/drills", {
-        scenario_id: run.scenario_id ?? scenario.id,
+        scenario_id: run.scenario_id ?? scenario?.id,
       });
       setRun(created);
       toasts.success(`Drill #${created.run_id} restarted`);
@@ -506,6 +518,36 @@ export function RunLifecycleCard({
     }
   }
 
+  /**
+   * Extend the drill timeout by 30 minutes.
+   * Calls POST /drills/{id}/extend-timeout with extend_min=30.
+   */
+  async function onExtendTimeout() {
+    if (run === null || !hasLiveRun) return;
+    setExtendingTimeout(true);
+    setError(null);
+    try {
+      const result = await api.post<{ new_timeout_sec?: number; extended_min?: number }>(
+        `/api/v1/drills/${run.run_id}/extend-timeout`,
+        { extend_min: 30 },
+      );
+      // Update local run state with new timeout.
+      if (result.new_timeout_sec !== undefined) {
+        setRun({ ...run, timeout_sec: result.new_timeout_sec });
+        setTimeLeftSec(result.new_timeout_sec);
+      } else if (result.extended_min !== undefined) {
+        // Fallback: add 30min to current timeLeftSec.
+        setTimeLeftSec((prev) => (prev ?? 0) + result.extended_min! * 60);
+      }
+      toasts.success(`Drill #${run.run_id} extended by 30 minutes`);
+    } catch (e: unknown) {
+      setError(detailFromError(e));
+      toasts.error(`Failed to extend timeout`);
+    } finally {
+      setExtendingTimeout(false);
+    }
+  }
+
   async function onRefresh() {
     if (run === null) return;
     setLoading(true);
@@ -522,7 +564,45 @@ export function RunLifecycleCard({
     }
   }
 
+  /**
+   * Sync a single asset's status with PVE.
+   * Calls POST /drills/{run_id}/assets/{asset_id}/sync-status.
+   */
+  async function onSyncAsset(assetId: number) {
+    if (run === null) return;
+    try {
+      await api.post(`/api/v1/drills/${run.run_id}/assets/${assetId}/sync-status`);
+      // Re-fetch the run to get updated asset state.
+      await fetchRun(run.run_id);
+      toasts.success(`Asset #${assetId} synced`);
+    } catch (e: unknown) {
+      setError(detailFromError(e));
+      toasts.error(`Failed to sync asset #${assetId}`);
+    }
+  }
+
   const hasLiveRun = run !== null && !TERMINAL_STATUSES.has(run.status);
+
+  // Countdown timer: ticks every second while a drill is live.
+  useEffect(() => {
+    if (run === null || !hasLiveRun || run.timeout_sec === null || run.timeout_sec === undefined) {
+      setTimeLeftSec(null);
+      return;
+    }
+    // Compute initial time left from timeout_sec (server returns remaining seconds).
+    const computeTimeLeft = () => {
+      if (run.timeout_sec === null || run.timeout_sec === undefined) return null;
+      return Math.max(0, run.timeout_sec);
+    };
+    setTimeLeftSec(computeTimeLeft());
+    const timer = setInterval(() => {
+      setTimeLeftSec((prev) => {
+        if (prev === null) return null;
+        return Math.max(0, prev - 1);
+      });
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [run?.run_id, run?.timeout_sec, hasLiveRun]);
 
   return (
     <Card>
@@ -542,7 +622,18 @@ export function RunLifecycleCard({
           <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
             <div className="flex items-start gap-2">
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-              <span className="font-mono whitespace-pre-wrap">{error}</span>
+              <span className="font-mono whitespace-pre-wrap flex-1">{error}</span>
+              <button
+                type="button"
+                onClick={() => {
+                  setError(null);
+                  setErrorKind(null);
+                }}
+                className="shrink-0 text-destructive/60 hover:text-destructive"
+                aria-label="Dismiss error"
+              >
+                <X className="h-4 w-4" />
+              </button>
             </div>
             {/*
               Q15: only show "Open Config" when the error is a PVE /
@@ -638,6 +729,12 @@ export function RunLifecycleCard({
             >
               <div className="flex flex-wrap items-center gap-3 text-sm">
                 <StatusPill status={run.status} />
+                {/* F6: team badge for multi-team exercises */}
+                {run.team && (
+                  <span className="inline-flex items-center rounded bg-secondary px-1.5 py-0.5 text-[10px] font-medium uppercase text-secondary-foreground">
+                    {run.team}
+                  </span>
+                )}
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
                   {run.started_by && <span>by {run.started_by}</span>}
                   {run.started_at && <span>{formatRelative(run.started_at)}</span>}
@@ -649,7 +746,42 @@ export function RunLifecycleCard({
                       {formatDuration(run.duration_sec)}
                     </span>
                   )}
+                  {/* Countdown timer for live drills */}
+                  {hasLiveRun && timeLeftSec !== null && (
+                    <span
+                      className={
+                        "font-mono font-semibold " +
+                        (timeLeftSec <= 60
+                          ? "text-red-500"
+                          : timeLeftSec <= 300
+                            ? "text-amber-500"
+                            : "text-emerald-500")
+                      }
+                      title="Time remaining before auto-timeout"
+                    >
+                      <Clock className="mr-1 inline h-3 w-3" />
+                      {Math.floor(timeLeftSec / 60)}m {timeLeftSec % 60}s left
+                    </span>
+                  )}
                 </div>
+                {/* Extend timeout button for live drills */}
+                {hasLiveRun && canStart && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={onExtendTimeout}
+                    disabled={extendingTimeout}
+                    className="h-6 text-xs"
+                    title="Extend drill timeout by 30 minutes"
+                  >
+                    {extendingTimeout ? (
+                      <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                    ) : (
+                      <Clock className="mr-1 h-3 w-3" />
+                    )}
+                    +30m
+                  </Button>
+                )}
                 <Button
                   variant="ghost"
                   size="icon"
@@ -731,13 +863,46 @@ export function RunLifecycleCard({
               </div>
             )}
 
+            {/* Scores display for completed drills */}
+            {TERMINAL_STATUSES.has(run.status) && (run.score_red !== null || run.score_blue !== null) && (
+              <div className="rounded-md border border-border bg-muted/20 px-3 py-2">
+                <div className="flex items-center gap-4 text-sm">
+                  {run.score_red !== null && run.score_red !== undefined && (
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs font-medium text-muted-foreground">Red:</span>
+                      <span className="font-mono font-semibold text-red-500">{run.score_red}</span>
+                    </div>
+                  )}
+                  {run.score_blue !== null && run.score_blue !== undefined && (
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-xs font-medium text-muted-foreground">Blue:</span>
+                      <span className="font-mono font-semibold text-blue-500">{run.score_blue}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
             {/* Q27: Assets section with improved visual integration */}
             {run.assets && run.assets.length > 0 && (
               <div className="rounded-md border border-border bg-muted/20">
-                <div className="border-b border-border px-3 py-2">
+                <div className="border-b border-border px-3 py-2 flex items-center justify-between">
                   <h4 className="text-xs font-medium text-muted-foreground">
                     Assets ({run.assets.length})
                   </h4>
+                  {hasLiveRun && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={onRefresh}
+                      disabled={loading}
+                      className="h-6 text-xs"
+                      title="Refresh all assets"
+                    >
+                      <RefreshCw className="mr-1 h-3 w-3" />
+                      Sync all
+                    </Button>
+                  )}
                 </div>
                 <ul className="divide-y divide-border">
                   {run.assets.map((a) => (
@@ -745,9 +910,9 @@ export function RunLifecycleCard({
                       key={a.asset_id ?? `${a.role}-${a.pve_vmid}`}
                       className="flex items-center justify-between gap-3 px-3 py-2 text-sm"
                     >
-                      <div>
+                      <div className="min-w-0 flex-1">
                         <div className="font-mono">{a.role ?? a.kind ?? "asset"}</div>
-                        <div className="text-xs text-muted-foreground">
+                        <div className="text-xs text-muted-foreground truncate">
                           {a.template ?? ""}
                           {a.pve_vmid !== null && a.pve_vmid !== undefined
                             ? ` · vmid=${a.pve_vmid}`
@@ -755,9 +920,21 @@ export function RunLifecycleCard({
                           {a.pve_ip ? ` · ${a.pve_ip}` : ""}
                         </div>
                       </div>
-                      <span className="font-mono text-xs text-muted-foreground">
-                        {a.status ?? "?"}
-                      </span>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className="font-mono text-xs text-muted-foreground">
+                          {a.status ?? "?"}
+                        </span>
+                        {hasLiveRun && a.asset_id && (
+                          <button
+                            type="button"
+                            onClick={() => onSyncAsset(a.asset_id!)}
+                            className="text-muted-foreground hover:text-foreground"
+                            title="Sync asset status with PVE"
+                          >
+                            <RefreshCw className="h-3.5 w-3.5" />
+                          </button>
+                        )}
+                      </div>
                     </li>
                   ))}
                 </ul>

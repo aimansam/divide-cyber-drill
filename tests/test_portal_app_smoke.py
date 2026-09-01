@@ -94,7 +94,7 @@ def test_app_source_references_scenarios_endpoint():
     src = (SRC_DIR / "components" / "portal" / "scenarios-card.tsx").read_text(
         encoding="utf-8"
     )
-    assert '"/api/v1/scenarios"' in src
+    assert '"/api/v1/scenarios' in src
 
 
 def test_app_source_uses_shadcn_ui_card():

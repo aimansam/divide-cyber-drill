@@ -240,7 +240,7 @@ export default function App() {
               case "operate":
                 return (
                   <>
-                    <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
+                    <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-[380px_1fr]">
                       <ScenariosCard
                         pickedId={pickedScenario?.id ?? null}
                         onPick={setPickedScenario}

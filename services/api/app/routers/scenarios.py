@@ -15,7 +15,7 @@ import yaml
 from fastapi import APIRouter, Depends, HTTPException, status
 from jsonschema import Draft202012Validator, FormatChecker
 from jsonschema.exceptions import ValidationError
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -75,6 +75,7 @@ def _row_to_dict(row: db_models.Scenario) -> dict:
 @router.get("", summary="List active scenarios")
 async def list_scenarios(
     include_archived: bool = False,
+    include_run_count: bool = False,
     session: AsyncSession = Depends(get_session),
 ) -> dict:
     q = select(db_models.Scenario)
@@ -82,9 +83,26 @@ async def list_scenarios(
         q = q.where(db_models.Scenario.archived_at.is_(None))
     q = q.order_by(db_models.Scenario.name)
     rows = (await session.execute(q)).scalars().all()
+    items = [_row_to_dict(r) for r in rows]
+    # Optional: attach run_count per scenario for the Operate page.
+    if include_run_count and rows:
+        scenario_ids = [r.id for r in rows]
+        counts = (
+            await session.execute(
+                select(
+                    db_models.Run.scenario_id,
+                    func.count(db_models.Run.id).label("cnt"),
+                )
+                .where(db_models.Run.scenario_id.in_(scenario_ids))
+                .group_by(db_models.Run.scenario_id)
+            )
+        ).all()
+        count_map = {row.scenario_id: row.cnt for row in counts}
+        for item in items:
+            item["run_count"] = count_map.get(item["id"], 0)
     return {
-        "items": [_row_to_dict(r) for r in rows],
-        "total": len(rows),
+        "items": items,
+        "total": len(items),
     }
 
 
