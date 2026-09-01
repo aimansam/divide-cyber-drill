@@ -865,12 +865,27 @@ class Runner:
         self._active_tasks[run_id] = task
 
     @classmethod
-    def get_timeout_sec(cls, run_id: int) -> int | None:
-        """Return remaining seconds until auto-timeout for a run, or None if not scheduled."""
-        deadline = cls._active_deadlines.get(run_id)
-        if deadline is None:
-            return None
+    def get_timeout_sec(cls, run_id: int, started_at: datetime | None = None) -> int | None:
+        """Return remaining seconds until auto-timeout for a run.
+        
+        If the in-memory deadline is lost (e.g. server restart), reconstructs it
+        from started_at and default drill_timeout_min.
+        """
         now = datetime.now(timezone.utc)
+        deadline = cls._active_deadlines.get(run_id)
+        
+        if deadline is None and started_at is not None:
+            timeout_min = getattr(settings, "drill_timeout_min", 30) or 30
+            # Ensure started_at is timezone-aware
+            if started_at.tzinfo is None:
+                started_at = started_at.replace(tzinfo=timezone.utc)
+            deadline = started_at + timedelta(minutes=timeout_min)
+            cls._active_deadlines[run_id] = deadline
+
+        if deadline is None:
+            timeout_min = getattr(settings, "drill_timeout_min", 30) or 30
+            return timeout_min * 60
+
         remaining = int((deadline - now).total_seconds())
         return max(0, remaining)
 

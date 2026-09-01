@@ -573,7 +573,7 @@ async def get_drill(
         "ended_at": run.ended_at.isoformat() if run.ended_at else None,
         "started_by": run.started_by,
         "duration_sec": run.duration_sec,
-        "timeout_sec": Runner.get_timeout_sec(run.id) if run.status.value in ("running", "pending") else None,
+        "timeout_sec": Runner.get_timeout_sec(run.id, run.started_at) if run.status.value in ("running", "pending") else None,
         "score_blue": run.score_blue,
         "score_red": run.score_red,
         "error": run.error,
@@ -662,6 +662,11 @@ async def sync_asset_status(
         "missing": db_models.AssetStatus.STOPPED,  # treat missing as stopped
     }
     mapped_status = pve_to_asset.get(pve_status)
+
+    # Also update pve_ip if discovered
+    if not pve_missing and state.ip and asset.pve_ip != state.ip:
+        asset.pve_ip = state.ip
+        await session.flush()
 
     # Q26: detect drift and update if needed.
     drifted = mapped_status is not None and asset.status != mapped_status

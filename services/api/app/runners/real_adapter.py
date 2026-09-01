@@ -464,10 +464,10 @@ class RealProxmoxAdapter(ProxmoxAdapter):
     async def get_vm_state(self, vmid: int, node: str) -> VmState:
         """Return current state. PVE returns 'running'|'stopped'|'paused'|...
 
-        IP is taken from the QEMU guest-agent interface (`ipconfig0`) when
-        available; otherwise the legacy `ip` field on the status payload.
-        Both are best-effort — many drill VMs won't have guest-agent
-        installed at clone time, in which case `ip` is None.
+        IP discovery order:
+        1. Query QEMU guest agent (agent/network-get-interfaces) if available.
+        2. Status payload `ip` field.
+        3. Config `ipconfig0` static definition fallback.
         """
         def _do() -> dict:
             return self._get_client().nodes(node).qemu(vmid).status.current.get()
@@ -475,10 +475,36 @@ class RealProxmoxAdapter(ProxmoxAdapter):
         current = await self._call(_do)
 
         ip: str | None = None
-        # `ip` field is sometimes populated by the agent; otherwise try config.
-        if current.get("ip"):
+
+        # 1. Try QEMU guest agent for live runtime IP addresses
+        if current.get("status") == "running":
+            def _get_agent_ips() -> str | None:
+                try:
+                    res = self._get_client().nodes(node).qemu(vmid).agent("network-get-interfaces").get()
+                    ifaces = res.get("result", []) if isinstance(res, dict) else res
+                    for iface in ifaces:
+                        if iface.get("name") in ("lo", "loopback"):
+                            continue
+                        for addr_info in iface.get("ip-addresses", []):
+                            if addr_info.get("ip-address-type") == "ipv4":
+                                addr = addr_info.get("ip-address")
+                                if addr and not addr.startswith("127."):
+                                    return addr
+                except Exception:
+                    pass
+                return None
+
+            try:
+                ip = await self._call(_get_agent_ips)
+            except Exception:
+                ip = None
+
+        # 2. `ip` field on status
+        if not ip and current.get("ip"):
             ip = current["ip"]
-        else:
+
+        # 3. Try config fallback
+        if not ip:
             try:
                 cfg = self._get_client().nodes(node).qemu(vmid).config.get()
                 ipconfig0 = cfg.get("ipconfig0") or ""
