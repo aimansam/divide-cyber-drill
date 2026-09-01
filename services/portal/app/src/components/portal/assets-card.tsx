@@ -305,13 +305,17 @@ export function AssetsCard({
                         </span>
                       ) : null}
                     </div>
-                    <div className="font-mono text-xs text-muted-foreground">
-                      {sshTarget}
+                    <div className="font-mono text-xs text-muted-foreground flex flex-wrap items-center gap-x-2">
+                      {a.pve_ip ? (
+                        <span className="text-sky-300 font-semibold">{sshTarget}</span>
+                      ) : (
+                        <span className="text-muted-foreground/70">(no IP)</span>
+                      )}
                       {a.pve_vmid !== null && a.pve_vmid !== undefined ? (
-                        <span className="ml-2">vmid={a.pve_vmid}</span>
+                        <span>vmid={a.pve_vmid}</span>
                       ) : null}
                       {a.pve_node ? (
-                        <span className="ml-2">node={a.pve_node}</span>
+                        <span>node={a.pve_node}</span>
                       ) : null}
                     </div>
                   </div>
