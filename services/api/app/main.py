@@ -1,7 +1,9 @@
 """FastAPI application entrypoint."""
 from __future__ import annotations
 
+import asyncio
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 
 import structlog
@@ -9,11 +11,14 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import selectinload
 
 from app import __version__
 from app.core.config import settings
 from app.core.logging import configure_logging
+from app.db import models
 from app.observability.middleware import PrometheusMiddleware
 from app.routers import admin, audit, auth, debrief, drills, events, exercises, health, me, proxmox, reports, scenarios, templates
 from app.services import orphan_cleanup as orphan_svc
@@ -213,6 +218,149 @@ async def lifespan(app: FastAPI):
 
         janitor_task = asyncio.create_task(_janitor_loop())
 
+    # Fix: Watchdog recovery after API restart.
+    # Reschedules watchdogs for any RUNNING drills so timeouts still fire
+    # even if the API container restarted mid-drill.
+    try:
+        from app.db.session import get_sessionmaker
+        from app.runners.runner import Runner
+
+        sm_recovery = get_sessionmaker()
+        async with sm_recovery() as recovery_session:
+            rescheduled = await Runner.recover_watchdogs(recovery_session)
+            if rescheduled > 0:
+                log.info(
+                    "divide_api.watchdog_recovery.completed",
+                    rescheduled=rescheduled,
+                )
+    except Exception as exc:  # pragma: no cover - best-effort
+        log.warning("divide_api.watchdog_recovery.failed", error=str(exc))
+
+    # Fix: Periodic PVE sync background task.
+    # Syncs all RUNNING drills with actual PVE state every 30s.
+    # Detects VM deletion and auto-transitions runs to FAILED.
+    pve_sync_task = None
+    pve_sync_interval_sec = getattr(settings, "pve_sync_interval_sec", 30) or 30
+
+    if pve_sync_interval_sec > 0:
+        import asyncio
+
+        async def _pve_sync_loop() -> None:
+            from app.db.session import get_sessionmaker
+            from app.runners.runner import build_runner
+            from app.db.models import RunStatus, AssetStatus, AuditAction, Run
+
+            sm = get_sessionmaker()
+            log.info(
+                "divide_api.pve_sync.started",
+                interval_sec=pve_sync_interval_sec,
+            )
+
+            while True:
+                try:
+                    async with sm() as session:
+                        runs = (
+                            await session.execute(
+                                select(Run)
+                                .where(Run.status == RunStatus.RUNNING)
+                                .options(selectinload(Run.assets))
+                            )
+                        ).scalars().all()
+
+                        for run in runs:
+                            if not run.assets:
+                                continue
+
+                            runner = build_runner()
+                            adapter = runner._adapter
+
+                            for asset in run.assets:
+                                if not asset.pve_vmid or not asset.pve_node:
+                                    continue
+
+                                try:
+                                    state = await adapter.get_vm_state(
+                                        asset.pve_vmid, asset.pve_node
+                                    )
+
+                                    # Update IP if discovered
+                                    if state.ip and asset.pve_ip != state.ip:
+                                        asset.pve_ip = state.ip
+                                        await session.flush()
+
+                                    # Detect VM deletion
+                                    if state.status == "missing" or state.status == "stopped":
+                                        if asset.status != AssetStatus.STOPPED:
+                                            old_status = asset.status
+                                            asset.status = AssetStatus.STOPPED
+                                            asset.cleaned_at = datetime.now(timezone.utc)
+                                            await session.flush()
+
+                                            # Write audit log
+                                            audit = models.AuditLog(
+                                                run_id=run.id,
+                                                asset_id=asset.id,
+                                                action=AuditAction.ASSET_STATUS_SYNCED,
+                                                actor="system:pve_sync",
+                                                detail={
+                                                    "old_status": old_status.value,
+                                                    "new_status": "stopped",
+                                                    "pve_status": state.status,
+                                                    "auto_detected": True,
+                                                },
+                                            )
+                                            session.add(audit)
+                                            await session.flush()
+
+                                            # If all assets are stopped, fail the run
+                                            all_stopped = all(
+                                                a.status == AssetStatus.STOPPED
+                                                for a in run.assets
+                                            )
+                                            if all_stopped:
+                                                run.status = RunStatus.FAILED
+                                                run.ended_at = datetime.now(timezone.utc)
+                                                run.error = "VM deleted or stopped outside of div:ide control"
+                                                await session.flush()
+
+                                                fail_audit = models.AuditLog(
+                                                    run_id=run.id,
+                                                    action=AuditAction.RUN_FAILED,
+                                                    actor="system:pve_sync",
+                                                    detail={
+                                                        "reason": "vm_deleted_outside_control",
+                                                        "asset_id": asset.id,
+                                                    },
+                                                )
+                                                session.add(fail_audit)
+                                                await session.flush()
+
+                                                log.warning(
+                                                    "divide_api.pve_sync.run_failed run_id=%s reason=vm_deleted",
+                                                    run.id,
+                                                )
+
+                                except Exception as exc:  # noqa: BLE001
+                                    log.debug(
+                                        "divide_api.pve_sync.asset_sync_failed run_id=%s asset_id=%s error=%s",
+                                        run.id,
+                                        asset.id,
+                                        str(exc),
+                                    )
+
+                        await session.commit()
+
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:  # noqa: BLE001
+                    log.warning(
+                        "divide_api.pve_sync.error", error=str(exc)
+                    )
+
+                await asyncio.sleep(pve_sync_interval_sec)
+
+        pve_sync_task = asyncio.create_task(_pve_sync_loop())
+
     yield
 
     # Cancel the janitor (if running) before tearing down other
@@ -225,6 +373,15 @@ async def lifespan(app: FastAPI):
         except (asyncio.CancelledError, Exception):  # noqa: BLE001
             pass
         log.info("divide_api.orphan_janitor.stopped")
+
+    # Cancel the PVE sync task (if running) on shutdown.
+    if pve_sync_task is not None:
+        pve_sync_task.cancel()
+        try:
+            await pve_sync_task
+        except (asyncio.CancelledError, Exception):  # noqa: BLE001
+            pass
+        log.info("divide_api.pve_sync.stopped")
 
     # R1: tear down the RedisEventBus bridge thread + redis pool.
     # InProcessEventBus has nothing to close. The factory caches

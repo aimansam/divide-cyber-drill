@@ -133,6 +133,10 @@ class Settings(BaseSettings):
     orphan_janitor_interval_min: int = 30
     orphan_janitor_grace_minutes: int = 5
 
+    # PVE sync interval in seconds. Set to 0 to disable.
+    # Syncs RUNNING drills with actual PVE state to detect VM deletion.
+    pve_sync_interval_sec: int = 30
+
     # F3-prep credential login. Lifetime of the HMAC token minted by
     # POST /api/v1/auth/login, in seconds. Default 8h covers a working
     # day; override for shorter demos. Clamped to a positive int at the

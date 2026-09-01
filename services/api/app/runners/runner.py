@@ -889,6 +889,60 @@ class Runner:
         remaining = int((deadline - now).total_seconds())
         return max(0, remaining)
 
+    @classmethod
+    async def recover_watchdogs(cls, session: AsyncSession) -> int:
+        """Reschedule watchdogs for any RUNNING drills after API restart.
+        
+        Returns the number of watchdogs rescheduled.
+        """
+        timeout_min = getattr(settings, "drill_timeout_min", 30) or 30
+        if timeout_min <= 0:
+            return 0
+
+        runs = (
+            await session.execute(
+                select(models.Run)
+                .where(models.Run.status == RunStatus.RUNNING)
+                .options(selectinload(models.Run.assets))
+            )
+        ).scalars().all()
+
+        rescheduled = 0
+        for run in runs:
+            if run.id in cls._active_tasks:
+                continue  # Already scheduled
+
+            remaining = cls.get_timeout_sec(run.id, run.started_at)
+            if remaining <= 0:
+                log.warning(
+                    "runner.recover_watchdog.already_expired run_id=%s remaining=%s",
+                    run.id,
+                    remaining,
+                )
+                continue
+
+            # Get node from first asset (watchdog needs it for teardown)
+            node = None
+            if run.assets:
+                node = run.assets[0].pve_node
+
+            if not node:
+                log.warning(
+                    "runner.recover_watchdog.no_node run_id=%s",
+                    run.id,
+                )
+                continue
+
+            cls._schedule_watchdog(run.id, node, len(run.assets))
+            log.info(
+                "runner.recover_watchdog.rescheduled run_id=%s remaining_sec=%s",
+                run.id,
+                remaining,
+            )
+            rescheduled += 1
+
+        return rescheduled
+
     async def extend_timeout(
         self,
         run_id: int,
