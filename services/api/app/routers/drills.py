@@ -664,7 +664,8 @@ async def sync_asset_status(
     mapped_status = pve_to_asset.get(pve_status)
 
     # Also update pve_ip if discovered
-    if not pve_missing and state.ip and asset.pve_ip != state.ip:
+    # NOTE: state is only defined if the try block succeeded (pve_missing=False)
+    if not pve_missing and hasattr(state, 'ip') and state.ip and asset.pve_ip != state.ip:
         asset.pve_ip = state.ip
         await session.flush()
 
