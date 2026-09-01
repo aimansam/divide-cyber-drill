@@ -249,6 +249,8 @@ async def lifespan(app: FastAPI):
             from app.db.session import get_sessionmaker
             from app.runners.runner import build_runner
             from app.db.models import RunStatus, AssetStatus, AuditAction, Run
+            from sqlalchemy import select
+            from sqlalchemy.orm import selectinload
 
             sm = get_sessionmaker()
             log.info(
@@ -302,7 +304,7 @@ async def lifespan(app: FastAPI):
                                                 asset_id=asset.id,
                                                 action=AuditAction.ASSET_STATUS_SYNCED,
                                                 actor="system:pve_sync",
-                                                detail={
+                                                details={
                                                     "old_status": old_status.value,
                                                     "new_status": "stopped",
                                                     "pve_status": state.status,
@@ -327,7 +329,7 @@ async def lifespan(app: FastAPI):
                                                     run_id=run.id,
                                                     action=AuditAction.RUN_FAILED,
                                                     actor="system:pve_sync",
-                                                    detail={
+                                                    details={
                                                         "reason": "vm_deleted_outside_control",
                                                         "asset_id": asset.id,
                                                     },

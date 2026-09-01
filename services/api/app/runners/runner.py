@@ -915,10 +915,25 @@ class Runner:
             remaining = cls.get_timeout_sec(run.id, run.started_at)
             if remaining <= 0:
                 log.warning(
-                    "runner.recover_watchdog.already_expired run_id=%s remaining=%s",
+                    "runner.recover_watchdog.already_expired run_id=%s remaining=%s - firing timeout immediately",
                     run.id,
                     remaining,
                 )
+                # Get node from first asset
+                node = run.assets[0].pve_node if run.assets else None
+                if node:
+                    # Create a Runner instance to fire the timeout
+                    runner = cls(adapter=_default_adapter())
+                    # Fire timeout immediately (sleep for 0 seconds)
+                    task = asyncio.get_running_loop().create_task(
+                        runner._watchdog_timeout_fire(
+                            run_id=run.id,
+                            node=node,
+                            timeout_min=0,  # Fire immediately
+                            asset_count=len(run.assets),
+                        )
+                    )
+                    cls._active_tasks[run.id] = task
                 continue
 
             # Get node from first asset (watchdog needs it for teardown)

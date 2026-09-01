@@ -686,7 +686,7 @@ async def sync_asset_status(
             asset_id=asset.id,
             action=AuditAction.ASSET_STATUS_SYNCED,
             actor=token.sub,
-            detail={
+            details={
                 "old_status": old_status.value,
                 "new_status": mapped_status.value,
                 "pve_status": pve_status,
