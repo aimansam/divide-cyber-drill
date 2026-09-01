@@ -286,11 +286,12 @@ export function MyRunsCard({
               <li key={r.run_id}>
                 <button
                   type="button"
-                  onClick={() =>
+                  onClick={() => {
+                    onPick(r);
                     setSelectedRowId((prev) =>
                       prev === r.run_id ? null : r.run_id,
-                    )
-                  }
+                    );
+                  }}
                   className={
                     "flex w-full items-center justify-between gap-3 px-2 py-3 text-left transition-colors hover:bg-accent " +
                     (isPicked ? "bg-accent" : "")
