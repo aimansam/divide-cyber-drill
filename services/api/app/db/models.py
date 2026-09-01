@@ -91,6 +91,7 @@ class AuditAction(str, enum.Enum):
     # its template snapshot. Distinct from RUN_STOPPED (which
     # destroys assets) and RUN_CANCELLED (trainee abort).
     RUN_RESET = "run.reset"
+    RUN_EXTENDED = "run.extended"
     ASSET_SPAWNED = "asset.spawned"
     ASSET_FAILED = "asset.failed"
     ASSET_ORPHANED = "asset.orphaned"

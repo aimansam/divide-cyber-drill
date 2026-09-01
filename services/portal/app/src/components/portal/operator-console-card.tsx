@@ -245,6 +245,25 @@ export function OperatorConsoleCard({ onNavigateToObserve }: OperatorConsoleCard
     }
   }
 
+  async function extendTimeout(id: number, minutes: number = 30) {
+    setPending(id);
+    setError(null);
+    setSuccess(null);
+    try {
+      const res = await api.post<{ extended_by_min: number; remaining_sec: number }>(
+        `/api/v1/drills/${id}/extend-timeout`,
+        { extend_min: minutes },
+      );
+      toasts.success(`Drill #${id} timeout extended by +${res.extended_by_min || minutes}m`);
+      await load();
+    } catch (e: unknown) {
+      toasts.error(`Failed to extend timeout: ${detailFromError(e)}`);
+      setError(detailFromError(e));
+    } finally {
+      setPending(null);
+    }
+  }
+
   async function reset(id: number) {
     // Q25-P1: confirm before resetting a drill.
     const confirmed = window.confirm(
@@ -469,6 +488,18 @@ export function OperatorConsoleCard({ onNavigateToObserve }: OperatorConsoleCard
                             Observe
                           </Button>
                         )}
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-7 text-xs"
+                          onClick={() => extendTimeout(r.run_id, 30)}
+                          disabled={pending === r.run_id}
+                          data-testid="operator-extend-timeout"
+                          title="Extend auto-timeout watchdog by +30m"
+                        >
+                          <Clock className="mr-1 h-3 w-3 text-sky-400" />
+                          +30m
+                        </Button>
                         <Button
                           size="sm"
                           variant="destructive"

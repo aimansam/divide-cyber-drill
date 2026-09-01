@@ -151,6 +151,7 @@ export interface RunDetail {
   started_at?: string | null;
   ended_at?: string | null;
   duration_sec?: number | null;
+  timeout_sec?: number | null;
   error?: string | null;
   assets?: RunAsset[];
 }

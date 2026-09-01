@@ -25,11 +25,12 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 log = logging.getLogger(__name__)
 
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
@@ -89,6 +90,11 @@ class RunnerError(RuntimeError):
 
 class Runner:
     """Orchestrates one run at a time."""
+
+    # Class-level dictionaries mapping run_id -> deadline (datetime UTC)
+    # and run_id -> asyncio.Task (for in-flight watchdog tasks).
+    _active_deadlines: dict[int, datetime] = {}
+    _active_tasks: dict[int, asyncio.Task] = {}
 
     def __init__(self, adapter: ProxmoxAdapter) -> None:
         self._adapter = adapter
@@ -846,7 +852,9 @@ class Runner:
             )
             return
 
-        loop.create_task(
+        now = datetime.now(timezone.utc)
+        self._active_deadlines[run_id] = now + timedelta(minutes=timeout_min)
+        task = loop.create_task(
             self._watchdog_timeout_fire(
                 run_id=run_id,
                 node=node,
@@ -854,6 +862,97 @@ class Runner:
                 asset_count=asset_count,
             )
         )
+        self._active_tasks[run_id] = task
+
+    @classmethod
+    def get_timeout_sec(cls, run_id: int) -> int | None:
+        """Return remaining seconds until auto-timeout for a run, or None if not scheduled."""
+        deadline = cls._active_deadlines.get(run_id)
+        if deadline is None:
+            return None
+        now = datetime.now(timezone.utc)
+        remaining = int((deadline - now).total_seconds())
+        return max(0, remaining)
+
+    async def extend_timeout(
+        self,
+        run_id: int,
+        extend_min: int = 30,
+        actor: str | None = None,
+        session: AsyncSession | None = None,
+    ) -> dict:
+        """Extend the auto-timeout for an active run by extend_min minutes."""
+        if extend_min <= 0 or extend_min > 240:
+            raise RunnerError("extend_min must be between 1 and 240 minutes")
+
+        sm = _sessionmaker()
+        async def _do(s: AsyncSession) -> dict:
+            run = (
+                await s.execute(
+                    select(models.Run)
+                    .where(models.Run.id == run_id)
+                    .options(selectinload(models.Run.assets))
+                )
+            ).scalar_one_or_none()
+            if run is None:
+                raise RunnerError(f"run id={run_id} not found")
+            if run.status not in (RunStatus.RUNNING, RunStatus.PENDING):
+                raise RunnerError(f"cannot extend timeout for terminal run (status={run.status.value})")
+
+            now = datetime.now(timezone.utc)
+            current_deadline = self._active_deadlines.get(run_id)
+            if current_deadline is None or current_deadline < now:
+                new_deadline = now + timedelta(minutes=extend_min)
+            else:
+                new_deadline = current_deadline + timedelta(minutes=extend_min)
+
+            self._active_deadlines[run_id] = new_deadline
+            remaining_sec = max(0, int((new_deadline - now).total_seconds()))
+
+            # Cancel existing task if any and spawn a new one with remaining time
+            old_task = self._active_tasks.get(run_id)
+            if old_task and not old_task.done():
+                old_task.cancel()
+
+            node = getattr(settings, "proxmox_node", "pve") or "pve"
+            try:
+                loop = asyncio.get_running_loop()
+                task = loop.create_task(
+                    self._watchdog_timeout_fire(
+                        run_id=run_id,
+                        node=node,
+                        timeout_min=remaining_sec / 60.0,
+                        asset_count=len(run.assets) if run.assets else 0,
+                    )
+                )
+                self._active_tasks[run_id] = task
+            except RuntimeError:
+                pass
+
+            await self._audit(
+                s,
+                action=AuditAction.RUN_EXTENDED,
+                actor=actor or "unknown",
+                run_id=run.id,
+                details={
+                    "extended_by_min": extend_min,
+                    "new_deadline": new_deadline.isoformat(),
+                    "remaining_sec": remaining_sec,
+                },
+            )
+            await s.commit()
+
+            return {
+                "run_id": run_id,
+                "extended_by_min": extend_min,
+                "remaining_sec": remaining_sec,
+                "new_deadline": new_deadline.isoformat(),
+            }
+
+        if session is not None:
+            return await _do(session)
+        async with sm() as session:
+            return await _do(session)
 
     async def _watchdog_timeout_fire(
         self, *, run_id: int, node: str, timeout_min: int, asset_count: int
@@ -919,6 +1018,8 @@ class Runner:
                         )
                     asset.status = AssetStatus.STOPPED
 
+                self._active_deadlines.pop(run_id, None)
+                self._active_tasks.pop(run_id, None)
                 run.status = RunStatus.TIMEOUT
                 run.ended_at = datetime.now(timezone.utc)
                 run.error = f"auto-timeout after {timeout_min} min"

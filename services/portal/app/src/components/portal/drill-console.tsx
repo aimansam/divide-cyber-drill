@@ -34,7 +34,7 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import { Activity, Download, FileText, Loader2, RefreshCw } from "lucide-react";
+import { Activity, Clock, Download, FileText, Loader2, RefreshCw } from "lucide-react";
 import { api, detailFromError, getToken } from "@/lib/api";
 import { formatDuration } from "@/lib/format";
 import { AssetsCard } from "./assets-card";
@@ -170,6 +170,25 @@ export function DrillConsole({ pickedRunId, scenarioName }: DrillConsoleProps) {
   // so the file is "viewable" rather than "downloadable". If the
   // tab fails to open (popup blocker), the error surfaces in the
   // same error alert as the report download.
+  const [extendPending, setExtendPending] = useState(false);
+
+  async function extendTimeout(minutes: number = 30) {
+    if (pickedRunId === null) return;
+    setExtendPending(true);
+    try {
+      const res = await api.post<{ extended_by_min: number; remaining_sec: number }>(
+        `/api/v1/drills/${pickedRunId}/extend-timeout`,
+        { extend_min: minutes },
+      );
+      toasts.success(`Drill #${pickedRunId} timeout extended by +${res.extended_by_min || minutes}m`);
+      await load();
+    } catch (e: unknown) {
+      toasts.error(`Failed to extend timeout: ${detailFromError(e)}`);
+    } finally {
+      setExtendPending(false);
+    }
+  }
+
   function viewDebrief() {
     if (pickedRunId === null) return;
     const tok = getToken();
@@ -253,13 +272,31 @@ export function DrillConsole({ pickedRunId, scenarioName }: DrillConsoleProps) {
             </h2>
             <StatusPill status={run?.status ?? null} />
             {isLive && (
-              <span
-                data-testid="drill-live-badge"
-                className="inline-flex items-center gap-1 rounded-md bg-sky-900/60 px-2 py-0.5 text-xs font-medium text-sky-200 ring-1 ring-inset ring-sky-700"
-              >
-                <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-sky-300" />
-                LIVE
-              </span>
+              <>
+                <span
+                  data-testid="drill-live-badge"
+                  className="inline-flex items-center gap-1 rounded-md bg-sky-900/60 px-2 py-0.5 text-xs font-medium text-sky-200 ring-1 ring-inset ring-sky-700"
+                >
+                  <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-sky-300" />
+                  LIVE
+                </span>
+                {run?.timeout_sec !== undefined && run?.timeout_sec !== null && (
+                  <span
+                    data-testid="drill-timeout-countdown"
+                    className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs font-mono font-medium ring-1 ring-inset ${
+                      run.timeout_sec < 180
+                        ? "bg-red-900/60 text-red-200 ring-red-700 animate-pulse"
+                        : run.timeout_sec < 600
+                        ? "bg-amber-900/60 text-amber-200 ring-amber-700"
+                        : "bg-slate-800 text-slate-300 ring-slate-600"
+                    }`}
+                    title="Time remaining before auto-stop watchdog"
+                  >
+                    <Clock className="h-3 w-3" />
+                    {formatDuration(run.timeout_sec)} left
+                  </span>
+                )}
+              </>
             )}
             {loading && (
               <Loader2
@@ -275,6 +312,23 @@ export function DrillConsole({ pickedRunId, scenarioName }: DrillConsoleProps) {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {isLive && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => extendTimeout(30)}
+              disabled={extendPending}
+              data-testid="drill-extend-timeout"
+              title="Extend auto-timeout watchdog by 30 minutes"
+            >
+              {extendPending ? (
+                <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+              ) : (
+                <Clock className="mr-1 h-3 w-3 text-sky-400" />
+              )}
+              +30m Time
+            </Button>
+          )}
           <Button
             variant="outline"
             size="sm"

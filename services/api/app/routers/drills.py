@@ -573,6 +573,7 @@ async def get_drill(
         "ended_at": run.ended_at.isoformat() if run.ended_at else None,
         "started_by": run.started_by,
         "duration_sec": run.duration_sec,
+        "timeout_sec": Runner.get_timeout_sec(run.id) if run.status.value in ("running", "pending") else None,
         "score_blue": run.score_blue,
         "score_red": run.score_red,
         "error": run.error,
@@ -1416,3 +1417,60 @@ async def _build_template_snapshot_from_live(
         "win_conditions": inner.get("win_conditions", {}),
         "run_status_at_snapshot": run.status.value,
     }
+
+@router.post(
+    "/{run_id}/extend-timeout",
+    summary="Extend the auto-timeout deadline of an active drill (admin/lead/red)",
+    dependencies=[Depends(require_role(Role.ADMIN, Role.LEAD, Role.RED))],
+)
+async def extend_drill_timeout(
+    run_id: int,
+    body: dict | None = None,
+    session: AsyncSession = Depends(get_session),
+    token=Depends(current_token),
+) -> dict:
+    body = body or {}
+    extend_min = body.get("extend_min", 30)
+    if not isinstance(extend_min, int):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="extend_min must be an integer",
+        )
+
+    # Check existence and authorization
+    run = (
+        await session.execute(
+            select(db_models.Run).where(db_models.Run.id == run_id)
+        )
+    ).scalar_one_or_none()
+    if run is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"run id={run_id} not found",
+        )
+    if not can_view_run(token, run):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="you do not have access to this run",
+        )
+    if run.status not in (db_models.RunStatus.RUNNING, db_models.RunStatus.PENDING):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"cannot extend timeout for terminal run (status={run.status.value})",
+        )
+
+    runner = _get_runner()
+    actor = getattr(token, "sub", "unknown") if token else "unknown"
+    try:
+        result = await runner.extend_timeout(
+            run_id=run_id,
+            extend_min=extend_min,
+            actor=actor,
+            session=session,
+        )
+        return result
+    except RunnerError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
