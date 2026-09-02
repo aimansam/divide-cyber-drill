@@ -665,7 +665,7 @@ export function RunLifecycleCard({
     ? 1
     : hasLiveRun
     ? 3
-    : run && isTerminal
+    : run && TERMINAL_STATUSES.has(run.status)
     ? 4
     : 2;
 
