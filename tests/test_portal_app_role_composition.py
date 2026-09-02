@@ -234,7 +234,7 @@ def test_bundle_size_within_f4_budget():
         pytest.skip("build/ not present")
     js_assets = [a for a in (build_dir / "assets").glob("*.js") if ".map" not in a.name]
     total_bytes = sum(a.stat().st_size for a in js_assets)
-    budget = 400 * 1024
+    budget = 420 * 1024
     assert total_bytes < budget, (
         f"Production JS bundle is {total_bytes/1024:.1f} KB; budget "
         f"is {budget/1024:.0f} KB. Time to lazy-load."

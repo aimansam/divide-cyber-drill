@@ -1,36 +1,22 @@
 /**
- * TopNav — top-of-page brand bar + role-aware view tabs + sign-out.
- *
- * Replaces the implicit "header text in app.tsx" with a proper
- * navigation surface. The previous layout was a vertical stack of
- * cards with no way to jump between "operate a drill" and "audit
- * the past" without scrolling — a real cyber range has 4-5 distinct
- * tasks the operator switches between.
- *
- * Tabs are role-gated via the same COMPOSITIONS matrix that
- * decides which cards render (see app.tsx + sign-in-card.tsx).
- * For example, blue users don't see the "Admin" tab because they
- * can't manage anything; observer users only see "Dashboard",
- * "History", and "Profile".
- *
- * Hash routing: the active tab is derived from window.location.hash
- * (e.g. "#/operate"). Setting it triggers a hashchange event that
- * the parent listens to. No react-router, no extra deps.
+ * TopNav — top-of-page brand bar + grouped navigation + session/user menu.
  */
 
 import {
   Activity,
+  ChevronDown,
   Clock,
   Compass,
   Gauge,
   History,
   KeyRound,
   LogOut,
+  Play,
   Settings,
   Shield,
   User as UserIcon,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { api, setToken } from "@/lib/api";
 import { emitTokenChange, formatTtl, useMe } from "@/lib/auth";
@@ -46,7 +32,7 @@ export type ViewKey =
   | "history"
   | "profile";
 
-interface TabSpec {
+export interface TabSpec {
   key: ViewKey;
   label: string;
   icon: typeof Activity;
@@ -54,24 +40,24 @@ interface TabSpec {
   roles: readonly Role[];
 }
 
-const TABS: readonly TabSpec[] = [
+export const TABS: readonly TabSpec[] = [
   {
     key: "dashboard",
     label: "Command Center",
     icon: Gauge,
-    roles: [], // all roles
+    roles: [],
   },
   {
     key: "operate",
     label: "Operate",
     icon: Compass,
-    roles: [], // all roles can start runs they own
+    roles: [],
   },
   {
     key: "observe",
     label: "Observe",
     icon: Activity,
-    roles: [], // all roles can observe
+    roles: [],
   },
   {
     key: "admin",
@@ -89,13 +75,13 @@ const TABS: readonly TabSpec[] = [
     key: "history",
     label: "History",
     icon: History,
-    roles: [], // all roles can browse history
+    roles: [],
   },
   {
     key: "profile",
     label: "Profile",
     icon: UserIcon,
-    roles: [], // all roles
+    roles: [],
   },
 ];
 
@@ -112,7 +98,18 @@ export function TopNav({
 }) {
   const { me, loading } = useMe();
   const [menuOpen, setMenuOpen] = useState(false);
-  const visibleTabs = tabsForRole(me?.role ?? null);
+  const [drillsOpen, setDrillsOpen] = useState(false);
+  const [mgmtOpen, setMgmtOpen] = useState(false);
+
+  const drillsRef = useRef<HTMLDivElement>(null);
+  const mgmtRef = useRef<HTMLDivElement>(null);
+
+  const role = me?.role ?? null;
+  const canAdmin = role === "admin" || role === "lead";
+
+  const isDrillActive =
+    activeView === "operate" || activeView === "observe" || activeView === "history";
+  const isMgmtActive = activeView === "admin" || activeView === "config";
 
   async function onSignOut() {
     try {
@@ -125,49 +122,279 @@ export function TopNav({
     setMenuOpen(false);
   }
 
+  // Dismiss dropdowns on outside click
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      const target = e.target as Node;
+      if (drillsRef.current && !drillsRef.current.contains(target)) {
+        setDrillsOpen(false);
+      }
+      if (mgmtRef.current && !mgmtRef.current.contains(target)) {
+        setMgmtOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
   return (
     <header
       className="sticky top-0 z-20 border-b border-border bg-background/95 backdrop-blur"
       data-testid="top-nav"
     >
       <div className="container mx-auto flex max-w-6xl items-center gap-4 px-4 py-2">
-        <div className="flex items-center gap-2">
+        {/* Brand */}
+        <div
+          className="flex items-center gap-2 cursor-pointer select-none"
+          onClick={() => onChangeView("dashboard")}
+        >
           <KeyRound className="h-5 w-5 text-primary" aria-hidden="true" />
           <span className="font-mono text-base font-semibold tracking-tight text-primary">
             div:ide
           </span>
-          <span className="text-xs text-muted-foreground">cyber range</span>
+          <span className="text-xs text-muted-foreground hidden sm:inline">
+            cyber range
+          </span>
         </div>
 
+        {/* Grouped / Compacted Navigation */}
         <nav
-          className="ml-4 flex flex-1 items-center gap-1 overflow-x-auto"
+          className="ml-2 flex flex-1 items-center gap-1.5"
           aria-label="View tabs"
         >
-          {visibleTabs.map((tab) => {
-            const Icon = tab.icon;
-            const active = activeView === tab.key;
-            return (
-              <button
-                key={tab.key}
-                type="button"
-                data-testid={`top-nav-tab-${tab.key}`}
-                data-active={active ? "true" : "false"}
-                onClick={() => onChangeView(tab.key)}
+          {/* Direct 1-Click: Command Center */}
+          <button
+            type="button"
+            data-testid="top-nav-tab-dashboard"
+            data-active={activeView === "dashboard" ? "true" : "false"}
+            onClick={() => {
+              onChangeView("dashboard");
+              setDrillsOpen(false);
+              setMgmtOpen(false);
+            }}
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs sm:text-sm font-medium transition-colors",
+              activeView === "dashboard"
+                ? "bg-primary/10 text-primary ring-1 ring-primary/30"
+                : "text-muted-foreground hover:bg-muted hover:text-foreground",
+            )}
+            aria-current={activeView === "dashboard" ? "page" : undefined}
+          >
+            <Gauge className="h-4 w-4" aria-hidden="true" />
+            <span>Command Center</span>
+          </button>
+
+          {/* Drills Group Dropdown */}
+          <div ref={drillsRef} className="relative">
+            <button
+              type="button"
+              data-testid="top-nav-drills-group"
+              onClick={() => {
+                setDrillsOpen((o) => !o);
+                setMgmtOpen(false);
+              }}
+              className={cn(
+                "inline-flex items-center gap-1 rounded-md px-2.5 py-1.5 text-xs sm:text-sm font-medium transition-colors",
+                isDrillActive
+                  ? "bg-primary/10 text-primary ring-1 ring-primary/30"
+                  : "text-muted-foreground hover:bg-muted hover:text-foreground",
+              )}
+            >
+              <Play className="h-3.5 w-3.5 fill-current opacity-80" aria-hidden="true" />
+              <span>Drills</span>
+              <ChevronDown
                 className={cn(
-                  "inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm transition transition-colors",
-                  active
+                  "h-3.5 w-3.5 transition-transform duration-200",
+                  drillsOpen && "rotate-180",
+                )}
+                aria-hidden="true"
+              />
+            </button>
+
+            {drillsOpen && (
+              <div
+                className="absolute left-0 top-full mt-1.5 w-48 rounded-lg border border-border bg-card p-1 shadow-lg z-50 animate-in fade-in-50 zoom-in-95"
+                role="menu"
+              >
+                <button
+                  type="button"
+                  data-testid="top-nav-tab-operate"
+                  data-active={activeView === "operate" ? "true" : "false"}
+                  onClick={() => {
+                    onChangeView("operate");
+                    setDrillsOpen(false);
+                  }}
+                  className={cn(
+                    "flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-xs sm:text-sm transition-colors",
+                    activeView === "operate"
+                      ? "bg-primary/15 text-primary font-medium"
+                      : "text-foreground hover:bg-muted",
+                  )}
+                  role="menuitem"
+                >
+                  <Compass className="h-4 w-4 text-muted-foreground shrink-0" />
+                  <span className="flex-1">Operate</span>
+                  {activeView === "operate" && (
+                    <span className="h-1.5 w-1.5 rounded-full bg-primary" />
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  data-testid="top-nav-tab-observe"
+                  data-active={activeView === "observe" ? "true" : "false"}
+                  onClick={() => {
+                    onChangeView("observe");
+                    setDrillsOpen(false);
+                  }}
+                  className={cn(
+                    "flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-xs sm:text-sm transition-colors",
+                    activeView === "observe"
+                      ? "bg-primary/15 text-primary font-medium"
+                      : "text-foreground hover:bg-muted",
+                  )}
+                  role="menuitem"
+                >
+                  <Activity className="h-4 w-4 text-muted-foreground shrink-0" />
+                  <span className="flex-1">Observe</span>
+                  {activeView === "observe" && (
+                    <span className="h-1.5 w-1.5 rounded-full bg-primary" />
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  data-testid="top-nav-tab-history"
+                  data-active={activeView === "history" ? "true" : "false"}
+                  onClick={() => {
+                    onChangeView("history");
+                    setDrillsOpen(false);
+                  }}
+                  className={cn(
+                    "flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-xs sm:text-sm transition-colors",
+                    activeView === "history"
+                      ? "bg-primary/15 text-primary font-medium"
+                      : "text-foreground hover:bg-muted",
+                  )}
+                  role="menuitem"
+                >
+                  <History className="h-4 w-4 text-muted-foreground shrink-0" />
+                  <span className="flex-1">History</span>
+                  {activeView === "history" && (
+                    <span className="h-1.5 w-1.5 rounded-full bg-primary" />
+                  )}
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Management Group Dropdown (Admin & Lead) */}
+          {canAdmin && (
+            <div ref={mgmtRef} className="relative">
+              <button
+                type="button"
+                data-testid="top-nav-mgmt-group"
+                onClick={() => {
+                  setMgmtOpen((o) => !o);
+                  setDrillsOpen(false);
+                }}
+                className={cn(
+                  "inline-flex items-center gap-1 rounded-md px-2.5 py-1.5 text-xs sm:text-sm font-medium transition-colors",
+                  isMgmtActive
                     ? "bg-primary/10 text-primary ring-1 ring-primary/30"
                     : "text-muted-foreground hover:bg-muted hover:text-foreground",
                 )}
-                aria-current={active ? "page" : undefined}
               >
-                <Icon className="h-4 w-4" aria-hidden="true" />
-                {tab.label}
+                <Shield className="h-3.5 w-3.5 opacity-80" aria-hidden="true" />
+                <span>Management</span>
+                <ChevronDown
+                  className={cn(
+                    "h-3.5 w-3.5 transition-transform duration-200",
+                    mgmtOpen && "rotate-180",
+                  )}
+                  aria-hidden="true"
+                />
               </button>
-            );
-          })}
+
+              {mgmtOpen && (
+                <div
+                  className="absolute left-0 top-full mt-1.5 w-48 rounded-lg border border-border bg-card p-1 shadow-lg z-50 animate-in fade-in-50 zoom-in-95"
+                  role="menu"
+                >
+                  <button
+                    type="button"
+                    data-testid="top-nav-tab-admin"
+                    data-active={activeView === "admin" ? "true" : "false"}
+                    onClick={() => {
+                      onChangeView("admin");
+                      setMgmtOpen(false);
+                    }}
+                    className={cn(
+                      "flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-xs sm:text-sm transition-colors",
+                      activeView === "admin"
+                        ? "bg-primary/15 text-primary font-medium"
+                        : "text-foreground hover:bg-muted",
+                    )}
+                    role="menuitem"
+                  >
+                    <Shield className="h-4 w-4 text-muted-foreground shrink-0" />
+                    <span className="flex-1">Admin</span>
+                    {activeView === "admin" && (
+                      <span className="h-1.5 w-1.5 rounded-full bg-primary" />
+                    )}
+                  </button>
+
+                  <button
+                    type="button"
+                    data-testid="top-nav-tab-config"
+                    data-active={activeView === "config" ? "true" : "false"}
+                    onClick={() => {
+                      onChangeView("config");
+                      setMgmtOpen(false);
+                    }}
+                    className={cn(
+                      "flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-xs sm:text-sm transition-colors",
+                      activeView === "config"
+                        ? "bg-primary/15 text-primary font-medium"
+                        : "text-foreground hover:bg-muted",
+                    )}
+                    role="menuitem"
+                  >
+                    <Settings className="h-4 w-4 text-muted-foreground shrink-0" />
+                    <span className="flex-1">Config</span>
+                    {activeView === "config" && (
+                      <span className="h-1.5 w-1.5 rounded-full bg-primary" />
+                    )}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Profile Direct Link */}
+          <button
+            type="button"
+            data-testid="top-nav-tab-profile"
+            data-active={activeView === "profile" ? "true" : "false"}
+            onClick={() => {
+              onChangeView("profile");
+              setDrillsOpen(false);
+              setMgmtOpen(false);
+            }}
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs sm:text-sm font-medium transition-colors",
+              activeView === "profile"
+                ? "bg-primary/10 text-primary ring-1 ring-primary/30"
+                : "text-muted-foreground hover:bg-muted hover:text-foreground",
+            )}
+            aria-current={activeView === "profile" ? "page" : undefined}
+          >
+            <UserIcon className="h-4 w-4" aria-hidden="true" />
+            <span>Profile</span>
+          </button>
         </nav>
 
+        {/* Right side: Session countdown + User Menu */}
         <div className="relative ml-auto flex items-center gap-3">
           {loading && !me && (
             <span className="text-xs italic text-muted-foreground">
@@ -182,7 +409,7 @@ export function TopNav({
               className="inline-flex items-center gap-2 rounded-md px-2 py-1 text-sm hover:bg-muted"
             >
               <span className="font-semibold">{me.sub}</span>
-              <span className="rounded bg-secondary/40 px-1.5 py-0.5 text-xs text-secondary-foreground">
+              <span className="rounded bg-secondary/40 px-1.5 py-0.5 text-xs text-secondary-foreground font-mono">
                 {ROLE_LABELS[me.role]}
               </span>
               <Settings className="h-3.5 w-3.5 text-muted-foreground" />
@@ -196,21 +423,18 @@ export function TopNav({
           {menuOpen && me && (
             <div
               data-testid="user-menu"
-              className="absolute right-0 top-full mt-2 w-44 rounded-md border border-border bg-card p-1 shadow-md"
+              className="absolute right-0 top-full mt-2 w-48 rounded-md border border-border bg-card p-1 shadow-md z-50"
             >
-              <div className="px-2 py-1 text-xs text-muted-foreground">
+              <div className="px-2 py-1 text-xs text-muted-foreground border-b border-border/60 mb-1">
                 Signed in as{" "}
-                <span className="font-mono text-foreground">{me.sub}</span>
+                <span className="font-mono text-foreground font-medium">{me.sub}</span>
               </div>
-              {/* F-auth-ux (Plan A3): session-expiry pill so the
-                  operator isn't blindsided when the token expires.
-                  Amber when <1h, red when <15min. */}
               <SessionExpiryPill ttl={me.ttl_remaining_s} />
               <Button
                 variant="ghost"
                 size="sm"
                 onClick={onSignOut}
-                className="w-full justify-start"
+                className="w-full justify-start text-destructive hover:text-destructive hover:bg-destructive/10"
                 data-testid="sign-out-button"
               >
                 <LogOut className="mr-1 h-3 w-3" />
@@ -226,8 +450,7 @@ export function TopNav({
 
 // ---------------------------------------------------------------------------
 // SessionExpiryPill — shows "expires in 4h 12m" under the user menu.
-// Plain when >1h, amber when <1h, red when <15min. Self-ticks every 30s
-// so the countdown stays accurate without a full useMe() re-fetch.
+// Plain when >1h, amber when <1h, red when <15min. Self-ticks every 30s.
 // ---------------------------------------------------------------------------
 
 function SessionExpiryPill({ ttl: initialTtl }: { ttl: number }) {
@@ -237,7 +460,6 @@ function SessionExpiryPill({ ttl: initialTtl }: { ttl: number }) {
     setTtl(initialTtl);
   }, [initialTtl]);
 
-  // Tick every 30s so the countdown stays roughly accurate.
   useEffect(() => {
     const h = window.setInterval(() => {
       setTtl((t) => Math.max(0, t - 30));
@@ -252,7 +474,7 @@ function SessionExpiryPill({ ttl: initialTtl }: { ttl: number }) {
   return (
     <div
       data-testid="session-expiry-pill"
-      className={`flex items-center gap-1 px-2 py-1 text-xs ${colorClass}`}
+      className={`flex items-center gap-1 px-2 py-1 text-xs font-mono ${colorClass}`}
     >
       <Clock className="h-3 w-3 shrink-0" />
       <span>
