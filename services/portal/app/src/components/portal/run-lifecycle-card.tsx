@@ -660,8 +660,49 @@ export function RunLifecycleCard({
     : null;
 
 
+  // Compute current operate step (1: Pick Target, 2: Ready to Launch, 3: Live Range Engagement, 4: Finished)
+  const currentStep = !scenario
+    ? 1
+    : hasLiveRun
+    ? 3
+    : run && isTerminal
+    ? 4
+    : 2;
+
   return (
     <Card className="h-full border-border/80 shadow-sm flex flex-col">
+      {/* Guided Workflow Stepper */}
+      <div className="border-b border-border/60 bg-muted/20 px-6 py-3.5">
+        <div className="flex items-center justify-between gap-2 overflow-x-auto text-xs">
+          <div className={`flex items-center gap-2 font-medium transition-colors ${currentStep === 1 ? "text-primary font-semibold" : currentStep > 1 ? "text-emerald-500" : "text-muted-foreground"}`}>
+            <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold ${currentStep === 1 ? "bg-primary text-primary-foreground shadow-sm" : currentStep > 1 ? "bg-emerald-500/20 text-emerald-500 ring-1 ring-emerald-500/30" : "bg-muted text-muted-foreground"}`}>
+              {currentStep > 1 ? "✓" : "1"}
+            </span>
+            <span>Select Target</span>
+          </div>
+          <span className="text-muted-foreground/30">──</span>
+          <div className={`flex items-center gap-2 font-medium transition-colors ${currentStep === 2 ? "text-primary font-semibold" : currentStep > 2 ? "text-emerald-500" : "text-muted-foreground"}`}>
+            <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold ${currentStep === 2 ? "bg-primary text-primary-foreground shadow-sm" : currentStep > 2 ? "bg-emerald-500/20 text-emerald-500 ring-1 ring-emerald-500/30" : "bg-muted text-muted-foreground"}`}>
+              {currentStep > 2 ? "✓" : "2"}
+            </span>
+            <span>Configure & Deploy</span>
+          </div>
+          <span className="text-muted-foreground/30">──</span>
+          <div className={`flex items-center gap-2 font-medium transition-colors ${currentStep === 3 ? "text-sky-400 font-semibold" : currentStep > 3 ? "text-emerald-500" : "text-muted-foreground"}`}>
+            <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold ${currentStep === 3 ? "bg-sky-500 text-white shadow-sm animate-pulse" : currentStep > 3 ? "bg-emerald-500/20 text-emerald-500 ring-1 ring-emerald-500/30" : "bg-muted text-muted-foreground"}`}>
+              {currentStep > 3 ? "✓" : "3"}
+            </span>
+            <span>Live Range</span>
+          </div>
+          <span className="text-muted-foreground/30">──</span>
+          <div className={`flex items-center gap-2 font-medium transition-colors ${currentStep === 4 ? "text-primary font-semibold" : "text-muted-foreground"}`}>
+            <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold ${currentStep === 4 ? "bg-emerald-500 text-white shadow-sm" : "bg-muted text-muted-foreground"}`}>
+              4
+            </span>
+            <span>Debrief & Reset</span>
+          </div>
+        </div>
+      </div>
       <CardHeader className="space-y-4 pb-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
