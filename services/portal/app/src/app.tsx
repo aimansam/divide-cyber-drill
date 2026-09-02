@@ -252,6 +252,10 @@ export default function App() {
                       scenario={pickedScenario}
                       pickedRunId={pickedRun?.run_id ?? null}
                       onNavigateToConfig={() => setActiveView("config")}
+                      onNavigateToObserve={(runId) => {
+                        setPickedRun({ run_id: runId, status: "running" });
+                        setActiveView("observe");
+                      }}
                     />
                   </div>
                 );
