@@ -108,14 +108,14 @@ export function ScenariosCard({
 
   return (
     <Card className="h-full">
-      <CardHeader className="space-y-4 pb-4">
+      <CardHeader className="space-y-4 pb-6">
         <div className="flex items-center justify-between">
           <div>
-            <CardTitle className="flex items-center gap-2">
-              <Target className="h-5 w-5 text-primary" />
+            <CardTitle className="flex items-center gap-2 text-xl">
+              <Target className="h-6 w-6 text-primary" />
               Scenarios
             </CardTitle>
-            <CardDescription className="mt-1">
+            <CardDescription className="mt-2 text-sm">
               {items.length} active scenario{items.length === 1 ? "" : "s"} ·
               Select one to begin
             </CardDescription>
@@ -126,7 +126,7 @@ export function ScenariosCard({
             onClick={load}
             disabled={loading}
             aria-label="Refresh"
-            className="h-8 w-8"
+            className="h-9 w-9"
           >
             {loading ? (
               <Loader2 className="h-4 w-4 animate-spin" />
@@ -142,7 +142,7 @@ export function ScenariosCard({
             placeholder="Search scenarios..."
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            className="pl-9 pr-8 h-9"
+            className="pl-9 pr-8 h-10"
           />
           {query && (
             <button
@@ -156,40 +156,40 @@ export function ScenariosCard({
           )}
         </div>
       </CardHeader>
-      <CardContent className="space-y-3">
+      <CardContent className="space-y-4">
         {error && (
-          <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive">
+          <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-sm text-destructive">
             {error}
           </div>
         )}
         {!error && loading && (
-          <div className="space-y-3">
-            {[0, 1, 2].map((i) => (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+            {[0, 1, 2, 3].map((i) => (
               <div
                 key={i}
-                className="h-24 animate-pulse rounded-lg bg-muted/50"
+                className="h-32 animate-pulse rounded-xl bg-muted/50"
               />
             ))}
           </div>
         )}
         {!error && !loading && items.length === 0 && (
-          <div className="rounded-lg border border-dashed border-border p-8 text-center">
-            <p className="text-sm text-muted-foreground">
+          <div className="rounded-xl border-2 border-dashed border-border p-12 text-center">
+            <p className="text-base text-muted-foreground font-medium">
               No scenarios registered.
             </p>
-            <p className="text-xs text-muted-foreground/70 mt-1">
+            <p className="text-sm text-muted-foreground/70 mt-2">
               Run the scenario sync from the admin endpoints to populate the catalog.
             </p>
           </div>
         )}
         {!error && !loading && items.length > 0 && filtered.length === 0 && (
-          <div className="rounded-lg border border-dashed border-border p-8 text-center">
-            <p className="text-sm text-muted-foreground">
+          <div className="rounded-xl border-2 border-dashed border-border p-12 text-center">
+            <p className="text-base text-muted-foreground font-medium">
               No scenarios match &quot;{query}&quot;
             </p>
           </div>
         )}
-        <div className="space-y-2">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
           {filtered.map((s) => {
             const isPicked = s.id === pickedId;
             const diffConfig = DIFFICULTY_CONFIG[s.difficulty?.toLowerCase() ?? ""] ?? {
@@ -203,39 +203,38 @@ export function ScenariosCard({
                 key={s.id}
                 onClick={() => onPick(s)}
                 className={
-                  "group relative w-full rounded-lg border p-4 text-left transition-all duration-200 " +
+                  "group relative w-full rounded-xl border p-5 text-left transition-all duration-200 " +
                   (isPicked
-                    ? "border-primary bg-primary/5 shadow-md ring-2 ring-primary/20"
-                    : "border-border bg-card hover:border-primary/50 hover:bg-accent/50 hover:shadow-sm")
+                    ? "border-primary bg-primary/5 shadow-lg ring-2 ring-primary/20"
+                    : "border-border bg-card hover:border-primary/50 hover:bg-accent/50 hover:shadow-md")
                 }
               >
                 {/* Selection indicator */}
                 {isPicked && (
-                  <div className="absolute top-3 right-3">
-                    <div className="flex h-6 w-6 items-center justify-center rounded-full bg-primary">
-                      <Check className="h-3.5 w-3.5 text-primary-foreground" />
+                  <div className="absolute top-4 right-4">
+                    <div className="flex h-7 w-7 items-center justify-center rounded-full bg-primary shadow-sm">
+                      <Check className="h-4 w-4 text-primary-foreground" />
                     </div>
                   </div>
                 )}
 
-                {/* Header: Name + Difficulty */}
-                <div className="flex items-start gap-3 pr-8">
-                  <div className="flex-1 min-w-0">
-                    <h4 className="font-semibold text-sm text-foreground truncate">
-                      {s.title || s.name}
-                    </h4>
-                    <p className="text-xs text-muted-foreground mt-0.5 font-mono">
-                      {s.name}
-                    </p>
-                  </div>
-                </div>
+                {/* Title */}
+                <h4 className="font-bold text-base text-foreground leading-tight pr-8">
+                  {s.title || s.name}
+                </h4>
+                <p className="text-xs text-muted-foreground mt-1 font-mono">
+                  {s.name}
+                </p>
+
+                {/* Divider */}
+                <div className="my-3 h-px bg-border/50" />
 
                 {/* Meta row: Difficulty + Duration + Runs */}
-                <div className="flex items-center gap-2 mt-3 flex-wrap">
+                <div className="flex items-center gap-2 flex-wrap">
                   {/* Difficulty badge */}
                   <span
                     className={
-                      "inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-xs font-medium " +
+                      "inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium " +
                       diffConfig.color
                     }
                   >
@@ -246,7 +245,7 @@ export function ScenariosCard({
                   {/* Duration */}
                   {s.duration_min && (
                     <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-                      <Clock className="h-3 w-3" />
+                      <Clock className="h-3.5 w-3.5" />
                       {s.duration_min}m
                     </span>
                   )}
@@ -254,15 +253,8 @@ export function ScenariosCard({
                   {/* Run count */}
                   {s.run_count !== undefined && s.run_count > 0 && (
                     <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-                      <TrendingUp className="h-3 w-3" />
-                      {s.run_count} run{s.run_count === 1 ? "" : "s"}
-                    </span>
-                  )}
-
-                  {/* Version */}
-                  {s.version !== undefined && s.version > 1 && (
-                    <span className="inline-flex items-center rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">
-                      v{s.version}
+                      <TrendingUp className="h-3.5 w-3.5" />
+                      {s.run_count}
                     </span>
                   )}
                 </div>

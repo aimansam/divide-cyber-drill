@@ -606,14 +606,14 @@ export function RunLifecycleCard({
 
   return (
     <Card className="h-full">
-      <CardHeader className="space-y-3">
+      <CardHeader className="space-y-4 pb-6">
         <div className="flex items-center justify-between">
           <div>
-            <CardTitle className="flex items-center gap-2">
-              <Settings className="h-5 w-5 text-primary" />
+            <CardTitle className="flex items-center gap-2 text-xl">
+              <Settings className="h-6 w-6 text-primary" />
               Drill lifecycle
             </CardTitle>
-            <CardDescription>
+            <CardDescription className="mt-2 text-sm">
               {scenario === null
                 ? "Pick a scenario above to start a drill."
                 : `Scenario: ${scenario.name}`}
@@ -624,7 +624,7 @@ export function RunLifecycleCard({
           </div>
         </div>
       </CardHeader>
-      <CardContent className="space-y-4">
+      <CardContent className="space-y-6">
         {error && (
           <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-sm text-destructive">
             <div className="flex items-start gap-3">
@@ -719,7 +719,7 @@ export function RunLifecycleCard({
             {/* Status banner with visual state indicator */}
             <div
               className={
-                "rounded-lg border-l-4 px-4 py-3 " +
+                "rounded-xl border-l-4 px-5 py-4 " +
                 (run.status === "running" || run.status === "pending"
                   ? "border-l-blue-500 bg-blue-500/10"
                   : run.status === "succeeded" || run.status === "completed"
@@ -733,18 +733,18 @@ export function RunLifecycleCard({
                         : "border-l-border bg-muted/50")
               }
             >
-              <div className="flex flex-wrap items-center gap-3 text-sm">
+              <div className="flex flex-wrap items-center gap-4 text-sm">
                 <StatusPill status={run.status} />
                 {run.team && (
-                  <span className="inline-flex items-center rounded bg-secondary px-2 py-0.5 text-xs font-medium uppercase text-secondary-foreground">
+                  <span className="inline-flex items-center rounded bg-secondary px-2.5 py-1 text-xs font-medium uppercase text-secondary-foreground">
                     {run.team}
                   </span>
                 )}
-                <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-sm text-muted-foreground">
                   {run.started_by && <span>by {run.started_by}</span>}
                   {run.started_at && <span>{formatRelative(run.started_at)}</span>}
                   {run.duration_sec !== null && run.duration_sec !== undefined && (
-                    <span className="font-mono">
+                    <span className="font-mono text-base font-medium">
                       {run.status === "running" || run.status === "pending"
                         ? "running for "
                         : "duration "}

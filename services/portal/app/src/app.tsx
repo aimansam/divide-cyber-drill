@@ -239,21 +239,19 @@ export default function App() {
                 );
               case "operate":
                 return (
-                  <>
-                    <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-[380px_1fr]">
-                      <ScenariosCard
-                        pickedId={pickedScenario?.id ?? null}
-                        onPick={setPickedScenario}
-                      />
-                      <RunLifecycleCard
-                        meSub={me.sub}
-                        meRole={me.role}
-                        scenario={pickedScenario}
-                        pickedRunId={pickedRun?.run_id ?? null}
-                        onNavigateToConfig={() => setActiveView("config")}
-                      />
-                    </div>
-                  </>
+                  <div className="space-y-8">
+                    <ScenariosCard
+                      pickedId={pickedScenario?.id ?? null}
+                      onPick={setPickedScenario}
+                    />
+                    <RunLifecycleCard
+                      meSub={me.sub}
+                      meRole={me.role}
+                      scenario={pickedScenario}
+                      pickedRunId={pickedRun?.run_id ?? null}
+                      onNavigateToConfig={() => setActiveView("config")}
+                    />
+                  </div>
                 );
               case "observe":
                 return (
