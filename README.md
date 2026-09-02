@@ -10,7 +10,7 @@
 > fully automated setup with zero-touch Windows installation.
 > **901 tests passing**, portal bundle under 280 KB ceiling.
 >
-> See [`docs/PLAN.md`](docs/PLAN.md) for the full roadmap.
+> See [`docs/ROADMAP.md`](docs/ROADMAP.md) for the full roadmap.
 
 ## What it does
 
@@ -231,23 +231,13 @@ make test-live-pg   # requires DIVIDE_TEST_LIVE_PG=1 + a reachable DB
 
 | Doc | Audience | Topic |
 |---|---|---|
-| [`docs/PLAN.md`](docs/PLAN.md) | Everyone | Canonical roadmap + closure summaries |
-| [`docs/TEST-PRODUCT.md`](docs/TEST-PRODUCT.md) | Devs | L1/L2/L3 ship criteria |
-| [`docs/SECTION-9-INTEGRATION.md`](docs/SECTION-9-INTEGRATION.md) | Operators | F9 DrillConsole consolidation (single live-drill screen) |
-| [`docs/SECTION-10-ONBOARDING.md`](docs/SECTION-10-ONBOARDING.md) | Operators | F10 onboarding wizard (4-step first-time UX) |
-| [`docs/SECTION-11-DEBRIEF.md`](docs/SECTION-11-DEBRIEF.md) | Operators | F11 drill debrief (markdown play-by-play) |
-| [`docs/SECTION-12-PRODUCTION.md`](docs/SECTION-12-PRODUCTION.md) | Operators | F12 production deployment (TLS + multi-worker) |
-| [`docs/R1-MULTIWORKER.md`](docs/R1-MULTIWORKER.md) | Devs | R1 Redis multi-worker SSE |
-| [`docs/F3-RUNBOOK.md`](docs/F3-RUNBOOK.md) | Devs | F3 multi-VM scenarios |
-| [`docs/F4-NOVNC.md`](docs/F4-NOVNC.md) | Devs | F4 noVNC console |
-| [`docs/F5-SCORING.md`](docs/F5-SCORING.md) | Devs | F5 flag scoring |
-| [`docs/F6-MULTITEAM.md`](docs/F6-MULTITEAM.md) | Devs | F6 multi-team exercises |
-| [`docs/F7-TEMPLATES.md`](docs/F7-TEMPLATES.md) | Devs | F7 range templates |
-| [`docs/F8-SOC.md`](docs/F8-SOC.md) | Devs | F8 SOC view + SSE |
-| [`docs/PORTAL-APP.md`](docs/PORTAL-APP.md) | Frontend devs | Portal component inventory |
-| [`docs/PORTAL-UI.md`](docs/PORTAL-UI.md) | Designers | Visual layout + tab nav |
-| [`USER-REQUIREMENTS.md`](USER-REQUIREMENTS.md) | Everyone | User requirements + acceptance criteria |
-| [`docs/LIVE-DRILL-RUNBOOK.md`](docs/LIVE-DRILL-RUNBOOK.md) | Operators | Live drill command reference |
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Architects / Devs | System design, portal components, Redis SSE bus, noVNC proxy, and metrics |
+| [`docs/FEATURES-AND-SCENARIOS.md`](docs/FEATURES-AND-SCENARIOS.md) | Scenario Authors / Operators | Scenario YAML spec, multi-VM networking, flags, scoring decay, and MITRE telemetry |
+| [`docs/OPERATIONS.md`](docs/OPERATIONS.md) | Operators | User/role management, CLI drill lifecycle, end-to-end demo, and troubleshooting |
+| [`docs/PROXMOX-SETUP.md`](docs/PROXMOX-SETUP.md) | SysAdmins | Proxmox cluster preparation, API token permissions (`pveum`), and SDN setup |
+| [`docs/TEMPLATE-SETUP.md`](docs/TEMPLATE-SETUP.md) | SysAdmins | Automated zero-touch Windows & Linux template creation |
+| [`docs/USER-REQUIREMENTS.md`](docs/USER-REQUIREMENTS.md) | Stakeholders | Role permission matrix and capability checklist |
+| [`docs/ROADMAP.md`](docs/ROADMAP.md) | Everyone | Project development history, phased milestones, and architecture roadmap |
 | [`docs/DEMO.md`](docs/DEMO.md) | Operators | Demo flow notes |
 | [`docs/PROXMOX-SETUP.md`](docs/PROXMOX-SETUP.md) | Operators | Proxmox token + ACL setup |
 | [`docs/USERS.md`](docs/USERS.md) | Operators | Credential auth model |
