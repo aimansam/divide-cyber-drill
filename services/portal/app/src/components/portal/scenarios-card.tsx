@@ -4,18 +4,17 @@ import {
   RefreshCw,
   Search,
   X,
-  Check,
   Target,
   Clock,
   TrendingUp,
   Shield,
   Zap,
   Skull,
+  ChevronRight,
 } from "lucide-react";
 import {
   Card,
   CardContent,
-  CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
@@ -38,31 +37,31 @@ interface ScenariosPayload {
   total?: number;
 }
 
-// Difficulty configuration with colors and icons
-const DIFFICULTY_CONFIG: Record<string, { color: string; icon: React.ReactNode; label: string }> = {
+const DIFFICULTY_CONFIG: Record<
+  string,
+  { badge: string; icon: React.ReactNode; label: string }
+> = {
   beginner: {
-    color: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
+    badge: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
     icon: <Shield className="h-3 w-3" />,
     label: "Beginner",
   },
   intermediate: {
-    color: "bg-amber-500/10 text-amber-400 border-amber-500/20",
+    badge: "bg-amber-500/10 text-amber-400 border-amber-500/20",
     icon: <Zap className="h-3 w-3" />,
     label: "Intermediate",
   },
   advanced: {
-    color: "bg-red-500/10 text-red-400 border-red-500/20",
+    badge: "bg-red-500/10 text-red-400 border-red-500/20",
     icon: <Skull className="h-3 w-3" />,
     label: "Advanced",
   },
 };
 
 /**
- * Scenarios picker card — modern card-based design.
+ * ScenariosCard — compact, high-density catalog sidebar for the Operate view.
  *
- * Fetches /api/v1/scenarios (public; no token required) on mount and
- * when the user clicks Refresh. Each scenario is rendered as a card
- * with visual difficulty indicators, run metrics, and clear selection state.
+ * Provides instant filtering, active state indication, and metadata badges.
  */
 export function ScenariosCard({
   onPick,
@@ -107,18 +106,21 @@ export function ScenariosCard({
   }, [items, query]);
 
   return (
-    <Card className="h-full">
-      <CardHeader className="space-y-4 pb-6">
+    <Card className="flex flex-col h-full border-border/80 shadow-sm">
+      <CardHeader className="space-y-3 pb-3">
         <div className="flex items-center justify-between">
-          <div>
-            <CardTitle className="flex items-center gap-2 text-xl">
-              <Target className="h-6 w-6 text-primary" />
-              Scenarios
-            </CardTitle>
-            <CardDescription className="mt-2 text-sm">
-              {items.length} active scenario{items.length === 1 ? "" : "s"} ·
-              Select one to begin
-            </CardDescription>
+          <div className="flex items-center gap-2">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
+              <Target className="h-4 w-4" />
+            </div>
+            <div>
+              <CardTitle className="text-base font-semibold leading-none">
+                Scenarios
+              </CardTitle>
+              <p className="text-xs text-muted-foreground mt-1">
+                {items.length} available · click to select
+              </p>
+            </div>
           </div>
           <Button
             variant="ghost"
@@ -126,76 +128,76 @@ export function ScenariosCard({
             onClick={load}
             disabled={loading}
             aria-label="Refresh"
-            className="h-9 w-9"
+            className="h-8 w-8 text-muted-foreground hover:text-foreground"
           >
             {loading ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
             ) : (
-              <RefreshCw className="h-4 w-4" />
+              <RefreshCw className="h-3.5 w-3.5" />
             )}
           </Button>
         </div>
+
         {/* Search filter */}
         <div className="relative">
-          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input
             placeholder="Search scenarios..."
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            className="pl-9 pr-8 h-10"
+            className="pl-8 pr-7 h-8 text-xs bg-muted/30 focus-visible:bg-background"
           />
           {query && (
             <button
               type="button"
               onClick={() => setQuery("")}
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground p-0.5"
               aria-label="Clear filter"
             >
-              <X className="h-4 w-4" />
+              <X className="h-3.5 w-3.5" />
             </button>
           )}
         </div>
       </CardHeader>
-      <CardContent className="space-y-4">
+      <CardContent className="flex-1 px-3 pb-3 pt-0">
         {error && (
-          <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-sm text-destructive">
+          <div className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-xs text-destructive">
             {error}
           </div>
         )}
+
         {!error && loading && (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+          <div className="space-y-2 py-1">
             {[0, 1, 2, 3].map((i) => (
               <div
                 key={i}
-                className="h-32 animate-pulse rounded-xl bg-muted/50"
+                className="h-16 animate-pulse rounded-lg bg-muted/40"
               />
             ))}
           </div>
         )}
+
         {!error && !loading && items.length === 0 && (
-          <div className="rounded-xl border-2 border-dashed border-border p-12 text-center">
-            <p className="text-base text-muted-foreground font-medium">
-              No scenarios registered.
-            </p>
-            <p className="text-sm text-muted-foreground/70 mt-2">
-              Run the scenario sync from the admin endpoints to populate the catalog.
-            </p>
+          <div className="rounded-lg border border-dashed border-border/80 p-6 text-center text-xs text-muted-foreground">
+            No scenarios found. Run sync to populate catalog.
           </div>
         )}
+
         {!error && !loading && items.length > 0 && filtered.length === 0 && (
-          <div className="rounded-xl border-2 border-dashed border-border p-12 text-center">
-            <p className="text-base text-muted-foreground font-medium">
-              No scenarios match &quot;{query}&quot;
-            </p>
+          <div className="rounded-lg border border-dashed border-border/80 p-6 text-center text-xs text-muted-foreground">
+            No scenarios match &quot;{query}&quot;
           </div>
         )}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+
+        <div className="space-y-2 overflow-y-auto max-h-[calc(100vh-280px)] pr-0.5">
           {filtered.map((s) => {
             const isPicked = s.id === pickedId;
-            const diffConfig = DIFFICULTY_CONFIG[s.difficulty?.toLowerCase() ?? ""] ?? {
-              color: "bg-muted text-muted-foreground border-border",
+            const diffConfig = DIFFICULTY_CONFIG[
+              s.difficulty?.toLowerCase() ?? ""
+            ] ?? {
+              badge: "bg-muted text-muted-foreground border-border",
               icon: <Target className="h-3 w-3" />,
-              label: s.difficulty ?? "Unknown",
+              label: s.difficulty ?? "Standard",
             };
 
             return (
@@ -203,60 +205,73 @@ export function ScenariosCard({
                 key={s.id}
                 onClick={() => onPick(s)}
                 className={
-                  "group relative w-full rounded-xl border p-5 text-left transition-all duration-200 " +
+                  "group relative w-full rounded-lg border text-left p-3 transition-all " +
                   (isPicked
-                    ? "border-primary bg-primary/5 shadow-lg ring-2 ring-primary/20"
-                    : "border-border bg-card hover:border-primary/50 hover:bg-accent/50 hover:shadow-md")
+                    ? "border-primary bg-primary/10 shadow-sm ring-1 ring-primary/30"
+                    : "border-border/60 bg-card/60 hover:border-primary/40 hover:bg-accent/40")
                 }
               >
-                {/* Selection indicator */}
+                {/* Active Indicator Bar */}
                 {isPicked && (
-                  <div className="absolute top-4 right-4">
-                    <div className="flex h-7 w-7 items-center justify-center rounded-full bg-primary shadow-sm">
-                      <Check className="h-4 w-4 text-primary-foreground" />
-                    </div>
-                  </div>
+                  <div className="absolute left-0 top-2 bottom-2 w-1 rounded-r-full bg-primary" />
                 )}
 
-                {/* Title */}
-                <h4 className="font-bold text-base text-foreground leading-tight pr-8">
-                  {s.title || s.name}
-                </h4>
-                <p className="text-xs text-muted-foreground mt-1 font-mono">
-                  {s.name}
-                </p>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <span className="font-semibold text-xs leading-tight text-foreground truncate">
+                        {s.title || s.name}
+                      </span>
+                      {s.version !== undefined && s.version > 1 && (
+                        <span className="inline-flex items-center rounded bg-primary/15 px-1 py-0.2 text-[9px] font-medium text-primary">
+                          v{s.version}
+                        </span>
+                      )}
+                    </div>
+                    <p className="font-mono text-[11px] text-muted-foreground/80 mt-0.5 truncate">
+                      {s.name}
+                    </p>
+                  </div>
 
-                {/* Divider */}
-                <div className="my-3 h-px bg-border/50" />
+                  <ChevronRight
+                    className={
+                      "h-4 w-4 shrink-0 transition-transform " +
+                      (isPicked
+                        ? "text-primary translate-x-0.5"
+                        : "text-muted-foreground/40 group-hover:text-muted-foreground group-hover:translate-x-0.5")
+                    }
+                  />
+                </div>
 
-                {/* Meta row: Difficulty + Duration + Runs */}
-                <div className="flex items-center gap-2 flex-wrap">
-                  {/* Difficulty badge */}
+                {/* Badges / Metrics Row */}
+                <div className="mt-2.5 flex items-center gap-1.5 flex-wrap">
                   <span
                     className={
-                      "inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-medium " +
-                      diffConfig.color
+                      "inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] font-medium " +
+                      diffConfig.badge
                     }
                   >
                     {diffConfig.icon}
                     {diffConfig.label}
                   </span>
 
-                  {/* Duration */}
                   {s.duration_min && (
-                    <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-                      <Clock className="h-3.5 w-3.5" />
+                    <span className="inline-flex items-center gap-0.5 rounded border border-border/40 bg-muted/30 px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                      <Clock className="h-2.5 w-2.5" />
                       {s.duration_min}m
                     </span>
                   )}
 
-                  {/* Run count */}
                   {s.run_count !== undefined && s.run_count > 0 && (
-                    <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-                      <TrendingUp className="h-3.5 w-3.5" />
+                    <span className="inline-flex items-center gap-0.5 rounded border border-border/40 bg-muted/30 px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                      <TrendingUp className="h-2.5 w-2.5" />
                       {s.run_count}
                     </span>
                   )}
+
+                  <span className="ml-auto font-mono text-[10px] text-muted-foreground/60">
+                    #{s.id}
+                  </span>
                 </div>
               </button>
             );

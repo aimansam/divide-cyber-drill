@@ -239,11 +239,13 @@ export default function App() {
                 );
               case "operate":
                 return (
-                  <div className="space-y-8">
-                    <ScenariosCard
-                      pickedId={pickedScenario?.id ?? null}
-                      onPick={setPickedScenario}
-                    />
+                  <div className="grid grid-cols-1 gap-6 lg:grid-cols-[380px_1fr] items-start">
+                    <div className="lg:sticky lg:top-4">
+                      <ScenariosCard
+                        pickedId={pickedScenario?.id ?? null}
+                        onPick={setPickedScenario}
+                      />
+                    </div>
                     <RunLifecycleCard
                       meSub={me.sub}
                       meRole={me.role}

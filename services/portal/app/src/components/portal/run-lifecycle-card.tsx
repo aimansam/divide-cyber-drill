@@ -46,6 +46,10 @@ import {
   CircleStop,
   AlertTriangle,
   X,
+  Target,
+  Zap,
+  Skull,
+  FileCode2,
 } from "lucide-react";
 import {
   Card,
@@ -603,28 +607,159 @@ export function RunLifecycleCard({
     }, 1000);
     return () => clearInterval(timer);
   }, [run?.run_id, run?.timeout_sec, hasLiveRun]);
+  const scenarioDiffConfig = scenario?.difficulty
+    ? {
+        beginner: {
+          badge: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
+          icon: <Shield className="h-3.5 w-3.5" />,
+          label: "Beginner",
+        },
+        intermediate: {
+          badge: "bg-amber-500/10 text-amber-400 border-amber-500/20",
+          icon: <Zap className="h-3.5 w-3.5" />,
+          label: "Intermediate",
+        },
+        advanced: {
+          badge: "bg-red-500/10 text-red-400 border-red-500/20",
+          icon: <Skull className="h-3.5 w-3.5" />,
+          label: "Advanced",
+        },
+      }[scenario.difficulty.toLowerCase()]
+    : null;
+
 
   return (
-    <Card className="h-full">
-      <CardHeader className="space-y-4 pb-6">
+    <Card className="h-full border-border/80 shadow-sm flex flex-col">
+      <CardHeader className="space-y-4 pb-4">
         <div className="flex items-center justify-between">
-          <div>
-            <CardTitle className="flex items-center gap-2 text-xl">
-              <Settings className="h-6 w-6 text-primary" />
-              Drill lifecycle
-            </CardTitle>
-            <CardDescription className="mt-2 text-sm">
-              {scenario === null
-                ? "Pick a scenario above to start a drill."
-                : `Scenario: ${scenario.name}`}
-              {run !== null && (
-                <span className="ml-2 font-mono">· run #{run.run_id}</span>
-              )}
-            </CardDescription>
+          <div className="flex items-center gap-2">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary">
+              <Settings className="h-4 w-4" />
+            </div>
+            <div>
+              <CardTitle className="text-base font-semibold leading-none">
+                Drill Workbench
+              </CardTitle>
+              <CardDescription className="mt-1 text-xs">
+                {scenario === null
+                  ? "Select a scenario from the sidebar to launch and manage drills."
+                  : `Target: ${scenario.title || scenario.name}`}
+                {run !== null && (
+                  <span className="ml-1.5 font-mono text-foreground font-medium">· run #{run.run_id}</span>
+                )}
+              </CardDescription>
+            </div>
           </div>
+          {onNavigateToConfig && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onNavigateToConfig}
+              className="h-8 text-xs gap-1.5 text-muted-foreground hover:text-foreground"
+            >
+              <FileCode2 className="h-3.5 w-3.5" />
+              <span>Scenario Specs</span>
+            </Button>
+          )}
         </div>
+
+        {/* Selected Scenario Preview Banner */}
+        {scenario ? (
+          <div className="rounded-xl border border-border/80 bg-gradient-to-r from-card via-muted/20 to-card p-4 transition-all">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h3 className="font-semibold text-sm text-foreground">
+                    {scenario.title || scenario.name}
+                  </h3>
+                  {scenario.version !== undefined && scenario.version > 1 && (
+                    <span className="inline-flex items-center rounded bg-primary/15 px-1.5 py-0.2 text-[10px] font-medium text-primary">
+                      v{scenario.version}
+                    </span>
+                  )}
+                  <span className="font-mono text-xs text-muted-foreground/70">
+                    ({scenario.name})
+                  </span>
+                </div>
+                <div className="flex items-center gap-3 text-xs text-muted-foreground flex-wrap pt-0.5">
+                  {scenarioDiffConfig && (
+                    <span
+                      className={
+                        "inline-flex items-center gap-1 rounded border px-2 py-0.5 text-[11px] font-medium " +
+                        scenarioDiffConfig.badge
+                      }
+                    >
+                      {scenarioDiffConfig.icon}
+                      {scenarioDiffConfig.label}
+                    </span>
+                  )}
+                  {scenario.duration_min && (
+                    <span className="inline-flex items-center gap-1">
+                      <Clock className="h-3.5 w-3.5 text-muted-foreground/70" />
+                      Estimated {scenario.duration_min} mins
+                    </span>
+                  )}
+                  {scenario.run_count !== undefined && (
+                    <span className="inline-flex items-center gap-1">
+                      <Target className="h-3.5 w-3.5 text-muted-foreground/70" />
+                      {scenario.run_count} previous run{scenario.run_count === 1 ? "" : "s"}
+                    </span>
+                  )}
+                  <span className="font-mono text-[11px] text-muted-foreground/50">
+                    ID #{scenario.id}
+                  </span>
+                </div>
+              </div>
+
+              {/* Action Buttons inside Scenario Banner */}
+              {canStart && (run === null || !hasLiveRun) && (
+                <div className="flex items-center gap-2 shrink-0">
+                  <Button
+                    onClick={onStart}
+                    disabled={loading}
+                    size="sm"
+                    className="h-9 px-4 font-medium shadow-sm"
+                  >
+                    {loading ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <Play className="mr-2 h-4 w-4 fill-current" />
+                    )}
+                    Start drill
+                  </Button>
+                  {canStop && (
+                    <Button
+                      variant="outline"
+                      onClick={onStop}
+                      disabled={loading || !hasLiveRun}
+                      data-testid="lifecycle-stop"
+                      title="Operator force-stop — only enabled while a drill is live."
+                      size="sm"
+                      className="h-9 px-3 text-muted-foreground"
+                    >
+                      <CircleStop className="mr-1.5 h-4 w-4" />
+                      Stop
+                    </Button>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className="rounded-xl border border-dashed border-border/80 p-8 text-center bg-muted/10">
+            <div className="mx-auto flex h-10 w-10 items-center justify-center rounded-full bg-muted/60 text-muted-foreground mb-3">
+              <Target className="h-5 w-5" />
+            </div>
+            <p className="text-sm font-medium text-foreground">
+              No scenario selected
+            </p>
+            <p className="text-xs text-muted-foreground mt-1 max-w-sm mx-auto">
+              Choose a scenario from the sidebar catalog on the left to review its configuration and launch the drill.
+            </p>
+          </div>
+        )}
       </CardHeader>
-      <CardContent className="space-y-6">
+      <CardContent className="space-y-6 pt-2">
         {error && (
           <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-sm text-destructive">
             <div className="flex items-start gap-3">
@@ -683,34 +818,21 @@ export function RunLifecycleCard({
           </div>
         )}
 
-        {canStart && scenario !== null && (run === null || !hasLiveRun) && (
+        {canStart && scenario !== null && !hasLiveRun && run !== null && (
           <div className="flex items-center gap-3">
             <Button
               onClick={onStart}
               disabled={loading || scenario === null}
-              size="lg"
-              className="flex-1"
+              size="default"
+              className="gap-2"
             >
               {loading ? (
-                <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
-                <Play className="mr-2 h-5 w-5" />
+                <Play className="h-4 w-4 fill-current" />
               )}
-              Start drill
+              Start new run
             </Button>
-            {canStop && (
-              <Button
-                variant="outline"
-                onClick={onStop}
-                disabled={loading || !hasLiveRun}
-                data-testid="lifecycle-stop"
-                title="Operator force-stop — only enabled while a drill is live."
-                size="lg"
-              >
-                <CircleStop className="mr-2 h-5 w-5" />
-                Stop
-              </Button>
-            )}
           </div>
         )}
 
