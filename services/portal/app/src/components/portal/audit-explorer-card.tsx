@@ -47,6 +47,7 @@ import {
   RefreshCw,
   ScrollText,
   Search,
+  X,
 } from "lucide-react";
 import {
   Card,
@@ -416,7 +417,7 @@ export function AuditExplorerCard({
 
         {!error && items.length > 0 && (
           <div className="mb-3 space-y-2">
-            {/* Filter toolbar: Search + Category chips + Actor select + Time format */}
+            {/* Filter toolbar: Category chips + Time format */}
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div
                 className="flex flex-wrap items-center gap-1"
@@ -426,12 +427,12 @@ export function AuditExplorerCard({
               >
                 {(
                   [
-                    { id: "all", label: "All" },
-                    { id: "run", label: "Run" },
-                    { id: "asset", label: "Asset" },
-                    { id: "flag", label: "Flags" },
-                    { id: "error", label: `Errors${errorCount > 0 ? ` (${errorCount})` : ""}` },
-                    { id: "system", label: "System" },
+                    { id: "all", label: "ALL" },
+                    { id: "run", label: "RUN" },
+                    { id: "asset", label: "ASSET" },
+                    { id: "flag", label: "FLAGS" },
+                    { id: "error", label: "ERRORS" },
+                    { id: "system", label: "SYSTEM" },
                   ] as const
                 ).map(({ id, label }) => (
                   <button
@@ -441,7 +442,7 @@ export function AuditExplorerCard({
                     aria-checked={actionFilter === id}
                     onClick={() => setActionFilter(id)}
                     className={
-                      "rounded-md border px-2 py-0.5 text-xs font-medium uppercase tracking-wide transition-colors " +
+                      "rounded-full border px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider transition-colors " +
                       (actionFilter === id
                         ? id === "error"
                           ? "border-red-500 bg-red-500/20 text-red-300"
@@ -475,7 +476,7 @@ export function AuditExplorerCard({
                   variant="ghost"
                   size="sm"
                   onClick={() => setShowExactTime(!showExactTime)}
-                  className="h-7 px-2 text-[11px] text-muted-foreground hover:text-foreground"
+                  className="h-7 px-2 text-[11px] text-muted-foreground hover:text-foreground font-mono"
                   title={showExactTime ? "Switch to relative time (e.g. 2m ago)" : "Switch to exact timestamp"}
                 >
                   <Clock className="mr-1 h-3 w-3" />
@@ -486,20 +487,20 @@ export function AuditExplorerCard({
 
             {/* Quick search input */}
             <div className="relative">
-              <Search className="absolute left-2.5 top-2 h-3.5 w-3.5 text-muted-foreground" />
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
               <Input
-                placeholder="Search audit action, actor, or payload details…"
+                placeholder="Search audit action, actor, or payload details..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                className="h-7 pl-8 text-xs"
+                className="h-7 pl-8 pr-7 text-xs bg-muted/30 focus-visible:bg-background"
               />
               {searchQuery && (
                 <button
                   type="button"
                   onClick={() => setSearchQuery("")}
-                  className="absolute right-2 top-1.5 text-xs text-muted-foreground hover:text-foreground"
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-muted-foreground hover:text-foreground p-0.5"
                 >
-                  ✕
+                  <X className="h-3.5 w-3.5" />
                 </button>
               )}
             </div>

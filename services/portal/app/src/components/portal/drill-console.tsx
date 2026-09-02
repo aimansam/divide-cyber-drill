@@ -274,41 +274,39 @@ export function DrillConsole({ pickedRunId, scenarioName }: DrillConsoleProps) {
   return (
     <div data-testid="drill-console" className="space-y-6">
       <header
-        className="rounded-xl border border-border/80 bg-card p-4 shadow-sm md:p-5"
+        className="rounded-xl border border-border/80 bg-card p-5 shadow-sm"
       >
-        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-          <div className="space-y-1.5">
-            <div className="flex items-center gap-2.5 flex-wrap">
-              <h2 className="font-mono text-xl font-bold tracking-tight text-foreground">
+        <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+          <div className="space-y-2 flex-1">
+            <div className="flex items-center gap-3 flex-wrap">
+              <h2 className="font-mono text-2xl font-bold tracking-tight text-foreground">
                 Drill #{pickedRunId}
               </h2>
               <StatusPill status={run?.status ?? null} />
               {isLive && (
-                <>
-                  <span
-                    data-testid="drill-live-badge"
-                    className="inline-flex items-center gap-1.5 rounded-full bg-sky-500/15 px-2.5 py-0.5 text-xs font-medium text-sky-400 border border-sky-500/30"
-                  >
-                    <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-sky-400" />
-                    LIVE
-                  </span>
-                  {run?.timeout_sec !== undefined && run?.timeout_sec !== null && (
-                    <span
-                      data-testid="drill-timeout-countdown"
-                      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-mono font-medium border ${
-                        run.timeout_sec < 180
-                          ? "bg-red-500/15 text-red-400 border-red-500/30 animate-pulse"
-                          : run.timeout_sec < 600
-                          ? "bg-amber-500/15 text-amber-400 border-amber-500/30"
-                          : "bg-muted text-muted-foreground border-border"
-                      }`}
-                      title="Time remaining before auto-stop watchdog"
-                    >
-                      <Clock className="h-3 w-3" />
-                      {formatDuration(run.timeout_sec)} left
-                    </span>
-                  )}
-                </>
+                <span
+                  data-testid="drill-live-badge"
+                  className="inline-flex items-center gap-1.5 rounded-full bg-sky-500/15 px-2.5 py-0.5 text-xs font-medium text-sky-400 border border-sky-500/30"
+                >
+                  <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-sky-400" />
+                  LIVE
+                </span>
+              )}
+              {isLive && run?.timeout_sec !== undefined && run?.timeout_sec !== null && (
+                <span
+                  data-testid="drill-timeout-countdown"
+                  className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-mono border ${
+                    run.timeout_sec < 180
+                      ? "bg-red-500/15 text-red-400 border-red-500/30 animate-pulse"
+                      : run.timeout_sec < 600
+                      ? "bg-amber-500/15 text-amber-400 border-amber-500/30"
+                      : "bg-muted text-muted-foreground border-border"
+                  }`}
+                  title="Time remaining before auto-stop watchdog"
+                >
+                  <Clock className="h-3 w-3" />
+                  {formatDuration(run.timeout_sec)} left
+                </span>
               )}
               {loading && (
                 <Loader2
@@ -317,21 +315,21 @@ export function DrillConsole({ pickedRunId, scenarioName }: DrillConsoleProps) {
                 />
               )}
             </div>
-            <div className="flex items-center gap-3 text-xs text-muted-foreground flex-wrap">
+            <div className="flex items-center gap-4 text-sm text-muted-foreground flex-wrap">
               {scenarioName && (
-                <span className="font-medium text-foreground/80">
+                <span className="font-medium text-foreground/90">
                   Scenario: {scenarioName}
                 </span>
               )}
               {run?.started_by && (
-                <span className="inline-flex items-center gap-1">
-                  <User className="h-3 w-3" />
+                <span className="inline-flex items-center gap-1.5">
+                  <User className="h-3.5 w-3.5" />
                   {run.started_by}
                 </span>
               )}
               {durationSec > 0 && (
-                <span className="inline-flex items-center gap-1 font-mono">
-                  <Timer className="h-3 w-3" />
+                <span className="inline-flex items-center gap-1.5 font-mono">
+                  <Timer className="h-3.5 w-3.5" />
                   {formatDuration(durationSec)} elapsed
                 </span>
               )}
@@ -346,7 +344,7 @@ export function DrillConsole({ pickedRunId, scenarioName }: DrillConsoleProps) {
                 disabled={extendPending}
                 data-testid="drill-extend-timeout"
                 title="Extend auto-timeout watchdog by 30 minutes"
-                className="h-8 text-xs gap-1.5 text-sky-400 border-sky-500/30 hover:bg-sky-500/10"
+                className="h-9 text-xs gap-1.5 text-sky-400 border-sky-500/30 hover:bg-sky-500/10"
               >
                 {extendPending ? (
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -362,7 +360,7 @@ export function DrillConsole({ pickedRunId, scenarioName }: DrillConsoleProps) {
               onClick={load}
               data-testid="drill-refresh"
               aria-label="Refresh"
-              className="h-8 text-xs gap-1.5"
+              className="h-9 text-xs gap-1.5"
             >
               <RefreshCw className="h-3.5 w-3.5" />
               <span>Refresh</span>
@@ -375,7 +373,7 @@ export function DrillConsole({ pickedRunId, scenarioName }: DrillConsoleProps) {
                   onClick={viewDebrief}
                   data-testid="drill-view-debrief"
                   aria-label="View debrief"
-                  className="h-8 text-xs gap-1.5"
+                  className="h-9 text-xs gap-1.5"
                 >
                   <FileText className="h-3.5 w-3.5" />
                   <span>View debrief</span>
@@ -386,7 +384,7 @@ export function DrillConsole({ pickedRunId, scenarioName }: DrillConsoleProps) {
                   onClick={downloadReport}
                   disabled={reportPending}
                   data-testid="drill-download-report"
-                  className="h-8 text-xs gap-1.5 shadow-sm"
+                  className="h-9 text-xs gap-1.5 shadow-sm"
                 >
                   <Download className="h-3.5 w-3.5" />
                   <span>{reportPending ? "Preparing…" : "Download report"}</span>
