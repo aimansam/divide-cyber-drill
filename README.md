@@ -5,16 +5,12 @@
 > streams live telemetry to a SOC view, scores flags with
 > time-decay, and produces leadership-ready markdown debriefs.
 >
-> **Status (F12 + F9.4 shipped):** all five final-product pillars
-> closed — F9 (DrillConsole consolidation), R1 (multi-worker
-> SSE via Redis pub/sub), F11 (drill debrief artifact),
-> F10 (4-step onboarding wizard), F12 (packaging), F9.4 (wired
-> the three deferred buttons the §18 audit flagged).
-> **901 tests passing** (431 root + 470 API), portal bundle
-> 273.53 KB (6.47 KB under the 280 KB ceiling).
+> **Status: Production Ready** — All features complete.
+> 7 VM templates (4 Linux + 3 Windows), 4 scenarios playable,
+> fully automated setup with zero-touch Windows installation.
+> **901 tests passing**, portal bundle under 280 KB ceiling.
 >
-> See [`docs/PLAN.md`](docs/PLAN.md) §17-§19 for the full
-> roadmap + closure summary.
+> See [`docs/PLAN.md`](docs/PLAN.md) for the full roadmap.
 
 ## What it does
 
@@ -41,19 +37,12 @@ The platform ships with four reference scenarios:
 
 | Scenario | Side | Difficulty | Duration |
 |---|---|---|---|
-| [`first-live-drill`](examples/scenarios/first-live-drill.scenario.yaml) | single-team | beginner | 30 min |
+| [`first-live-drill`](examples/scenarios/first-live-drill.scenario.yaml) | single-team | beginner | 10 min |
 | [`red-vs-blue-baseline`](examples/scenarios/red-vs-blue-baseline.scenario.yaml) | multi-team (red + blue) | beginner | 30 min |
 | [`phish-to-ransom`](examples/scenarios/phish-to-ransom.scenario.yaml) | single-team | intermediate | 90 min |
 | [`lateral-movement-baseline`](examples/scenarios/lateral-movement-baseline.scenario.yaml) | single-team | beginner | 45 min |
 
-## Five-minute "first drill" walkthrough
-
-The platform ships with a 6-step onboarding wizard. A brand-new
-operator with a fresh deployment goes from "empty database" to
-"live drill running" entirely in the browser — no SSH, no editing
-`deploy/.env`, no editing `/etc/network/interfaces`. PVE host +
-token and the Linux bridges the runner needs are all set up via
-the wizard.
+## Quick Start
 
 ### 1. Install
 
@@ -69,34 +58,34 @@ cp deploy/.env.example deploy/.env
 make up             # starts the stack (waits for /healthz)
 ```
 
-### 2. Open the portal
+### 2. Create VM Templates (Automated)
+
+All 7 VM templates (4 Linux + 3 Windows) can be created automatically:
+
+```bash
+# Setup SSH access to PVE (one-time, 2 minutes)
+PVE_ROOT_PASSWORD=your_pve_root_password bash tools/setup_ssh_auto.sh
+
+# Run automated template creation (~2.5 hours, fully unattended)
+export PROXMOX_HOST=https://192.168.0.10 PROXMOX_PORT=8006
+export PROXMOX_USER=divide@pve@pam PROXMOX_TOKEN_ID=drill-token
+export PROXMOX_TOKEN_SECRET=4ea3414f-d3a4-47b5-a2ed-19018f416cc0
+export PROXMOX_VERIFY_SSL=false
+export PVE_HOST=192.168.0.10 PVE_SSH_USER=root
+export PYTHONPATH=/DATA/Storage/docker/divide-cyber-drill/services/api
+
+python3 tools/auto_install_windows.py
+```
+
+See [`docs/TEMPLATE-SETUP.md`](docs/TEMPLATE-SETUP.md) for complete details.
+
+### 3. Open the Portal
 
 Browse to `http://localhost:8000/portal/app/`.
 
 The first time you visit, you see the **Onboarding Wizard**.
 No token, no users, no PVE bridges yet — the wizard walks you
-through:
-
-```
-Step -1: PVE credentials  POST /api/v1/admin/pve-config
-Step  0: PVE bridges       POST /api/v1/admin/pve-setup-bridges (PVE SDN)
-Step  1: Bootstrap admin   POST /api/v1/auth/setup
-Step  2: Pick scenario     GET  /api/v1/scenarios
-Step  3: Form team         POST /exercises + POST /auth/users
-Step  4: Launch drill      POST /api/v1/drills (single-team)
-```
-
-Steps -1 and 0 use PVE's Software-Defined Networking API
-(`/cluster/sdn/{zones,vnets}`) — no SSH, no editing
-`/etc/network/interfaces`, no `ifreload`. The wizard needs a PVE
-token with `SDN.Allocate` permission (see `docs/PROXMOX-SETUP.md §2`).
-
-```
-Step 1: Bootstrap admin      POST /api/v1/auth/setup
-Step 2: Pick scenario        GET /api/v1/scenarios
-Step 3: Form team (multi)    POST /exercises + POST /auth/users
-Step 4: Launch drill         POST /api/v1/drills (single-team)
-```
+through PVE setup, admin creation, and launching your first drill.
 
 ### 3. Fill in the wizard
 

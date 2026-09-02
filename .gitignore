@@ -22,3 +22,5 @@ deploy/certs/*.key
 .vscode/
 *.swp
 deploy/.env
+tools/cloud-images/*.qcow2
+tools/*.vfd
