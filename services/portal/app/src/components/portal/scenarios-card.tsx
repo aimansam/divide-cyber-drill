@@ -115,11 +115,13 @@ export function ScenariosCard({
             </div>
             <div>
               <CardTitle className="text-base font-semibold leading-none">
-                Scenarios
+                Target Scenarios
               </CardTitle>
-              <p className="text-xs text-muted-foreground mt-1">
-                {items.length} available · click to select
-              </p>
+              <div className="flex items-center gap-2 mt-1">
+                <span className="inline-flex items-center rounded-full bg-primary/10 border border-primary/20 px-2 py-0.5 text-[10px] font-medium text-primary">
+                  {items.length} {items.length === 1 ? "Target" : "Targets"} Available
+                </span>
+              </div>
             </div>
           </div>
           <Button
@@ -142,7 +144,7 @@ export function ScenariosCard({
         <div className="relative">
           <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input
-            placeholder="Search scenarios..."
+            placeholder="Search targets..."
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             className="pl-8 pr-7 h-8 text-xs bg-muted/30 focus-visible:bg-background"
@@ -205,37 +207,40 @@ export function ScenariosCard({
                 key={s.id}
                 onClick={() => onPick(s)}
                 className={
-                  "group relative w-full rounded-lg border text-left p-3 transition-all " +
+                  "group relative w-full rounded-lg border text-left p-3 transition-all duration-200 overflow-hidden " +
                   (isPicked
                     ? "border-primary bg-primary/10 shadow-sm ring-1 ring-primary/30"
                     : "border-border/60 bg-card/60 hover:border-primary/40 hover:bg-accent/40")
                 }
               >
-                {/* Active Indicator Bar */}
-                {isPicked && (
-                  <div className="absolute left-0 top-2 bottom-2 w-1 rounded-r-full bg-primary" />
-                )}
+                {/* Active Indicator Bar - HTB style left accent */}
+                <div
+                  className={
+                    "absolute left-0 top-0 bottom-0 w-1 transition-colors " +
+                    (isPicked ? "bg-primary" : "bg-transparent group-hover:bg-primary/30")
+                  }
+                />
 
-                <div className="flex items-start justify-between gap-2">
+                <div className="flex items-start justify-between gap-2 pl-2">
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-1.5 flex-wrap">
-                      <span className="font-semibold text-xs leading-tight text-foreground truncate">
+                      <span className="font-semibold text-xs leading-tight text-foreground truncate group-hover:text-primary transition-colors">
                         {s.title || s.name}
                       </span>
                       {s.version !== undefined && s.version > 1 && (
-                        <span className="inline-flex items-center rounded bg-primary/15 px-1 py-0.2 text-[9px] font-medium text-primary">
+                        <span className="inline-flex items-center rounded bg-primary/15 px-1 py-0.2 text-[9px] font-mono font-medium text-primary">
                           v{s.version}
                         </span>
                       )}
                     </div>
                     <p className="font-mono text-[11px] text-muted-foreground/80 mt-0.5 truncate">
-                      {s.name}
+                      <span className="text-muted-foreground/50">target://</span>{s.name}
                     </p>
                   </div>
 
                   <ChevronRight
                     className={
-                      "h-4 w-4 shrink-0 transition-transform " +
+                      "h-4 w-4 shrink-0 transition-all " +
                       (isPicked
                         ? "text-primary translate-x-0.5"
                         : "text-muted-foreground/40 group-hover:text-muted-foreground group-hover:translate-x-0.5")
@@ -243,11 +248,11 @@ export function ScenariosCard({
                   />
                 </div>
 
-                {/* Badges / Metrics Row */}
-                <div className="mt-2.5 flex items-center gap-1.5 flex-wrap">
+                {/* Badges / Metrics Row - HTB style */}
+                <div className="mt-2.5 flex items-center gap-1.5 flex-wrap pl-2">
                   <span
                     className={
-                      "inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] font-medium " +
+                      "inline-flex items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider " +
                       diffConfig.badge
                     }
                   >
@@ -256,16 +261,16 @@ export function ScenariosCard({
                   </span>
 
                   {s.duration_min && (
-                    <span className="inline-flex items-center gap-0.5 rounded border border-border/40 bg-muted/30 px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                    <span className="inline-flex items-center gap-0.5 rounded border border-border/40 bg-muted/30 px-1.5 py-0.5 text-[10px] text-muted-foreground font-mono">
                       <Clock className="h-2.5 w-2.5" />
                       {s.duration_min}m
                     </span>
                   )}
 
                   {s.run_count !== undefined && s.run_count > 0 && (
-                    <span className="inline-flex items-center gap-0.5 rounded border border-border/40 bg-muted/30 px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                    <span className="inline-flex items-center gap-0.5 rounded border border-border/40 bg-muted/30 px-1.5 py-0.5 text-[10px] text-muted-foreground font-mono">
                       <TrendingUp className="h-2.5 w-2.5" />
-                      {s.run_count}
+                      {s.run_count} {s.run_count === 1 ? "run" : "runs"}
                     </span>
                   )}
 

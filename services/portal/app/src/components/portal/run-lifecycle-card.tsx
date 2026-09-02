@@ -921,7 +921,7 @@ export function RunLifecycleCard({
 
         {run !== null && (
           <>
-            {/* Status banner with visual state indicator */}
+            {/* Target Machine HUD - HTB style cockpit */}
             <div
               className={
                 "rounded-xl border-l-4 px-5 py-4 " +
@@ -938,42 +938,65 @@ export function RunLifecycleCard({
                         : "border-l-border bg-muted/50")
               }
             >
-              <div className="flex flex-wrap items-center gap-4 text-sm">
-                <StatusPill status={run.status} />
-                {run.team && (
-                  <span className="inline-flex items-center rounded bg-secondary px-2.5 py-1 text-xs font-medium uppercase text-secondary-foreground">
-                    {run.team}
+              {/* Target Machine Header */}
+              <div className="flex items-start gap-3 mb-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 border border-primary/20 shrink-0">
+                  <Server className="h-5 w-5 text-primary" />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-semibold text-sm text-foreground truncate">
+                      {scenario?.title || scenario?.name || "Target Machine"}
+                    </span>
+                    <StatusPill status={run.status} />
+                    {scenario && (
+                      <span className="inline-flex items-center rounded bg-primary/10 border border-primary/20 px-1.5 py-0.2 text-[10px] font-mono font-medium text-primary">
+                        {scenario.name}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 mt-1 text-[11px] text-muted-foreground font-mono">
+                    <span>RUN #{run.run_id}</span>
+                    <span className="text-muted-foreground/40">·</span>
+                    {run.started_at && <span>Started {formatRelative(run.started_at)}</span>}
+                    {run.started_by && (
+                      <>
+                        <span className="text-muted-foreground/40">·</span>
+                        <span>by {run.started_by}</span>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Status row with timer and actions */}
+              <div className="flex items-center gap-3 flex-wrap pt-2 border-t border-border/40">
+                {run.duration_sec !== null && run.duration_sec !== undefined && (
+                  <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground font-mono">
+                    <Clock className="h-3 w-3" />
+                    {run.status === "running" || run.status === "pending"
+                      ? "Running for "
+                      : "Duration "}
+                    {formatDuration(run.duration_sec)}
                   </span>
                 )}
-                <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-sm text-muted-foreground">
-                  {run.started_by && <span>by {run.started_by}</span>}
-                  {run.started_at && <span>{formatRelative(run.started_at)}</span>}
-                  {run.duration_sec !== null && run.duration_sec !== undefined && (
-                    <span className="font-mono text-base font-medium">
-                      {run.status === "running" || run.status === "pending"
-                        ? "running for "
-                        : "duration "}
-                      {formatDuration(run.duration_sec)}
-                    </span>
-                  )}
-                  {/* Countdown timer for live drills */}
-                  {hasLiveRun && timeLeftSec !== null && (
-                    <span
-                      className={
-                        "font-mono font-semibold " +
-                        (timeLeftSec <= 60
-                          ? "text-red-500"
-                          : timeLeftSec <= 300
-                            ? "text-amber-500"
-                            : "text-emerald-500")
-                      }
-                      title="Time remaining before auto-timeout"
-                    >
-                      <Clock className="mr-1 inline h-3 w-3" />
-                      {Math.floor(timeLeftSec / 60)}m {timeLeftSec % 60}s left
-                    </span>
-                  )}
-                </div>
+                {/* Countdown timer for live drills */}
+                {hasLiveRun && timeLeftSec !== null && (
+                  <span
+                    className={
+                      "inline-flex items-center gap-1 text-[11px] font-mono font-semibold " +
+                      (timeLeftSec <= 60
+                        ? "text-red-500"
+                        : timeLeftSec <= 300
+                          ? "text-amber-500"
+                          : "text-emerald-500")
+                    }
+                    title="Time remaining before auto-timeout"
+                  >
+                    <Clock className="h-3 w-3" />
+                    {Math.floor(timeLeftSec / 60)}m {timeLeftSec % 60}s left
+                  </span>
+                )}
                 {/* Extend timeout button for live drills */}
                 {hasLiveRun && canStart && (
                   <Button
@@ -981,7 +1004,7 @@ export function RunLifecycleCard({
                     size="sm"
                     onClick={onExtendTimeout}
                     disabled={extendingTimeout}
-                    className="h-7 text-xs px-2.5 gap-1 text-sky-400 border-sky-500/30 hover:bg-sky-500/10"
+                    className="h-7 text-xs px-2.5 gap-1 text-sky-400 border-sky-500/30 hover:bg-sky-500/10 font-mono"
                     title="Extend drill timeout by 30 minutes"
                   >
                     {extendingTimeout ? (
@@ -989,7 +1012,7 @@ export function RunLifecycleCard({
                     ) : (
                       <Clock className="mr-1 h-3 w-3" />
                     )}
-                    +30m Time
+                    +30m
                   </Button>
                 )}
 
@@ -1005,6 +1028,7 @@ export function RunLifecycleCard({
                   <RefreshCw className="h-3.5 w-3.5" />
                 </Button>
               </div>
+
               {latestAudit && (
                 <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-border/40 pt-1.5 text-xs">
                   <span className="text-[11px] font-medium text-muted-foreground">Latest event:</span>
@@ -1094,14 +1118,16 @@ export function RunLifecycleCard({
               </div>
             )}
 
-            {/* Assets section with card-based visual design */}
+            {/* Spawned Machine Cards - HTB style */}
             {run.assets && run.assets.length > 0 && (
               <div className="rounded-xl border border-border/80 bg-card overflow-hidden shadow-sm">
-                <div className="border-b border-border/40 px-4 py-3 flex items-center justify-between">
+                <div className="border-b border-border/40 px-4 py-3 flex items-center justify-between bg-muted/20">
                   <div className="flex items-center gap-2">
-                    <Server className="h-3.5 w-3.5 text-primary" />
+                    <div className="flex h-6 w-6 items-center justify-center rounded bg-primary/10 border border-primary/20">
+                      <Server className="h-3 w-3 text-primary" />
+                    </div>
                     <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                      Target Assets ({run.assets.length})
+                      Spawned Machines ({run.assets.length})
                     </h4>
                   </div>
                   {hasLiveRun && (
@@ -1110,11 +1136,11 @@ export function RunLifecycleCard({
                       size="sm"
                       onClick={onRefresh}
                       disabled={loading}
-                      className="h-6 text-xs gap-1 text-muted-foreground hover:text-foreground"
+                      className="h-6 text-xs gap-1 text-muted-foreground hover:text-foreground font-mono"
                       title="Refresh all assets"
                     >
                       <RefreshCw className="h-3 w-3" />
-                      <span>Sync all</span>
+                      <span>Sync PVE</span>
                     </Button>
                   )}
                 </div>
@@ -1129,41 +1155,43 @@ export function RunLifecycleCard({
                     return (
                       <div
                         key={a.asset_id ?? `${a.role}-${a.pve_vmid}`}
-                        className="rounded-lg border border-border/60 bg-muted/15 p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:border-border transition-colors"
+                        className="rounded-lg border border-border/60 bg-muted/15 p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:border-border transition-colors group"
                       >
-                        <div className="min-w-0 flex-1 space-y-1">
+                        <div className="min-w-0 flex-1 space-y-1.5">
                           <div className="flex items-center gap-2 flex-wrap">
-                            <span className="font-mono text-xs font-semibold text-foreground">
+                            <span className="inline-flex items-center rounded bg-primary/10 border border-primary/20 px-1.5 py-0.2 text-[10px] font-mono font-medium text-primary uppercase tracking-wider">
                               {a.role ?? a.kind ?? "asset"}
                             </span>
                             {a.template && (
-                              <span className="text-[10px] text-muted-foreground truncate">
-                                ({a.template})
+                              <span className="text-[10px] text-muted-foreground truncate font-mono">
+                                {a.template}
+                              </span>
+                            )}
+                            {a.pve_vmid !== null && a.pve_vmid !== undefined && (
+                              <span className="font-mono text-[10px] text-muted-foreground/60">
+                                VMID: {a.pve_vmid}
                               </span>
                             )}
                           </div>
                           <div className="font-mono text-[11px] text-muted-foreground flex flex-wrap items-center gap-2">
                             {a.pve_ip ? (
-                              <span className="inline-flex items-center gap-1 rounded bg-sky-500/10 px-1.5 py-0.2 text-[10px] text-sky-400 font-semibold border border-sky-500/20">
+                              <span className="inline-flex items-center gap-1 rounded bg-sky-500/10 px-2 py-0.5 text-[11px] text-sky-400 font-semibold border border-sky-500/20">
                                 {sshTarget}
                               </span>
                             ) : (
-                              <span className="text-muted-foreground/60">(no IP)</span>
-                            )}
-                            {a.pve_vmid !== null && a.pve_vmid !== undefined && (
-                              <span>vmid={a.pve_vmid}</span>
+                              <span className="text-muted-foreground/60 italic">(no IP assigned)</span>
                             )}
                           </div>
                         </div>
 
                         <div className="flex items-center gap-2 shrink-0">
-                          <span className="font-mono text-[11px] px-1.5 py-0.5 rounded border border-border/50 bg-muted/30 text-muted-foreground">
+                          <span className="font-mono text-[10px] px-2 py-0.5 rounded border border-border/50 bg-muted/30 text-muted-foreground uppercase tracking-wider">
                             {a.status ?? "?"}
                           </span>
                           <Button
                             variant="ghost"
                             size="sm"
-                            className="h-7 px-2 text-xs gap-1 text-muted-foreground hover:text-foreground"
+                            className="h-7 px-2 text-xs gap-1 text-muted-foreground hover:text-foreground font-mono"
                             onClick={() => copySsh(sshTarget, a.pve_vmid ?? null)}
                             title="Copy SSH Target"
                           >
@@ -1172,7 +1200,7 @@ export function RunLifecycleCard({
                             ) : (
                               <Clipboard className="h-3.5 w-3.5" />
                             )}
-                            <span className="text-[10px]">{copiedVmid === a.pve_vmid ? "Copied" : "Copy"}</span>
+                            <span className="text-[10px]">{copiedVmid === a.pve_vmid ? "Copied" : "Copy IP"}</span>
                           </Button>
                           {hasLiveRun && a.asset_id && (
                             <Button
@@ -1198,38 +1226,40 @@ export function RunLifecycleCard({
               <VpnDownloadButton runStatus={run.status} endedAt={run.ended_at} />
             )}
 
-            {/* Danger Zone / Cancel Drill section */}
+            {/* Danger Zone / Cancel Drill section - HTB style */}
             {canCancelThis && hasLiveRun && (
               <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-4 transition-all">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-destructive">
-                      <AlertTriangle className="h-3.5 w-3.5" />
-                      <span>Abort Drill Execution</span>
-                    </div>
-                    <p className="text-xs text-muted-foreground">
+                <div className="flex items-start gap-3 mb-3">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-destructive/10 border border-destructive/20 shrink-0">
+                    <AlertTriangle className="h-4 w-4 text-destructive" />
+                  </div>
+                  <div className="flex-1">
+                    <h4 className="text-xs font-semibold uppercase tracking-wider text-destructive">
+                      Abort Drill Execution
+                    </h4>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">
                       Terminate all cloned VMs on Proxmox and log a cancellation audit event.
                     </p>
                   </div>
-                  <div className="flex items-center gap-2 w-full sm:w-auto shrink-0">
-                    <Input
-                      placeholder="Reason (e.g. user requested)"
-                      value={cancelReason}
-                      onChange={(e) => setCancelReason(e.target.value)}
-                      maxLength={120}
-                      className="h-8 text-xs bg-background w-full sm:w-60"
-                    />
-                    <Button
-                      variant="destructive"
-                      size="sm"
-                      onClick={onCancel}
-                      disabled={loading}
-                      className="h-8 text-xs shrink-0 gap-1.5 shadow-sm font-medium"
-                    >
-                      <Square className="h-3.5 w-3.5 fill-current" />
-                      <span>Cancel drill</span>
-                    </Button>
-                  </div>
+                </div>
+                <div className="flex items-center gap-2 w-full sm:w-auto shrink-0 pt-2 border-t border-destructive/20">
+                  <Input
+                    placeholder="Reason (e.g. user requested)"
+                    value={cancelReason}
+                    onChange={(e) => setCancelReason(e.target.value)}
+                    maxLength={120}
+                    className="h-8 text-xs bg-background w-full sm:w-60 font-mono"
+                  />
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    onClick={onCancel}
+                    disabled={loading}
+                    className="h-8 text-xs shrink-0 gap-1.5 shadow-sm font-medium"
+                  >
+                    <Square className="h-3.5 w-3.5 fill-current" />
+                    <span>Cancel drill</span>
+                  </Button>
                 </div>
               </div>
             )}
@@ -1316,13 +1346,13 @@ function VpnDownloadButton({
   }
 
   return (
-    <div className="rounded-xl border border-border/70 bg-card p-3.5 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
+    <div className="rounded-xl border border-border/70 bg-card p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs">
       <div className="flex items-center gap-3">
         <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 text-primary shrink-0 border border-primary/20">
           <Shield className="h-4 w-4" />
         </div>
         <div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <h5 className="text-xs font-semibold text-foreground">WireGuard VPN Access</h5>
             {vpnIp && (
               <span className="font-mono text-[10px] text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-1.5 py-0.2 rounded">
@@ -1330,7 +1360,7 @@ function VpnDownloadButton({
               </span>
             )}
           </div>
-          <p className="text-[11px] text-muted-foreground mt-0.5">
+          <p className="text-[10px] text-muted-foreground mt-0.5">
             Download your personal profile to route directly to isolated drill VM subnets.
           </p>
           {error && <p className="text-xs text-destructive mt-1">{error}</p>}
@@ -1341,7 +1371,7 @@ function VpnDownloadButton({
         variant="outline"
         onClick={download}
         disabled={downloading}
-        className="h-8 text-xs shrink-0 gap-1.5 border-border/80 hover:bg-muted font-medium"
+        className="h-8 text-xs shrink-0 gap-1.5 border-border/80 hover:bg-muted font-mono font-medium"
       >
         {downloading ? (
           <Loader2 className="h-3.5 w-3.5 animate-spin" />
