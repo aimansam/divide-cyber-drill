@@ -605,23 +605,30 @@ export function RunLifecycleCard({
   }, [run?.run_id, run?.timeout_sec, hasLiveRun]);
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Drill lifecycle</CardTitle>
-        <CardDescription>
-          {scenario === null
-            ? "Pick a scenario above to start a drill."
-            : `Scenario: ${scenario.name}`}
-          {run !== null && (
-            <span className="ml-2 font-mono">· run #{run.run_id}</span>
-          )}
-        </CardDescription>
+    <Card className="h-full">
+      <CardHeader className="space-y-3">
+        <div className="flex items-center justify-between">
+          <div>
+            <CardTitle className="flex items-center gap-2">
+              <Settings className="h-5 w-5 text-primary" />
+              Drill lifecycle
+            </CardTitle>
+            <CardDescription>
+              {scenario === null
+                ? "Pick a scenario above to start a drill."
+                : `Scenario: ${scenario.name}`}
+              {run !== null && (
+                <span className="ml-2 font-mono">· run #{run.run_id}</span>
+              )}
+            </CardDescription>
+          </div>
+        </div>
       </CardHeader>
       <CardContent className="space-y-4">
         {error && (
-          <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
-            <div className="flex items-start gap-2">
-              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+          <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-sm text-destructive">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0" />
               <span className="font-mono whitespace-pre-wrap flex-1">{error}</span>
               <button
                 type="button"
@@ -629,7 +636,7 @@ export function RunLifecycleCard({
                   setError(null);
                   setErrorKind(null);
                 }}
-                className="shrink-0 text-destructive/60 hover:text-destructive"
+                className="shrink-0 text-destructive/60 hover:text-destructive transition-colors"
                 aria-label="Dismiss error"
               >
                 <X className="h-4 w-4" />
@@ -677,22 +684,20 @@ export function RunLifecycleCard({
         )}
 
         {canStart && scenario !== null && (run === null || !hasLiveRun) && (
-          <div className="flex items-center gap-2">
-            <Button onClick={onStart} disabled={loading || scenario === null}>
+          <div className="flex items-center gap-3">
+            <Button
+              onClick={onStart}
+              disabled={loading || scenario === null}
+              size="lg"
+              className="flex-1"
+            >
               {loading ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                <Loader2 className="mr-2 h-5 w-5 animate-spin" />
               ) : (
-                <Play className="mr-2 h-4 w-4" />
+                <Play className="mr-2 h-5 w-5" />
               )}
               Start drill
             </Button>
-            {/* Q20: always-visible Stop button (disabled until a
-                live run exists). Q19's gate ``canStop && hasLiveRun``
-                hid it for first-time operators who hadn't yet
-                started a drill -- they'd never learn the capability
-                exists. Now it sits next to Start as a discoverable
-                affordance; the button is greyed out until the
-                operator has a running drill to stop. */}
             {canStop && (
               <Button
                 variant="outline"
@@ -700,8 +705,9 @@ export function RunLifecycleCard({
                 disabled={loading || !hasLiveRun}
                 data-testid="lifecycle-stop"
                 title="Operator force-stop — only enabled while a drill is live."
+                size="lg"
               >
-                <CircleStop className="mr-2 h-4 w-4" />
+                <CircleStop className="mr-2 h-5 w-5" />
                 Stop
               </Button>
             )}
@@ -710,32 +716,31 @@ export function RunLifecycleCard({
 
         {run !== null && (
           <>
-            {/* Q27: Status line with visual state indicator */}
+            {/* Status banner with visual state indicator */}
             <div
               className={
-                "rounded-md border-l-4 px-3 py-2 " +
+                "rounded-lg border-l-4 px-4 py-3 " +
                 (run.status === "running" || run.status === "pending"
-                  ? "border-l-blue-500 bg-blue-500/5"
+                  ? "border-l-blue-500 bg-blue-500/10"
                   : run.status === "succeeded" || run.status === "completed"
-                    ? "border-l-emerald-500 bg-emerald-500/5"
+                    ? "border-l-emerald-500 bg-emerald-500/10"
                     : run.status === "failed" || run.status === "timeout"
-                      ? "border-l-red-500 bg-red-500/5"
+                      ? "border-l-red-500 bg-red-500/10"
                       : run.status === "stopped" ||
                           run.status === "cancelled" ||
                           run.status === "canceled"
-                        ? "border-l-gray-500 bg-gray-500/5"
-                        : "border-l-border")
+                        ? "border-l-gray-500 bg-gray-500/10"
+                        : "border-l-border bg-muted/50")
               }
             >
               <div className="flex flex-wrap items-center gap-3 text-sm">
                 <StatusPill status={run.status} />
-                {/* F6: team badge for multi-team exercises */}
                 {run.team && (
-                  <span className="inline-flex items-center rounded bg-secondary px-1.5 py-0.5 text-[10px] font-medium uppercase text-secondary-foreground">
+                  <span className="inline-flex items-center rounded bg-secondary px-2 py-0.5 text-xs font-medium uppercase text-secondary-foreground">
                     {run.team}
                   </span>
                 )}
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
                   {run.started_by && <span>by {run.started_by}</span>}
                   {run.started_at && <span>{formatRelative(run.started_at)}</span>}
                   {run.duration_sec !== null && run.duration_sec !== undefined && (
