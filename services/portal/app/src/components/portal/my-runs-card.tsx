@@ -24,6 +24,9 @@ import {
   RotateCcw,
   Eye,
   CircleStop,
+  Activity,
+  Radio,
+  ChevronRight,
 } from "lucide-react";
 import {
   Card,
@@ -203,10 +206,32 @@ export function MyRunsCard({
   }, [items, statusFilter, liveOnly]);
 
   return (
-    <Card className={compact ? "h-full" : ""}>
-      <CardHeader className={compact ? "px-3 py-2" : "flex-row items-center justify-between space-y-0"}>
+    <Card className={compact ? "h-full border-border/80 shadow-sm flex flex-col" : ""}>
+      <CardHeader className={compact ? "p-3 pb-2 space-y-2" : "flex-row items-center justify-between space-y-0"}>
         <div>
-          <CardTitle className={compact ? "text-sm" : ""}>{liveOnly ? "Live drills" : isAllView ? "All runs" : "My runs"}</CardTitle>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                <Activity className="h-4 w-4" />
+              </div>
+              <div>
+                <CardTitle className={compact ? "text-sm font-semibold leading-none" : ""}>
+                  {liveOnly ? "Live Drills" : isAllView ? "All Runs" : "My Runs"}
+                </CardTitle>
+                {compact && (
+                  <p className="text-[11px] text-muted-foreground mt-0.5">
+                    {filtered.length} active · select to view
+                  </p>
+                )}
+              </div>
+            </div>
+            {liveOnly && filtered.length > 0 && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-sky-500/15 px-2 py-0.5 text-[10px] font-medium text-sky-400 border border-sky-500/30">
+                <Radio className="h-2.5 w-2.5 animate-pulse text-sky-400" />
+                Live
+              </span>
+            )}
+          </div>
           {!compact && (
             <CardDescription>
               {items.length} run{items.length === 1 ? "" : "s"} visible to you ·
@@ -248,7 +273,7 @@ export function MyRunsCard({
           )}
         </div>
       </CardHeader>
-      <CardContent>
+      <CardContent className={compact ? "px-3 pb-3 pt-0 flex-1" : ""}>
         {error && <div className="text-sm text-destructive">{error}</div>}
         {loading && items.length === 0 && (
           <div className="flex items-center justify-center py-8 text-sm text-muted-foreground">
@@ -257,9 +282,9 @@ export function MyRunsCard({
           </div>
         )}
         {!error && !loading && filtered.length === 0 && (
-          <div className="text-sm italic text-muted-foreground">
+          <div className="rounded-lg border border-dashed border-border/80 p-5 text-center text-xs text-muted-foreground">
             {liveOnly
-              ? "No live drills running right now."
+              ? "No live drills running right now. Launch one in Operate."
               : statusFilter === "all"
                 ? isAllView
                   ? "No drills on record. Start one from the scenario list."
@@ -269,7 +294,7 @@ export function MyRunsCard({
         )}
         <ul
           ref={listRef}
-          className={compact ? "divide-y divide-border max-h-[calc(100vh-200px)] overflow-y-auto" : "divide-y divide-border max-h-96 overflow-y-auto"}
+          className={compact ? "space-y-1.5 max-h-[calc(100vh-200px)] overflow-y-auto pr-0.5" : "divide-y divide-border max-h-96 overflow-y-auto"}
           aria-live="polite"
         >
           {filtered.map((r) => {
@@ -281,6 +306,63 @@ export function MyRunsCard({
               "succeeded", "completed", "failed", "timeout",
               "stopped", "cancelled", "canceled",
             ].includes(r.status);
+
+            if (compact) {
+              return (
+                <li key={r.run_id}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onPick(r);
+                      setSelectedRowId((prev) =>
+                        prev === r.run_id ? null : r.run_id,
+                      );
+                    }}
+                    className={
+                      "group relative w-full rounded-lg border text-left p-2.5 transition-all " +
+                      (isPicked
+                        ? "border-primary bg-primary/10 shadow-sm ring-1 ring-primary/30"
+                        : "border-border/60 bg-card/60 hover:border-primary/40 hover:bg-accent/40")
+                    }
+                  >
+                    {isPicked && (
+                      <div className="absolute left-0 top-2 bottom-2 w-1 rounded-r-full bg-primary" />
+                    )}
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="font-mono text-xs font-semibold text-foreground">
+                            Drill #{r.run_id}
+                          </span>
+                          {r.scenario_id !== undefined && (
+                            <span className="inline-flex items-center rounded border border-border/50 bg-muted/40 px-1 py-0.2 text-[9px] font-mono text-muted-foreground">
+                              scen:{r.scenario_id}
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-2 mt-1 text-[11px] text-muted-foreground">
+                          <span>{r.started_by ?? "—"}</span>
+                          {r.started_at && (
+                            <span>· {formatRelative(r.started_at)}</span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex flex-col items-end gap-1 shrink-0">
+                        <StatusPill status={r.status} />
+                        <ChevronRight
+                          className={
+                            "h-3.5 w-3.5 transition-transform " +
+                            (isPicked
+                              ? "text-primary translate-x-0.5"
+                              : "text-muted-foreground/40 group-hover:text-muted-foreground group-hover:translate-x-0.5")
+                          }
+                        />
+                      </div>
+                    </div>
+                  </button>
+                </li>
+              );
+            }
 
             return (
               <li key={r.run_id}>

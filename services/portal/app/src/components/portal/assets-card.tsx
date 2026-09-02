@@ -224,8 +224,8 @@ export function AssetsCard({
   }
 
   return (
-    <Card>
-      {!compact && (
+    <Card className="border-border/80 shadow-sm overflow-hidden">
+      {!compact ? (
         <CardHeader>
           <div className="flex items-center justify-between">
             <div>
@@ -251,8 +251,35 @@ export function AssetsCard({
             )}
           </div>
         </CardHeader>
+      ) : (
+        <CardHeader className="pb-3 pt-4 px-4 border-b border-border/40">
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+              <Server className="h-3.5 w-3.5 text-primary" />
+              Assets & VMs
+            </CardTitle>
+            <div className="flex items-center gap-2">
+              <span className="font-mono text-[11px] text-muted-foreground">
+                {assets.length} VM{assets.length === 1 ? "" : "s"}
+              </span>
+              {pickedRunId !== null && assets.length > 0 && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  onClick={syncAll}
+                  disabled={syncingAll}
+                  className="h-6 w-6 text-muted-foreground hover:text-foreground"
+                  aria-label="sync all assets with PVE"
+                  title="Sync all assets with PVE"
+                >
+                  <RefreshCw className={`h-3 w-3 ${syncingAll ? "animate-spin" : ""}`} />
+                </Button>
+              )}
+            </div>
+          </div>
+        </CardHeader>
       )}
-      <CardContent>
+      <CardContent className={compact ? "p-3" : ""}>
         {loading && (
           <div className="text-sm italic text-muted-foreground">Loading…</div>
         )}
@@ -288,6 +315,117 @@ export function AssetsCard({
               : a.pve_vmid !== null && a.pve_vmid !== undefined
                 ? `vmid=${a.pve_vmid}`
                 : a.role ?? "asset";
+            if (compact) {
+              return (
+                <li
+                  key={a.asset_id ?? `${a.role}-${a.pve_vmid}-${a.pve_ip}`}
+                  className="rounded-lg border border-border/70 bg-card/60 p-3 hover:border-border transition-colors mb-2 last:mb-0"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="font-mono text-xs font-semibold text-foreground">
+                          {a.role ?? a.kind ?? "asset"}
+                        </span>
+                        {a.template && (
+                          <span className="text-[10px] text-muted-foreground truncate">
+                            ({a.template})
+                          </span>
+                        )}
+                      </div>
+                      <div className="font-mono text-[11px] text-muted-foreground mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                        {a.pve_ip ? (
+                          <span className="inline-flex items-center gap-1 rounded bg-sky-500/10 px-1.5 py-0.2 text-[10px] text-sky-400 font-semibold border border-sky-500/20">
+                            {sshTarget}
+                          </span>
+                        ) : (
+                          <span className="text-muted-foreground/60">(no IP)</span>
+                        )}
+                        {a.pve_vmid !== null && a.pve_vmid !== undefined && (
+                          <span>vmid={a.pve_vmid}</span>
+                        )}
+                        {a.pve_node && (
+                          <span>node={a.pve_node}</span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <span className="font-mono text-[11px] px-1.5 py-0.5 rounded border border-border/50 bg-muted/30 text-muted-foreground">
+                        {a.status ?? "?"}
+                      </span>
+                      {syncStatuses[a.asset_id ?? 0] && (
+                        syncStatuses[a.asset_id ?? 0].pve_status === "missing" ? (
+                          <span title="VM deleted"><XCircle className="h-3.5 w-3.5 text-red-400" /></span>
+                        ) : syncStatuses[a.asset_id ?? 0].drifted ? (
+                          <span title="Drifted"><AlertCircle className="h-3.5 w-3.5 text-amber-400" /></span>
+                        ) : (
+                          <span title="Synced"><CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" /></span>
+                        )
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="mt-2 pt-2 border-t border-border/40 flex items-center justify-between gap-2">
+                    <div className="text-[10px] text-muted-foreground/60">
+                      {syncStatuses[a.asset_id ?? 0]?.last_synced_at && (
+                        <span>synced {formatSyncAgo(syncStatuses[a.asset_id ?? 0].last_synced_at)}</span>
+                      )}
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 px-2 text-xs gap-1 text-muted-foreground hover:text-foreground"
+                        aria-label={copiedVmid === a.pve_vmid ? "copied" : "copy SSH target"}
+                        onClick={() => copy(sshTarget, a.pve_vmid ?? null)}
+                      >
+                        {copiedVmid === a.pve_vmid ? (
+                          <ClipboardCheck className="h-3.5 w-3.5 text-emerald-400" />
+                        ) : (
+                          <Clipboard className="h-3.5 w-3.5" />
+                        )}
+                        <span className="text-[10px]">{copiedVmid === a.pve_vmid ? "Copied" : "Copy"}</span>
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                        aria-label="sync status with PVE"
+                        onClick={() => syncAsset(a.asset_id ?? 0)}
+                        disabled={syncingAssetId === a.asset_id}
+                        title="Sync with PVE"
+                      >
+                        <RefreshCw className={`h-3 w-3 ${syncingAssetId === a.asset_id ? "animate-spin" : ""}`} />
+                      </Button>
+                      {onOpenConsole && a.status === "running" && a.pve_vmid && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                          aria-label="open VM console"
+                          onClick={() => onOpenConsole({ asset_id: a.asset_id ?? 0, role: a.role })}
+                          title="Open Console"
+                        >
+                          <Terminal className="h-3.5 w-3.5 text-sky-400" />
+                        </Button>
+                      )}
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 text-muted-foreground hover:text-destructive"
+                        aria-label="delete VM from PVE"
+                        onClick={() => deleteAsset(a.asset_id ?? 0)}
+                        disabled={deletingAssetId === a.asset_id || !a.pve_vmid}
+                        title="Delete VM"
+                      >
+                        <Trash2 className={`h-3 w-3 ${deletingAssetId === a.asset_id ? "animate-pulse" : ""}`} />
+                      </Button>
+                    </div>
+                  </div>
+                </li>
+              );
+            }
             return (
               <li
                 key={a.asset_id ?? `${a.role}-${a.pve_vmid}-${a.pve_ip}`}

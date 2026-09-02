@@ -257,14 +257,16 @@ export default function App() {
                 );
               case "observe":
                 return (
-                  <div className="grid grid-cols-1 gap-6 lg:grid-cols-[280px_1fr]">
-                    <MyRunsCard
-                      meRole={me.role}
-                      pickedRunId={pickedRun?.run_id ?? null}
-                      onPick={setPickedRun}
-                      compact
-                      liveOnly
-                    />
+                  <div className="grid grid-cols-1 gap-6 lg:grid-cols-[320px_1fr] items-start">
+                    <div className="lg:sticky lg:top-4">
+                      <MyRunsCard
+                        meRole={me.role}
+                        pickedRunId={pickedRun?.run_id ?? null}
+                        onPick={setPickedRun}
+                        compact
+                        liveOnly
+                      />
+                    </div>
                     <DrillConsole
                       pickedRunId={pickedRun?.run_id ?? null}
                       scenarioName={pickedScenario?.title ?? pickedScenario?.name}

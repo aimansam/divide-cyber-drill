@@ -34,12 +34,23 @@
  */
 
 import { useEffect, useRef, useState } from "react";
-import { Activity, Clock, Download, FileText, Loader2, RefreshCw } from "lucide-react";
+import {
+  Activity,
+  Clock,
+  Download,
+  FileText,
+  Loader2,
+  RefreshCw,
+  Network,
+  Timer,
+  User,
+} from "lucide-react";
 import { api, detailFromError, getToken } from "@/lib/api";
 import { formatDuration } from "@/lib/format";
 import { AssetsCard } from "./assets-card";
 import { AuditExplorerCard } from "./audit-explorer-card";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { EmptyState } from "./empty-state";
 import { useToasts } from "./toast";
 import { StatusPill } from "./status-pill";
@@ -261,111 +272,128 @@ export function DrillConsole({ pickedRunId, scenarioName }: DrillConsoleProps) {
   );
 
   return (
-    <div data-testid="drill-console" className="space-y-4">
+    <div data-testid="drill-console" className="space-y-6">
       <header
-        className="flex flex-col gap-3 rounded-md border border-border bg-card p-4 shadow-sm md:flex-row md:items-center md:justify-between"
+        className="rounded-xl border border-border/80 bg-card p-4 shadow-sm md:p-5"
       >
-        <div className="space-y-1">
-          <div className="flex items-center gap-2">
-            <h2 className="font-mono text-lg font-semibold tracking-tight">
-              Drill #{pickedRunId}
-            </h2>
-            <StatusPill status={run?.status ?? null} />
-            {isLive && (
-              <>
-                <span
-                  data-testid="drill-live-badge"
-                  className="inline-flex items-center gap-1 rounded-md bg-sky-900/60 px-2 py-0.5 text-xs font-medium text-sky-200 ring-1 ring-inset ring-sky-700"
-                >
-                  <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-sky-300" />
-                  LIVE
-                </span>
-                {run?.timeout_sec !== undefined && run?.timeout_sec !== null && (
+        <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-2.5 flex-wrap">
+              <h2 className="font-mono text-xl font-bold tracking-tight text-foreground">
+                Drill #{pickedRunId}
+              </h2>
+              <StatusPill status={run?.status ?? null} />
+              {isLive && (
+                <>
                   <span
-                    data-testid="drill-timeout-countdown"
-                    className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-xs font-mono font-medium ring-1 ring-inset ${
-                      run.timeout_sec < 180
-                        ? "bg-red-900/60 text-red-200 ring-red-700 animate-pulse"
-                        : run.timeout_sec < 600
-                        ? "bg-amber-900/60 text-amber-200 ring-amber-700"
-                        : "bg-slate-800 text-slate-300 ring-slate-600"
-                    }`}
-                    title="Time remaining before auto-stop watchdog"
+                    data-testid="drill-live-badge"
+                    className="inline-flex items-center gap-1.5 rounded-full bg-sky-500/15 px-2.5 py-0.5 text-xs font-medium text-sky-400 border border-sky-500/30"
                   >
-                    <Clock className="h-3 w-3" />
-                    {formatDuration(run.timeout_sec)} left
+                    <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-sky-400" />
+                    LIVE
                   </span>
-                )}
-              </>
-            )}
-            {loading && (
-              <Loader2
-                className="h-3.5 w-3.5 animate-spin text-muted-foreground"
-                aria-hidden="true"
-              />
-            )}
-          </div>
-          <p className="text-sm text-muted-foreground">
-            {scenarioName ? `Scenario: ${scenarioName} · ` : ""}
-            {run?.started_by ?? "—"}
-            {durationSec > 0 ? ` · ${formatDuration(durationSec)} elapsed` : ""}
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          {isLive && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => extendTimeout(30)}
-              disabled={extendPending}
-              data-testid="drill-extend-timeout"
-              title="Extend auto-timeout watchdog by 30 minutes"
-            >
-              {extendPending ? (
-                <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-              ) : (
-                <Clock className="mr-1 h-3 w-3 text-sky-400" />
+                  {run?.timeout_sec !== undefined && run?.timeout_sec !== null && (
+                    <span
+                      data-testid="drill-timeout-countdown"
+                      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-mono font-medium border ${
+                        run.timeout_sec < 180
+                          ? "bg-red-500/15 text-red-400 border-red-500/30 animate-pulse"
+                          : run.timeout_sec < 600
+                          ? "bg-amber-500/15 text-amber-400 border-amber-500/30"
+                          : "bg-muted text-muted-foreground border-border"
+                      }`}
+                      title="Time remaining before auto-stop watchdog"
+                    >
+                      <Clock className="h-3 w-3" />
+                      {formatDuration(run.timeout_sec)} left
+                    </span>
+                  )}
+                </>
               )}
-              +30m Time
-            </Button>
-          )}
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={load}
-            data-testid="drill-refresh"
-            aria-label="Refresh"
-          >
-            <RefreshCw className="mr-1 h-3 w-3" />
-            Refresh
-          </Button>
-          {run && (run.status === "succeeded" || run.status === "failed" || run.status === "timeout" || run.status === "cancelled" || run.status === "completed" || run.status === "stopped") && (
-            <>
-              {/* F11.2: leadership-facing markdown play-by-play.
-                  Opens in a new tab (modern browsers render .md
-                  inline; older fall back to plain text). */}
+              {loading && (
+                <Loader2
+                  className="h-4 w-4 animate-spin text-muted-foreground"
+                  aria-hidden="true"
+                />
+              )}
+            </div>
+            <div className="flex items-center gap-3 text-xs text-muted-foreground flex-wrap">
+              {scenarioName && (
+                <span className="font-medium text-foreground/80">
+                  Scenario: {scenarioName}
+                </span>
+              )}
+              {run?.started_by && (
+                <span className="inline-flex items-center gap-1">
+                  <User className="h-3 w-3" />
+                  {run.started_by}
+                </span>
+              )}
+              {durationSec > 0 && (
+                <span className="inline-flex items-center gap-1 font-mono">
+                  <Timer className="h-3 w-3" />
+                  {formatDuration(durationSec)} elapsed
+                </span>
+              )}
+            </div>
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            {isLive && (
               <Button
                 variant="outline"
                 size="sm"
-                onClick={viewDebrief}
-                data-testid="drill-view-debrief"
-                aria-label="View debrief"
+                onClick={() => extendTimeout(30)}
+                disabled={extendPending}
+                data-testid="drill-extend-timeout"
+                title="Extend auto-timeout watchdog by 30 minutes"
+                className="h-8 text-xs gap-1.5 text-sky-400 border-sky-500/30 hover:bg-sky-500/10"
               >
-                <FileText className="mr-1 h-3 w-3" />
-                View debrief
+                {extendPending ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Clock className="h-3.5 w-3.5" />
+                )}
+                <span>+30m Time</span>
               </Button>
-              <Button
-                variant="default"
-                size="sm"
-                onClick={downloadReport}
-                disabled={reportPending}
-                data-testid="drill-download-report"
-              >
-                <Download className="mr-1 h-3 w-3" />
-                {reportPending ? "Preparing…" : "Download report"}
-              </Button>
-            </>
-          )}
+            )}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={load}
+              data-testid="drill-refresh"
+              aria-label="Refresh"
+              className="h-8 text-xs gap-1.5"
+            >
+              <RefreshCw className="h-3.5 w-3.5" />
+              <span>Refresh</span>
+            </Button>
+            {run && (run.status === "succeeded" || run.status === "failed" || run.status === "timeout" || run.status === "cancelled" || run.status === "completed" || run.status === "stopped") && (
+              <>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={viewDebrief}
+                  data-testid="drill-view-debrief"
+                  aria-label="View debrief"
+                  className="h-8 text-xs gap-1.5"
+                >
+                  <FileText className="h-3.5 w-3.5" />
+                  <span>View debrief</span>
+                </Button>
+                <Button
+                  variant="default"
+                  size="sm"
+                  onClick={downloadReport}
+                  disabled={reportPending}
+                  data-testid="drill-download-report"
+                  className="h-8 text-xs gap-1.5 shadow-sm"
+                >
+                  <Download className="h-3.5 w-3.5" />
+                  <span>{reportPending ? "Preparing…" : "Download report"}</span>
+                </Button>
+              </>
+            )}
+          </div>
         </div>
       </header>
 
@@ -396,17 +424,26 @@ export function DrillConsole({ pickedRunId, scenarioName }: DrillConsoleProps) {
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         {/* Left column: topology + assets + console */}
         <div className="space-y-6">
-          <section aria-label="Topology">
-            <h3 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-              Network topology
-            </h3>
-            <TopologyGraph assets={topologyAssets} />
-          </section>
+          <Card className="border-border/80 shadow-sm overflow-hidden">
+            <CardHeader className="pb-3 pt-4 px-4 border-b border-border/40">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-2">
+                  <Network className="h-3.5 w-3.5 text-primary" />
+                  Network topology
+                </CardTitle>
+                <span className="font-mono text-[11px] text-muted-foreground">
+                  {topologyAssets.length} node{topologyAssets.length === 1 ? "" : "s"}
+                </span>
+              </div>
+            </CardHeader>
+            <CardContent className="p-4 pt-3">
+              <section aria-label="Topology">
+                <TopologyGraph assets={topologyAssets} />
+              </section>
+            </CardContent>
+          </Card>
 
           <section aria-label="Assets">
-            <h3 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-              Assets
-            </h3>
             <AssetsCard
               pickedRunId={pickedRunId}
               compact
