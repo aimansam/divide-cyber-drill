@@ -64,7 +64,7 @@ PORTAL_HTML_FILES: dict[str, tuple[str, list[str]]] = {
             "pveum acl modify",
         ],
     ),
-    # The React/Vite user portal at /portal/app/ is covered by
+    # The React/Vite user portal at / is covered by
     # tests/test_portal_app_smoke.py instead — the bundle-vs-source
     # invariants are different (the on-disk index.html is tiny and
     # references /src/main.tsx, not API fragments). We still want
@@ -172,7 +172,7 @@ def test_both_pages_have_a_script_tag():
     """Every vanilla portal page must run JS; a missing <script> means the
     page is broken before fetch() is even called.
 
-    The React portal at /portal/app/ uses a Vite-bundled
+    The React portal at / uses a Vite-bundled
     ``<script type="module" src="/src/main.tsx">`` instead of an inline
     block — its invariant is covered by test_portal_app_smoke.py
     (``test_app_entry_script_marker_is_present``).

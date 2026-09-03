@@ -66,8 +66,8 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-PORTAL_URL="${API%/}/portal/app/"
-SETUP_URL="${API%/}/portal/"
+PORTAL_URL="${API%/}/"
+SETUP_URL="${API%/}/setup/"
 
 bold() { printf "\033[1m%s\033[0m\n" "$*"; }
 ok()   { printf "  \033[32mok\033[0m %s\n" "$*"; }

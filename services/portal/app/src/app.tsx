@@ -80,13 +80,14 @@ const VALID_VIEWS = [
 type AnonView = "probing" | "signin" | "wizard";
 
 // F-reset-ux: parse a magic-link URL into the (sub, token) pair.
-// The URL format is ``/portal/app/#/?sub=<sub>&token=<token>`` --
+// The URL format is ``/#/reset?sub=<sub>&token=<token>`` --
 // the query string lives in the URL fragment because we use a
 // hash-based router. Returning ``null`` if either is missing.
 function readResetParamsFromHash(): { sub: string; token: string } | null {
   if (typeof window === "undefined") return null;
   const hash = window.location.hash;
-  // ``/#/...?sub=foo&token=bar`` -> fragment is ``/?sub=foo&token=bar``.
+  // ``/#/reset?sub=foo&token=bar`` -> fragment is ``/reset?sub=foo&token=bar``.
+  // Also handles legacy ``/#/?sub=foo&token=bar`` format.
   const qIndex = hash.indexOf("?");
   if (qIndex === -1) return null;
   const params = new URLSearchParams(hash.slice(qIndex + 1));

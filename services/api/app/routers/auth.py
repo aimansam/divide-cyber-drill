@@ -800,13 +800,13 @@ async def issue_reset_link(
     #
     # P12: the path is now configurable via settings.portal_path so
     # reverse-proxied / subdomain deployments don't have to paste
-    # the path back into the link. Default stays "/portal/app/"
-    # so docker-compose keeps working unchanged.
+    # the path back into the link. Default is "/" (root) so the
+    # magic link becomes /#/reset?sub=...&token=...
     from app.core.config import settings
 
     portal_base = settings.portal_path.rstrip("/") + "/"
     magic_link = (
-        f"{portal_base}#/?sub={user.sub}&token={token}"
+        f"{portal_base}#/reset?sub={user.sub}&token={token}"
     )
 
     return IssueResetLinkResponse(

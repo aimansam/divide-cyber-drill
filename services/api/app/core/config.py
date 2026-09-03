@@ -96,7 +96,7 @@ class Settings(BaseSettings):
     # extra env var.
     divide_token_secret: SecretStr | None = None
 
-    # Setup wizard portal (vanilla HTML+JS). Mounted at /portal/ by main.py.
+    # Setup wizard portal (vanilla HTML+JS). Mounted at /setup/ by main.py.
     # Defaults to the bundled copy; override for development to point at
     # the live source tree.
     portal_dir: str = "/app/portal"
@@ -104,10 +104,10 @@ class Settings(BaseSettings):
     # P12: prefix the portal is mounted at. Used to build absolute
     # magic-link URLs in admin-issued reset links
     # (POST /api/v1/auth/users/{sub}/issue-reset). Default
-    # ``/portal/app/`` matches the docker-compose mount; reverse-
-    # proxied deployments (subdomain, custom path) override via
-    # DIVIDE_PORTAL_PATH. Trailing slash is required.
-    portal_path: str = "/portal/app/"
+    # ``/`` (root) since the SPA is served at the origin root;
+    # reverse-proxied deployments (subdomain, custom path) override
+    # via DIVIDE_PORTAL_PATH. Trailing slash is required.
+    portal_path: str = "/"
 
     # Drill lifecycle (L2 2.8) — auto-timeout runs that stay RUNNING for
     # longer than this many minutes. The watchdog asyncio task is

@@ -1,4 +1,4 @@
-"""Smoke + invariants for the React/Vite user portal at /portal/app/.
+"""Smoke + invariants for the React/Vite user portal at /.
 
 Day-1 deliverables (M1 + M3.1 in the next-plan):
 
@@ -57,20 +57,20 @@ def test_build_directory_exists_after_npm_run_build():
 
 
 def test_built_index_html_references_correct_base_path():
-    """The built index.html must reference assets under /portal/app/
+    """The built index.html must reference assets under /assets/
     (not the Vite dev server's root-relative paths). A regression here
-    would mean the bundle 404s when served behind /portal/app/.
+    would mean the bundle 404s when served from the root.
     """
     if not BUILD_DIR.is_dir():
         pytest.skip("build/ not present")
     html = _read("services/portal/app/build/index.html")
-    assert "/portal/app/assets/" in html, (
-        "Built index.html must reference /portal/app/assets/...; "
+    assert "/assets/" in html, (
+        "Built index.html must reference /assets/...; "
         "vite.config.ts `base` field is wrong"
     )
-    for ref in re.findall(r"/portal/app/assets/([\w\.\-]+)", html):
+    for ref in re.findall(r"/assets/([\w\.\-]+)", html):
         assert (BUILD_DIR / "assets" / ref).exists(), (
-            f"Bundle references /portal/app/assets/{ref} but that file "
+            f"Bundle references /assets/{ref} but that file "
             f"isn't in build/assets/"
         )
 
@@ -121,19 +121,19 @@ def test_app_entry_script_marker_is_present():
 
 
 def test_portal_app_serves_index_html_via_staticfiles(client: TestClient):
-    """Hit /portal/app/ and assert the response is the built HTML
+    """Hit / and assert the response is the built HTML
     (not the source-tree HTML and not a 404).
     """
     if not BUILD_DIR.is_dir():
         pytest.skip("build/ not present; bundle not testable")
-    r = client.get("/portal/app/")
-    assert r.status_code == 200, f"GET /portal/app/ -> {r.status_code}"
+    r = client.get("/")
+    assert r.status_code == 200, f"GET / -> {r.status_code}"
     body = r.text
     assert "<div id=\"root\"" in body, (
         "Response is not the React app — got the source-tree HTML or a "
         "different mount's index.html"
     )
-    assert "/portal/app/assets/" in body, (
+    assert "/assets/" in body, (
         "Built bundle path is missing — vite.config.ts base field is "
         "wrong, or main.py mounted the source dir instead of build/"
     )
@@ -141,21 +141,21 @@ def test_portal_app_serves_index_html_via_staticfiles(client: TestClient):
 
 def test_portal_app_serves_assets(client: TestClient):
     """The asset referenced in the built index.html must also resolve.
-    Catches a mount-order bug where the parent /portal mount shadows
-    the /portal/app/ submount.
+    Catches a mount-order bug where the parent mount shadows
+    the root mount.
     """
     if not BUILD_DIR.is_dir():
         pytest.skip("build/ not present")
-    index = client.get("/portal/app/")
+    index = client.get("/")
     assert index.status_code == 200
-    match = re.search(r'/portal/app/assets/([\w\.\-]+\.js)', index.text)
+    match = re.search(r'/assets/([\w\.\-]+\.js)', index.text)
     if not match:
         pytest.skip("no JS asset path in built index.html")
-    asset_path = "/portal/app/assets/" + match.group(1)
+    asset_path = "/assets/" + match.group(1)
     r = client.get(asset_path)
     assert r.status_code == 200, (
         f"GET {asset_path} -> {r.status_code}; "
-        f"the /portal/app/ mount is probably being shadowed by /portal/"
+        f"the root mount is probably being shadowed by /setup/"
     )
 
 
@@ -164,16 +164,16 @@ def test_portal_app_serves_assets(client: TestClient):
 
 def test_portal_app_does_not_serve_source_tree_index_html(client: TestClient):
     """Regression: services/portal/app/index.html at the root references
-    /src/main.tsx (the Vite dev entry) and must NOT be what /portal/app/
+    /src/main.tsx (the Vite dev entry) and must NOT be what /
     serves. FastAPI's StaticFiles would happily serve it if the mount
     pointed at services/portal/app/ instead of services/portal/app/build/.
     """
     if not BUILD_DIR.is_dir():
         pytest.skip("build/ not present")
-    r = client.get("/portal/app/")
+    r = client.get("/")
     body = r.text
     assert '"/src/main.tsx"' not in body, (
-        "/portal/app/ is serving the source-tree HTML. main.py is "
+        "/ is serving the source-tree HTML. main.py is "
         "mounting the source dir, not services/portal/app/build/"
     )
 

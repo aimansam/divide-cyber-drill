@@ -2,18 +2,17 @@ import path from "node:path";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 
-// div:ide portal/app bundle config.
+// div:ide portal bundle config.
 // `build.outDir` is the directory FastAPI's StaticFiles mount will
 // serve. The container COPY moves services/portal/app/build to
-// /portal/app/build inside the API image, and main.py mounts the
-// whole services/portal tree at /portal/. The page is served at
-// /portal/app/ (root of this build dir), assets at /portal/app/assets/.
+// /app/portal/build inside the API image, and main.py mounts the
+// build dir at / (root). The page is served at /, assets at /assets/.
 //
-// `base: '/portal/app/'` makes Vite emit relative-style absolute
-// paths (`/portal/app/assets/index-XXXX.js`) so the bundle resolves
-// correctly when served from a sub-path.
+// `base: '/'` makes Vite emit root-relative paths
+// (`/assets/index-XXXX.js`) so the bundle resolves correctly when
+// served from the root.
 export default defineConfig({
-  base: "/portal/app/",
+  base: "/",
   plugins: [react()],
   resolve: {
     alias: {

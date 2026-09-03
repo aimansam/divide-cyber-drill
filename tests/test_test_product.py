@@ -279,12 +279,12 @@ def test_portal_app_doc_exists_and_links():
     )
 
     # README's portal URL table must mention both surviving portals.
-    for path in ["/portal/", "/portal/app/"]:
+    for path in ["/setup/", "/"]:
         assert path in readme, (
             f"README.md should mention {path!r} in the portal URL table"
         )
     # The legacy /portal/test/ tool was removed when F3-F8 made
-    # /portal/app/ the canonical surface.
+    # / the canonical surface.
     assert "/portal/test/" not in readme, (
         "README.md should NOT reference the removed /portal/test/ legacy"
     )
@@ -304,8 +304,8 @@ def test_three_portals_consistently_described():
         "docs/USER-REQUIREMENTS.md",
     ]
     portal_slugs = [
-        ("/portal/", "setup wizard"),
-        ("/portal/app/", "user portal"),
+        ("/setup/", "setup wizard"),
+        ("/", "user portal"),
     ]
     for relpath in docs_to_check:
         text = (REPO / relpath).read_text(encoding="utf-8")

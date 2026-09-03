@@ -37,7 +37,7 @@ docker compose exec api python tools/issue_token.py \
 ## 2. Live Drill Operations
 
 ### Starting a Drill (Web UI)
-1. Log in to `/portal/app/`
+1. Log in to `/`
 2. Navigate to **Operate** tab
 3. Select your scenario (e.g. `Red vs Blue Baseline`)
 4. Click **Start Drill**

@@ -81,7 +81,7 @@ See [`docs/TEMPLATE-SETUP.md`](docs/TEMPLATE-SETUP.md) for complete details.
 
 ### 3. Open the Portal
 
-Browse to `http://localhost:8000/portal/app/`.
+Browse to `http://localhost:8000/`.
 
 The first time you visit, you see the **Onboarding Wizard**.
 No token, no users, no PVE bridges yet — the wizard walks you
@@ -139,9 +139,9 @@ divide-cyber-drill/
 │   │   │   └── observability/        Prometheus metrics
 │   │   ├── tests/                    460 API tests
 │   │   └── pyproject.toml
-│   └── portal/app/                   React + Vite portal (CDN-style)
-│       ├── src/components/portal/    20+ components (cards)
-│       └── build/                    vite bundle (273.53 KB)
+│   └── portal/                       React + Vite portal (CDN-style)
+│       ├── app/src/components/portal/ 20+ components (cards)
+│       └── app/build/                 vite bundle (273.53 KB)
 ├── deploy/
 │   ├── docker-compose.yml            Dev stack (single-worker)
 │   ├── docker-compose.production.yaml  F12.3 production stack (multi-worker + Redis)
@@ -243,7 +243,7 @@ make test-live-pg   # requires DIVIDE_TEST_LIVE_PG=1 + a reachable DB
 | [`docs/USERS.md`](docs/USERS.md) | Operators | Credential auth model |
 | [`docs/SCENARIO-SPEC.md`](docs/SCENARIO-SPEC.md) | Scenario authors | YAML schema reference |
 | [`docs/SCENARIO-SYNC.md`](docs/SCENARIO-SYNC.md) | Devs | YAML -> DB sync |
-| [`docs/SETUP-UI.md`](docs/SETUP-UI.md) | Operators | Setup wizard at `/portal/` |
+| [`docs/SETUP-UI.md`](docs/SETUP-UI.md) | Operators | Setup wizard at `/setup/` |
 | [`docs/OBSERVABILITY.md`](docs/OBSERVABILITY.md) | Operators | Prometheus + Grafana setup |
 
 ## Roadmap
@@ -268,7 +268,7 @@ with playhead). Total ~34 h. No committed delivery date.
 ```
 +------------------+       +-------------------+       +------------------+
 | Proxmox VE host  |       | Traefik (TLS)     |       | div:ide portal   |
-| (PVE 9.x)        | <---> | (prod only)       | <---> | /portal/app/     |
+| (PVE 9.x)        | <---> | (prod only)       | <---> | /                |
 |                  |       |                   |       | (React + Vite)   |
 | +--------------+ |       +-------------------+       +------------------+
 | | tpl-debian   | |                  |                          ^

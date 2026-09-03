@@ -385,7 +385,7 @@ class TestIssueResetLink:
         assert body["sub"] == "victim"
         assert body["reset_token"]
         assert body["magic_link"].startswith(
-            "/portal/app/#/?sub=victim&token="
+            "/#/reset?sub=victim&token="
         )
         assert body["expires_at"]
 
@@ -422,10 +422,10 @@ class TestIssueResetLink:
             )
             assert r.status_code == 200
             assert r.json()["magic_link"].startswith(
-                "/my-portal/#/?sub=victim&token="
+                "/my-portal/#/reset?sub=victim&token="
             )
             # And the default path is NOT used.
-            assert not r.json()["magic_link"].startswith("/portal/app/")
+            assert not r.json()["magic_link"].startswith("/#/reset")
         finally:
             get_settings.cache_clear()
 
@@ -484,12 +484,12 @@ class TestIssueResetLink:
         assert link_resp.status_code == 200
         magic_link = link_resp.json()["magic_link"]
 
-        # The link format is /portal/app/#/?sub=...&token=...
+        # The link format is /#/reset?sub=...&token=...
         # so the query string lives in the FRAGMENT (after the
-        # ``#``), and the fragment also has a leading ``/`` before
-        # the ``?``. We strip both before parsing.
+        # ``#``), and the fragment has ``reset?`` before the
+        # query params. We strip the route prefix before parsing.
         parsed = urlparse(magic_link)
-        qs_raw = parsed.fragment.lstrip("/").lstrip("?")
+        qs_raw = parsed.fragment.split("?", 1)[-1]
         qs = parse_qs(qs_raw)
         sub = qs["sub"][0]
         token = qs["token"][0]

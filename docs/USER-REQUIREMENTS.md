@@ -63,7 +63,7 @@ PVE OK?".
   `token.sub` (commit `359a62d`).
 - [`/portal/`](../services/portal/index.html) setup wizard for the
   one-time deploy.
-- [`/portal/app/`](../services/portal/app/index.html) user portal
+- [`/`](../services/portal/app/index.html) user portal
   (commits `d0ce912`, `M3.2-Half1`, `M3.2-Half2`) — operators see
   `ScenariosCard` + `PveOpsCard` (read-only PVE health + storage +
   drill-template-status) + `ScenarioAuthoringCard` (import /
@@ -99,7 +99,7 @@ PVE OK?".
 - `GET /api/v1/drills/{id}` + `/audit` for live run inspection.
 - `/portal/test/` cards 1
   (scenario picker), 2 (run lifecycle), 3 (cancel), 5 (audit log).
-- [`/portal/app/`](../services/portal/app/index.html) (commits
+- [`/`](../services/portal/app/index.html) (commits
   `d0ce912`, `M3.2-Half1`, `M3.2-Half2`) — the lead's primary
   day-2 surface: `TokenBar` + `ScenariosCard` + `ScenarioAuthoringCard`
   (import / archive / restore) + `MyRunsCard` ("All runs") +
@@ -131,7 +131,7 @@ PVE OK?".
 - `GET /api/v1/drills/{id}` for the run they started.
 - `GET /api/v1/drills/{id}/audit` for self-attribution.
 - `/portal/test/` cards 2 (run lifecycle), 4 (assets).
-- [`/portal/app/`](../services/portal/app/index.html) (commits
+- [`/`](../services/portal/app/index.html) (commits
   `d0ce912`, `M3.2-Half1`, `M3.2-Half2`) — the **trainee-facing
   surface**. Full red composition: `ScenariosCard` + `MyRunsCard`
   ("My runs", server-filtered to own by `visible_runs_query` from
@@ -173,7 +173,7 @@ victim VMs.
   `SocViewCard` shows the timeline with severity filter (info /
   low / medium / high), pause/resume, and reconnect handling.
 - `/portal/test/` cards 4 (assets), 5 (audit), 6 (metrics).
-- [`/portal/app/`](../services/portal/app/index.html) (commits
+- [`/`](../services/portal/app/index.html) (commits
   `d0ce912`, `M3.2-Half1`, `M3.2-Half2`) — the blue team's
   primary surface. Full blue composition (read-only): `ScenariosCard`
   + `MyRunsCard` ("My runs" — own-runs filter on the server) +
@@ -214,7 +214,7 @@ after-the-fact reviewer.
 - Same read access as red/blue: `GET /drills/{id}`, `/audit`,
   `/metrics`, future `/report`.
 - `/portal/test/` cards 5 (audit), 6 (metrics).
-- [`/portal/app/`](../services/portal/app/index.html) (commits
+- [`/`](../services/portal/app/index.html) (commits
   `d0ce912`, `M3.2-Half1`, `M3.2-Half2`) — the observer's
   surface (read-only). Full observer composition: `ScenariosCard`
   + `MyRunsCard` (rendered as "All runs" — observer sees every run
@@ -283,7 +283,7 @@ gates below are real and exercised by the parametrized matrix in
 | `GET /metrics` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `GET /portal/` (wizard) | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ |
 | `GET /portal/test/` (operator tool) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| `GET /portal/app/` (user portal) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `GET /` (user portal) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 
 **Legend:** ✅ own = result is filtered to `runs.started_by =
 token.sub`. ✅ any = full list / all rows. ❌ = 403. The
@@ -296,7 +296,7 @@ intended per-endpoint gating is documented in the
 
 The portal URLs are static HTML and don't authenticate; gating is
 purely about what the JS calls (X-Divide-Token). The user portal at
-`/portal/app/` is the canonical entry point for trainees and leads;
+`/` is the canonical entry point for trainees and leads;
 the operator tool at `/portal/test/` is what the operator uses
 during setup, troubleshooting, and ad-hoc poking. Both are
 read-accessible to anyone on the LAN — RBAC is enforced only at the
@@ -319,7 +319,7 @@ L2 demo.
 | Gap | Affects | Severity | Plan slot |
 |---|---|---|---|
 | ~~No `require_role(...)` gate on any router~~ | everyone | **CLOSED** L2 2.9 (commits `1631448`, `0c2da49`, matrix commit). All routers now enforce the §2 matrix; see `services/api/tests/test_authorization.py`. | done |
-| `/portal/test/` UI doesn't accept `X-Divide-Token` | operator | cosmetic — `/portal/app/` does (commit `d0ce912`) | ~30 min to retrofit; the user portal replaces `/portal/test/` once M3 lands |
+| `/portal/test/` UI doesn't accept `X-Divide-Token` | operator | cosmetic — `/` does (commit `d0ce912`) | ~30 min to retrofit; the user portal replaces `/portal/test/` once M3 lands |
 | No browser console to the cloned VM (noVNC) | red, blue | **biggest single UX gap** | Phase 2 / L3 |
 | No guest-side telemetry from inside the VM | blue, audit | drill has no observable "moving target" | L3 3.8; gated on next-plan #7 (cloud-init user-data) |
 | No Grafana anonymous viewer (L2 2.6 ⚠️) | blue, observer | can't share a dashboard with a non-admin | ~30 min; deferred per next plan |
@@ -330,7 +330,7 @@ L2 demo.
 | No drill auto-timeout (L2 2.8 ⚠️) | admin, watchdog | forgotten drills rack up CPU | next-plan #4 (45 min) |
 | No MinIO telemetry sink (L2 2.11 ⚠️) | lead, blue | audit events don't reach `divide-artifacts` | next-plan #5 (1 h) |
 | No after-action JSON report (L2 2.12 ⚠️) | lead, observer | debrief = re-query the DB by hand | next-plan #6 (45 min) |
-| No role-aware UI composition in `/portal/app/` | red, blue, observer, lead, admin | **CLOSED** commits `M3.2-Half1` + `M3.2-Half2`. `COMPOSITIONS` in `src/app.tsx` renders only the cards each role can use; `tests/test_portal_app_role_composition.py` pins the per-role card set (6 parametrized cases + per-card role documentation + bundle integrity). Identity badge is server-verified via `GET /api/v1/me` + `useMe()` — no more client-side JWT decode. Half 2 closed the rest: `RunInspectorCard`, `AssetsCard`, `AuditExplorerCard`, `PveOpsCard` (admin), `ScenarioAuthoringCard` (admin + lead). | done |
+| No role-aware UI composition in `/` | red, blue, observer, lead, admin | **CLOSED** commits `M3.2-Half1` + `M3.2-Half2`. `COMPOSITIONS` in `src/app.tsx` renders only the cards each role can use; `tests/test_portal_app_role_composition.py` pins the per-role card set (6 parametrized cases + per-card role documentation + bundle integrity). Identity badge is server-verified via `GET /api/v1/me` + `useMe()` — no more client-side JWT decode. Half 2 closed the rest: `RunInspectorCard`, `AssetsCard`, `AuditExplorerCard`, `PveOpsCard` (admin), `ScenarioAuthoringCard` (admin + lead). | done |
 
 ---
 
@@ -339,12 +339,12 @@ L2 demo.
 1. **Multi-user demo this week?** If yes, we need to add a 9th item
    to the next plan: token-aware `/portal/test/` + `require_role` on
    `/api/v1/admin/*` (~1 h, ships ahead of #2). **Update 2026-08-24:**
-   the user portal at `/portal/app/` now handles tokens end-to-end
+   the user portal at `/` now handles tokens end-to-end
    (commit `d0ce912`). **Update 2026-08-24 (later):** the
    `require_role(...)` substrate + `/admin/*` gate + drill matrix +
    own-runs-only filter all shipped in commits `1631448` / `0c2da49`
    / matrix commit. The multi-user demo path is fully wired:
-   `/portal/app/` for the UI, `/api/v1/*` for the API, both behind
+   `/` for the UI, `/api/v1/*` for the API, both behind
    the §2 matrix.
 2. **Compliance / observer read-only needed?** If yes, add items 9 +
    10: observer role + filtered audit read endpoints (~1.5 h, L3 work
@@ -374,5 +374,5 @@ L2 demo.
 
   `/portal/test/`.
 - [`PORTAL-APP.md`](PORTAL-APP.md) — the React/Vite user portal at
-  `/portal/app/`.
+  `/`.
 - [`SETUP-UI.md`](SETUP-UI.md) — the setup wizard at `/portal/`.

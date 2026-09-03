@@ -68,8 +68,8 @@ services:
       # User portal (React/Vite) build output. Bind-mounted so `npm run
       # build` in services/portal/app/ on the host is reflected on the
       # next browser refresh without rebuilding the API image. The
-      # container's /app/portal/app/ is otherwise image-baked via the
-      # Dockerfile's `COPY services/portal`.
+      # container's /app/portal/app/build is otherwise image-baked via
+      # the Dockerfile's `COPY services/portal`.
       # NOTE: the target subdir `build` does not yet exist inside the
       # image's baked portal (it's .gitignored and excluded by the
       # build context). Compose creates it on mount. The mount also

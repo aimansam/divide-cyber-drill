@@ -137,7 +137,7 @@ divide-cyber-drill/
 │   ├── orchestrator/            # background workers (RQ)
 │   ├── portal/                  # browser portals
 │   │   ├── index.html           # /portal/ setup wizard (vanilla)
-│   │   └── app/                 # /portal/app/ user portal (React/Vite)
+│   │   └── app/                 # / user portal (React/Vite)
 │   │       ├── src/             #    TypeScript + React components
 │   │       ├── package.json
 │   │       ├── vite.config.ts
@@ -508,7 +508,7 @@ On drill completion, report-builder extracts IOCs (IPs, domains, URLs, hashes) f
 - Template: `tpl-debian-cloudinit` (debian-13-genericcloud, qcow2 import
   via `local: /upload?content=import` + `POST /qemu/{vmid}/config`
   with `scsi0=local-lvm:0,import-from={volid}`).
-- Portal: `/portal/` setup wizard, `/portal/app/` user portal.
+- Portal: `/setup/` setup wizard, `/` user portal.
 - Run #11 — `status=succeeded`, `pve_vmid=109`, audit
   `run.started → asset.spawned → run.completed`, asset teardown
   to `stopped`. `make preflight` 9/9 READY. L1 ledger 9/9 ✅.
@@ -538,7 +538,7 @@ post-L1 plan in TEST-PRODUCT.md)
   (`.github/workflows/ci.yml`) now runs `make verify` on every push.
 - Flipped L2 2.13 + 2.14 to ✅. Tests: 248 → 256 (+8).
 
-**Stage 15 — Setup wizard at `/portal/`** ✅
+**Stage 15 — Setup wizard at `/setup/`** ✅
 - 4-step browser UI (probe → ACL grant → template upload → first
   drill) served by FastAPI `StaticFiles`. No SSH into PVE required
   except for one `pveum acl modify /storage --users divide@pve@pam

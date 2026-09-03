@@ -39,9 +39,9 @@ The **div:ide Cyber Range** is a lightweight, self-hosted cyber-range and attack
 
 ---
 
-## 2. Web Portal Architecture (`/portal/app/`)
+## 2. Web Portal Architecture (`/`)
 
-The portal is a lightweight React 19 single-page application built with Vite, TailwindCSS, and Lucide icons. It is served directly by FastAPI under `/portal/app/` from pre-built static assets.
+The portal is a lightweight React 19 single-page application built with Vite, TailwindCSS, and Lucide icons. It is served directly by FastAPI under `/` from pre-built static assets.
 
 ### Tab Organization
 The UI organizes features into distinct operational views:

@@ -72,8 +72,7 @@ def test_demo_script_lists_scenarios():
 
 def test_demo_script_prints_portal_url():
     src = _read(DEMO_SH)
-    assert "/portal/app/" in src
-    assert "PORTAL_URL" in src or "portal/app" in src
+    assert "PORTAL_URL" in src
 
 
 def test_demo_script_documents_admin_hints():

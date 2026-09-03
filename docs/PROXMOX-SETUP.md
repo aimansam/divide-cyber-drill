@@ -206,7 +206,7 @@ container restart.
 
 Flow:
 
-1. Open the portal: `http://localhost:8000/portal/app/`.
+1. Open the portal: `http://localhost:8000/`.
 2. The wizard's **first** step asks for PVE host + user + token. Pre-fills
    the user + token ID with the values you created in §1-3.
 3. Click **Save + connect**. The API calls `GET /api2/json/version`

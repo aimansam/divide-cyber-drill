@@ -500,9 +500,10 @@ def create_app() -> FastAPI:
     # Q21: global audit search across all runs.
     app.include_router(audit.router, prefix="/api/v1/audit", tags=["audit"])
 
-    # Mount the React-based user portal at /portal/app/ FIRST. Starlette
-    # resolves mounts by first match, so the more-specific subpath has
-    # to be registered before the catch-all /portal mount below.
+    # Mount the React-based user portal at / (root). API routes are
+    # registered first so /api/v1/* takes precedence. The hash router
+    # (/#/operate, /#/observe, etc.) means the browser only ever
+    # requests / from the server — all view routing is client-side.
     #
     # The Vite source tree (services/portal/app/) has its own
     # index.html at the root that references /src/main.tsx — that's
@@ -515,7 +516,7 @@ def create_app() -> FastAPI:
         app_build = portal_path / "app" / "build"
         if app_build.is_dir():
             app.mount(
-                "/portal/app",
+                "/",
                 StaticFiles(directory=str(app_build), html=True),
                 name="portal_app",
             )
@@ -529,13 +530,23 @@ def create_app() -> FastAPI:
                 ),
             )
 
-        # Setup wizard + operator test tool. Mounted last so the
-        # /portal/app/ subpath above is matched first.
-        app.mount(
-            "/portal",
-            StaticFiles(directory=str(portal_path), html=True),
-            name="portal",
-        )
+        # Setup wizard (vanilla HTML+JS). Mounted at /setup/ so it
+        # doesn't conflict with the SPA at /.
+        setup_wizard = portal_path / "setup"
+        if setup_wizard.is_dir():
+            app.mount(
+                "/setup",
+                StaticFiles(directory=str(setup_wizard), html=True),
+                name="setup_wizard",
+            )
+        else:
+            # Fall back to the old layout: the wizard lives at the
+            # root of the portal dir (services/portal/index.html).
+            app.mount(
+                "/setup",
+                StaticFiles(directory=str(portal_path), html=True),
+                name="setup_wizard",
+            )
     else:
         log.warning(
             "divide_api.portal_skipped",
