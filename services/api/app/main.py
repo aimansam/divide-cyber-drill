@@ -515,6 +515,19 @@ def create_app() -> FastAPI:
     if portal_path.is_dir():
         app_build = portal_path / "app" / "build"
         if app_build.is_dir():
+            # Explicit route for the portal root. More reliable than
+            # relying on StaticFiles html=True for the bare / path.
+            from fastapi.responses import FileResponse
+
+            @app.get("/")
+            async def serve_portal_root():
+                """Serve the portal's index.html at the root path."""
+                index = app_build / "index.html"
+                if index.is_file():
+                    return FileResponse(str(index))
+                raise HTTPException(404, "Portal build not found")
+
+            # StaticFiles mount for assets and other static files.
             app.mount(
                 "/",
                 StaticFiles(directory=str(app_build), html=True),
