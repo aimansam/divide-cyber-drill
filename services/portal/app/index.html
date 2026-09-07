@@ -1,12 +1,79 @@
-<!doctype html>
-<html lang="en" class="dark">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>div:ide — portal</title>
-  </head>
-  <body class="bg-background text-foreground antialiased">
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
-  </body>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OxBlood Drill - Cyber Adversary Drill Platform</title>
+  <link rel="stylesheet" href="/drill/styles.css">
+</head>
+<body>
+  <div class="app">
+    <!-- Header -->
+    <header class="header">
+      <div class="logo">OxBlood Drill</div>
+      <div class="search">
+        <input type="search" placeholder="Search labs, drills, users...">
+      </div>
+      <div class="header-right">
+        <button class="icon-btn" title="Notifications">🔔</button>
+        <div class="rank-badge">LVL 42</div>
+        <div class="user-avatar" title="User menu">JD</div>
+      </div>
+    </header>
+
+    <div class="main-container">
+      <!-- Sidebar -->
+      <nav class="sidebar">
+        <div class="nav-item active" data-page="dashboard">
+          <span class="nav-icon">📊</span>
+          <span>Dashboard</span>
+        </div>
+        <div class="nav-item" data-page="labs">
+          <span class="nav-icon">🧪</span>
+          <span>Labs</span>
+        </div>
+        <div class="nav-item" data-page="drills">
+          <span class="nav-icon">🎯</span>
+          <span>Cyber Drills</span>
+        </div>
+        <div class="nav-item" data-page="teams">
+          <span class="nav-icon">👥</span>
+          <span>Teams</span>
+        </div>
+        <div class="nav-item" data-page="scoreboard">
+          <span class="nav-icon">🏆</span>
+          <span>Scoreboard</span>
+        </div>
+        <div class="nav-item" data-page="reports">
+          <span class="nav-icon">📄</span>
+          <span>Reports</span>
+        </div>
+        <div class="nav-item" data-page="learning-path">
+          <span class="nav-icon">📚</span>
+          <span>Learning Path</span>
+        </div>
+        <div class="nav-item" data-page="settings">
+          <span class="nav-icon">⚙️</span>
+          <span>Settings</span>
+        </div>
+        <div class="nav-item" onclick="logout()" style="margin-top: auto; border-top: 1px solid var(--border);">
+          <span class="nav-icon">🚪</span>
+          <span>Logout</span>
+        </div>
+      </nav>
+
+      <!-- Content Area - Pages loaded dynamically -->
+      <main class="content" id="content">
+        <!-- Pages will be loaded here by JavaScript -->
+      </main>
+    </div>
+  </div>
+
+  <script src="/drill/auth.js"></script>
+  <script src="/drill/api.js"></script>
+  <script src="/drill/app.js"></script>
+  <script src="/drill/ui-utils.js"></script>
+  <script src="/drill/ui-drills.js"></script>
+  <script src="/drill/ui-advanced.js"></script>
+</body>
 </html>

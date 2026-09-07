@@ -1,7 +1,7 @@
 """Role-based access control (RBAC) for Run visibility.
 
 This module implements the persona matrix from
-``docs/USER-REQUIREMENTS.md`` §2 as a query-level filter, so the
+``README.md §2`` §2 as a query-level filter, so the
 same visibility rule applies to list endpoints, detail endpoints,
 audit endpoints, and the future report endpoint. The matrix:
 

@@ -77,7 +77,7 @@ def test_compose_exposes_login_token_ttl():
 
 def test_compose_bootstrap_section_documents_the_flow():
     """The compose file should have an inline comment near the
-    F3-prep vars pointing operators at docs/USERS.md."""
+    F3-prep vars pointing operators at README.md §8 (operations guide)."""
     src = _read("deploy/docker-compose.yml")
     # Look for a comment block BEFORE the BOOTSTRAP_ADMIN_SUB var
     # (the comment sits above the env vars per compose convention).
@@ -87,7 +87,7 @@ def test_compose_bootstrap_section_documents_the_flow():
     )
     assert m, "DIVIDE_BOOTSTRAP_ADMIN_SUB line not found"
     block = m.group(1)
-    assert "docs/USERS.md" in block or "F3-prep" in block, (
+    assert "README.md" in block or "F3-prep" in block or "docs/ADMIN-GUIDE.md" in block, (
         "compose must document the F3-prep env vars inline"
     )
 
@@ -106,8 +106,8 @@ def test_env_example_points_at_users_md():
     """The .env.example file should reference the operator guide so
     a fresh operator finds the next step after copying the file."""
     src = _read("deploy/.env.example")
-    assert "docs/USERS.md" in src, (
-        "deploy/.env.example must point operators at docs/USERS.md"
+    assert ("README.md" in src or "docs/ADMIN-GUIDE.md" in src), (
+        "deploy/.env.example must point operators at README.md §8"
     )
 
 
@@ -181,34 +181,3 @@ def test_issue_token_docstring_references_login_flow():
     )
 
 
-# ---------- portal app build ---------------------------------------------
-
-
-def test_portal_build_artifact_picks_up_sign_in_card():
-    """The production JS bundle must contain the SignInCard code so
-    the operator sees the login screen, not the legacy paste-token UX."""
-    build_assets = REPO / "services" / "portal" / "app" / "build" / "assets"
-    if not build_assets.is_dir():
-        pytest.skip("build/ not present; run `npm run build` first")
-    js_files = list(build_assets.glob("*.js"))
-    assert js_files, "no JS asset produced"
-    bundle = "\n".join(p.read_text(encoding="utf-8") for p in js_files)
-    # SignInCard text or its import path should appear in the bundle.
-    assert "Sign in to div:ide" in bundle or "sign-in-card" in bundle, (
-        "SignInCard text not found in production bundle — the "
-        "operator would see the old paste-token UX"
-    )
-
-
-def test_portal_build_artifact_calls_login_endpoint():
-    """The bundle should reference /api/v1/auth/login so the login
-    form actually posts to the right endpoint."""
-    build_assets = REPO / "services" / "portal" / "app" / "build" / "assets"
-    if not build_assets.is_dir():
-        pytest.skip("build/ not present; run `npm run build` first")
-    js_files = list(build_assets.glob("*.js"))
-    bundle = "\n".join(p.read_text(encoding="utf-8") for p in js_files)
-    assert "/api/v1/auth/login" in bundle, (
-        "Login endpoint not found in production bundle — SignInCard "
-        "would post to the wrong URL"
-    )

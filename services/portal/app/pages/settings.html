@@ -1,0 +1,122 @@
+
+          <div class="page-header">
+            <h1 class="page-title">Settings</h1>
+          </div>
+
+          <div class="grid grid-2">
+            <div class="card">
+              <div class="card-header">
+                <h3 class="card-title">Profile</h3>
+              </div>
+              <div style="display: flex; flex-direction: column; gap: var(--space-md);">
+                <div>
+                  <label style="display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">Username</label>
+                  <input type="text" value="john_doe" style="width: 100%;">
+                </div>
+                <div>
+                  <label style="display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">Email</label>
+                  <input type="text" value="john@example.com" style="width: 100%;">
+                </div>
+                <button class="btn btn-primary" style="align-self: flex-start;">Save Changes</button>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-header">
+                <h3 class="card-title">Notifications</h3>
+              </div>
+              <div style="display: flex; flex-direction: column; gap: var(--space-md);">
+                <div class="checkbox-item">
+                  <input type="checkbox" checked>
+                  <label>Email notifications for drill updates</label>
+                </div>
+                <div class="checkbox-item">
+                  <input type="checkbox" checked>
+                  <label>Browser notifications for team activity</label>
+                </div>
+                <div class="checkbox-item">
+                  <input type="checkbox">
+                  <label>Weekly progress reports</label>
+                </div>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-header">
+                <h3 class="card-title">Security</h3>
+              </div>
+              <div style="display: flex; flex-direction: column; gap: var(--space-md);">
+                <button class="btn btn-secondary">Change Password</button>
+                <button class="btn btn-secondary">Enable Two-Factor Authentication</button>
+                <button class="btn btn-secondary">View Active Sessions</button>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-header">
+                <h3 class="card-title">Appearance</h3>
+              </div>
+              <div style="display: flex; flex-direction: column; gap: var(--space-md);">
+                <div>
+                  <label style="display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">Theme</label>
+                  <select style="width: 100%; background: var(--bg-primary); border: 1px solid var(--border); color: var(--text-primary); padding: 8px 12px; border-radius: 3px;">
+                    <option>Dark (Default)</option>
+                    <option>Light</option>
+                    <option>System</option>
+                  </select>
+                </div>
+                <div>
+                  <label style="display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">Font Size</label>
+                  <select style="width: 100%; background: var(--bg-primary); border: 1px solid var(--border); color: var(--text-primary); padding: 8px 12px; border-radius: 3px;">
+                    <option>Small</option>
+                    <option selected>Medium (Default)</option>
+                    <option>Large</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            <!-- User Stats Card -->
+            <div class="card" style="grid-column: 1/-1;">
+              <div class="card-header">
+                <h3 class="card-title">Your Stats</h3>
+              </div>
+              <div id="user-stats" style="padding: var(--space-md);">
+                <div style="text-align: center; color: var(--text-secondary);">Loading stats...</div>
+              </div>
+            </div>
+
+            <!-- Badges Card -->
+            <div class="card" style="grid-column: 1/-1;">
+              <div class="card-header">
+                <h3 class="card-title">Earned Badges</h3>
+              </div>
+              <div id="user-badges" style="padding: var(--space-md);">
+                <div style="text-align: center; color: var(--text-secondary);">Loading badges...</div>
+              </div>
+            </div>
+
+            <!-- Activity Card -->
+            <div class="card" style="grid-column: 1/-1;">
+              <div class="card-header">
+                <h3 class="card-title">Recent Activity</h3>
+              </div>
+              <div id="user-activity" style="padding: var(--space-md);">
+                <div style="text-align: center; color: var(--text-secondary);">Loading activity...</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+
+  <script type="module" src="/components.js"></script>
+  <script type="module" src="/app-components-demo.js"></script>
+  <script src="/auth.js"></script>
+  <script src="/api.js"></script>
+  <script src="/app.js"></script>
+  <script src="/ui-utils.js"></script>
+  <script src="/ui-drills.js"></script>
+  <script src="/ui-advanced.js"></script>
+</body>
+</html>

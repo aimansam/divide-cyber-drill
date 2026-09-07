@@ -105,7 +105,7 @@ class AuditAction(str, enum.Enum):
     ASSET_STATUS_SYNCED = "asset.status_synced"
     # F5: runner logged the planting intent for a flag
     # declared in spec.flags[]. The actual filesystem write
-    # happens via cloud-init user_data (see docs/F5-SCORING.md);
+    # happens via cloud-init user_data (see README.md §5);
     # the audit row is the operator-visible record.
     FLAG_PLANTED = "flag.planted"
     # F-reset-ux (P8): admin-issued reset link + the user-side

@@ -4,21 +4,21 @@ Usage:
     python3 tools/gen_diagrams.py
 
 Outputs:
-    docs/images/00-overview.png
-    docs/images/01-phase0-foundations.png
-    docs/images/02-phase1-one-vm-drill.png
-    docs/images/03-phase2-multi-vm-sdn.png
-    docs/images/04-phase3-telemetry-reports.png
-    docs/images/05-phase4-polish.png
+    assets/diagrams/00-overview.png
+    assets/diagrams/01-phase0-foundations.png
+    assets/diagrams/02-phase1-one-vm-drill.png
+    assets/diagrams/03-phase2-multi-vm-sdn.png
+    assets/diagrams/04-phase3-telemetry-reports.png
+    assets/diagrams/05-phase4-polish.png
 """
 import os
 import matplotlib.pyplot as plt
 from matplotlib.patches import FancyBboxPatch, FancyArrowPatch, Rectangle
 from matplotlib.lines import Line2D
 
-# Resolve output dir relative to this script: tools/ -> ../docs/images
+# Resolve output dir relative to this script: tools/ -> ../assets/diagrams
 _HERE = os.path.dirname(os.path.abspath(__file__))
-OUT_DIR = os.path.normpath(os.path.join(_HERE, "..", "docs", "images"))
+OUT_DIR = os.path.normpath(os.path.join(_HERE, "..", "assets", "diagrams"))
 os.makedirs(OUT_DIR, exist_ok=True)
 
 # ---------- Brand palette ----------

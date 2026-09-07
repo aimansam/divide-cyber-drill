@@ -48,7 +48,7 @@ jobs:
         run: python tools/gen_diagrams.py
       - name: Verify diagrams committed
         run: |
-          if [[ -n "$(git status --porcelain docs/images/)" ]]; then
+          if [[ -n "$(git status --porcelain assets/diagrams/)" ]]; then
             echo "::error::Architecture diagrams are out of date. Run 'python tools/gen_diagrams.py' locally."
             exit 1
           fi

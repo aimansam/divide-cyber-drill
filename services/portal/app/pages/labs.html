@@ -1,0 +1,189 @@
+
+          <div class="page-header">
+            <h1 class="page-title">Labs</h1>
+            <button class="btn btn-secondary">Filter</button>
+          </div>
+
+          <div style="display: flex; gap: var(--space-xl);">
+            <!-- Filter Sidebar -->
+            <div style="width: 240px; flex-shrink: 0;">
+              <div class="card">
+                <div class="filter-section">
+                  <div class="filter-title">Difficulty</div>
+                  <div class="checkbox-item">
+                    <input type="checkbox" name="difficulty" value="easy" checked>
+                    <label>Easy</label>
+                  </div>
+                  <div class="checkbox-item">
+                    <input type="checkbox" name="difficulty" value="medium">
+                    <label>Medium</label>
+                  </div>
+                  <div class="checkbox-item">
+                    <input type="checkbox" name="difficulty" value="hard">
+                    <label>Hard</label>
+                  </div>
+                  <div class="checkbox-item">
+                    <input type="checkbox" name="difficulty" value="expert">
+                    <label>Expert</label>
+                  </div>
+                </div>
+
+                <div class="filter-section">
+                  <div class="filter-title">Category</div>
+                  <div class="checkbox-item">
+                    <input type="checkbox" name="category" value="Web" checked>
+                    <label>Web</label>
+                  </div>
+                  <div class="checkbox-item">
+                    <input type="checkbox" name="category" value="Network">
+                    <label>Network</label>
+                  </div>
+                  <div class="checkbox-item">
+                    <input type="checkbox" name="category" value="Active Directory">
+                    <label>Active Directory</label>
+                  </div>
+                  <div class="checkbox-item">
+                    <input type="checkbox" name="category" value="Linux">
+                    <label>Linux</label>
+                  </div>
+                  <div class="checkbox-item">
+                    <input type="checkbox" name="category" value="Windows">
+                    <label>Windows</label>
+                  </div>
+                  <div class="checkbox-item">
+                    <input type="checkbox" name="category" value="Forensics">
+                    <label>Forensics</label>
+                  </div>
+                  <div class="checkbox-item">
+                    <input type="checkbox" name="category" value="Blue Team">
+                    <label>Blue Team</label>
+                  </div>
+                </div>
+
+                <div class="filter-section">
+                  <div class="filter-title">Tags</div>
+                  <div class="checkbox-item">
+                    <input type="checkbox" name="tag" value="sql" checked>
+                    <label>SQL</label>
+                  </div>
+                  <div class="checkbox-item">
+                    <input type="checkbox" name="tag" value="xss">
+                    <label>XSS</label>
+                  </div>
+                  <div class="checkbox-item">
+                    <input type="checkbox" name="tag" value="rce">
+                    <label>RCE</label>
+                  </div>
+                  <div class="checkbox-item">
+                    <input type="checkbox" name="tag" value="privilege-escalation">
+                    <label>Privilege Escalation</label>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Lab Cards Grid -->
+            <div style="flex: 1;">
+              <div class="grid grid-3">
+                <div class="lab-card">
+                  <span class="badge badge-easy">Easy</span>
+                  <div class="lab-title" style="margin-top: var(--space-sm);">SQL Injection 101</div>
+                  <div class="lab-meta">
+                    <span>⏱ 45 min</span>
+                  </div>
+                  <div class="lab-tags">
+                    <span class="tag">Web</span>
+                    <span class="tag">SQL</span>
+                    <span class="tag">OWASP</span>
+                  </div>
+                  <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <span style="font-size: 12px; color: var(--text-secondary);">Not Started</span>
+                    <button class="btn btn-primary btn-sm">Start →</button>
+                  </div>
+                </div>
+
+                <div class="lab-card">
+                  <span class="badge badge-hard">Hard</span>
+                  <div class="lab-title" style="margin-top: var(--space-sm);">Buffer Overflow</div>
+                  <div class="lab-meta">
+                    <span>⏱ 2h</span>
+                  </div>
+                  <div class="lab-tags">
+                    <span class="tag">Binary</span>
+                    <span class="tag">Memory</span>
+                  </div>
+                  <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <span style="font-size: 12px; color: var(--medium);">In Progress</span>
+                    <button class="btn btn-primary btn-sm">Continue →</button>
+                  </div>
+                </div>
+
+                <div class="lab-card">
+                  <span class="badge badge-medium">Medium</span>
+                  <div class="lab-title" style="margin-top: var(--space-sm);">Active Directory Basics</div>
+                  <div class="lab-meta">
+                    <span>⏱ 1h 30min</span>
+                  </div>
+                  <div class="lab-tags">
+                    <span class="tag">AD</span>
+                    <span class="tag">Windows</span>
+                    <span class="tag">Kerberos</span>
+                  </div>
+                  <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <span style="font-size: 12px; color: var(--text-secondary);">Not Started</span>
+                    <button class="btn btn-primary btn-sm">Start →</button>
+                  </div>
+                </div>
+
+                <div class="lab-card">
+                  <span class="badge badge-expert">Expert</span>
+                  <div class="lab-title" style="margin-top: var(--space-sm);">Kernel Exploitation</div>
+                  <div class="lab-meta">
+                    <span>⏱ 4h</span>
+                  </div>
+                  <div class="lab-tags">
+                    <span class="tag">Linux</span>
+                    <span class="tag">Kernel</span>
+                    <span class="tag">PrivEsc</span>
+                  </div>
+                  <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <span style="font-size: 12px; color: var(--text-secondary);">Not Started</span>
+                    <button class="btn btn-primary btn-sm">Start →</button>
+                  </div>
+                </div>
+
+                <div class="lab-card">
+                  <span class="badge badge-easy">Easy</span>
+                  <div class="lab-title" style="margin-top: var(--space-sm);">Linux Privilege Escalation</div>
+                  <div class="lab-meta">
+                    <span>⏱ 1h</span>
+                  </div>
+                  <div class="lab-tags">
+                    <span class="tag">Linux</span>
+                    <span class="tag">PrivEsc</span>
+                  </div>
+                  <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <span style="font-size: 12px; color: var(--low);">Completed</span>
+                    <button class="btn btn-secondary btn-sm">Review</button>
+                  </div>
+                </div>
+
+                <div class="lab-card">
+                  <span class="badge badge-medium">Medium</span>
+                  <div class="lab-title" style="margin-top: var(--space-sm);">Network Pivoting</div>
+                  <div class="lab-meta">
+                    <span>⏱ 2h</span>
+                  </div>
+                  <div class="lab-tags">
+                    <span class="tag">Network</span>
+                    <span class="tag">Pivoting</span>
+                    <span class="tag">Tunneling</span>
+                  </div>
+                  <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <span style="font-size: 12px; color: var(--text-secondary);">Not Started</span>
+                    <button class="btn btn-primary btn-sm">Start →</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>

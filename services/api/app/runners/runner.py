@@ -387,7 +387,7 @@ class Runner:
         # sees the chain. The actual filesystem write is done via
         # cloud-init user_data on the target asset; that comes
         # for free when scenarios author a user_data snippet
-        # referencing spec.flags[].id. See docs/F5-SCORING.md §3
+        # referencing spec.flags[].id. See README.md §5 §3
         # for the user_data recipe.
         # F7: use template snapshot flags if available
         if req.template_id is not None and snapshot.get("flags") is not None:

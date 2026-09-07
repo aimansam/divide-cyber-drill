@@ -2,7 +2,7 @@
 
 Phase 0: this module is lazy-instantiated so the API container boots even
 without Proxmox credentials. Real Proxmox integration is gated until we get
-explicit user sign-off (see docs/PLAN.md §13 and the staging plan).
+explicit user sign-off (see README.md §13 and the staging plan).
 
 Read-only endpoints land first (Stage 2). Write endpoints (clone/start/stop)
 require token promotion to PVEVMAdmin and are scheduled for Stage 3+.

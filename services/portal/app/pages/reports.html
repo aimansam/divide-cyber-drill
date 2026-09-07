@@ -1,0 +1,271 @@
+
+          <div class="page-header">
+            <h1 class="page-title">Report: Ransomware Simulation Drill</h1>
+            <button class="btn btn-primary">Export PDF</button>
+          </div>
+
+          <!-- Drill Summary -->
+          <div class="card" style="margin-bottom: var(--space-xl);">
+            <div class="card-header">
+              <h3 class="card-title">Drill Summary</h3>
+            </div>
+            <div class="grid grid-4">
+              <div>
+                <div style="color: var(--text-secondary); font-size: 12px; margin-bottom: 4px;">Scenario</div>
+                <div style="font-weight: 600;">Ransomware Simulation</div>
+              </div>
+              <div>
+                <div style="color: var(--text-secondary); font-size: 12px; margin-bottom: 4px;">Duration</div>
+                <div style="font-weight: 600; font-family: var(--font-mono);">2h 15m</div>
+              </div>
+              <div>
+                <div style="color: var(--text-secondary); font-size: 12px; margin-bottom: 4px;">Team</div>
+                <div style="font-weight: 600;">Alpha</div>
+              </div>
+              <div>
+                <div style="color: var(--text-secondary); font-size: 12px; margin-bottom: 4px;">Result</div>
+                <div style="font-weight: 600;">Completed (4/5 objectives)</div>
+              </div>
+            </div>
+            <div style="margin-top: var(--space-lg); padding-top: var(--space-lg); border-top: 1px solid var(--border);">
+              <div style="display: flex; justify-content: space-between; align-items: center;">
+                <div>
+                  <div style="color: var(--text-secondary); font-size: 12px; margin-bottom: 4px;">Final Score</div>
+                  <div style="font-size: 24px; font-weight: 700; font-family: var(--font-mono);">850 / 1000</div>
+                </div>
+                <div style="text-align: right;">
+                  <div style="color: var(--text-secondary); font-size: 12px; margin-bottom: 4px;">Performance</div>
+                  <div style="font-size: 18px; font-weight: 700; color: var(--low);">Excellent</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Findings List -->
+          <div class="card" style="margin-bottom: var(--space-xl);">
+            <div class="card-header">
+              <h3 class="card-title">Findings</h3>
+            </div>
+            <table>
+              <thead>
+                <tr>
+                  <th>Severity</th>
+                  <th>Finding</th>
+                  <th>Evidence</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><span class="badge badge-high">High</span></td>
+                  <td style="font-weight: 600;">SQL Injection in login form</td>
+                  <td>
+                    <button class="btn btn-secondary btn-sm">View</button>
+                    <button class="btn btn-secondary btn-sm">Download</button>
+                  </td>
+                </tr>
+                <tr>
+                  <td><span class="badge badge-medium">Medium</span></td>
+                  <td style="font-weight: 600;">Weak SMB password on file server</td>
+                  <td>
+                    <button class="btn btn-secondary btn-sm">View</button>
+                    <button class="btn btn-secondary btn-sm">Download</button>
+                  </td>
+                </tr>
+                <tr>
+                  <td><span class="badge badge-low">Low</span></td>
+                  <td style="font-weight: 600;">Outdated Apache version (2.4.41)</td>
+                  <td>
+                    <button class="btn btn-secondary btn-sm">View</button>
+                    <button class="btn btn-secondary btn-sm">Download</button>
+                  </td>
+                </tr>
+                <tr>
+                  <td><span class="badge badge-medium">Medium</span></td>
+                  <td style="font-weight: 600;">Missing security headers on web application</td>
+                  <td>
+                    <button class="btn btn-secondary btn-sm">View</button>
+                    <button class="btn btn-secondary btn-sm">Download</button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <!-- Timeline of Actions -->
+          <div class="card" style="margin-bottom: var(--space-xl);">
+            <div class="card-header">
+              <h3 class="card-title">Timeline of Actions</h3>
+            </div>
+            <div class="activity-item">
+              <div class="activity-time">14:23</div>
+              <div class="activity-text">Flag captured: SQL injection vulnerability exploited</div>
+            </div>
+            <div class="activity-item">
+              <div class="activity-time">14:18</div>
+              <div class="activity-text">Lateral movement to Domain Controller via Kerberoasting</div>
+            </div>
+            <div class="activity-item">
+              <div class="activity-time">14:10</div>
+              <div class="activity-text">Initial access via phishing email with malicious attachment</div>
+            </div>
+            <div class="activity-item">
+              <div class="activity-time">14:00</div>
+              <div class="activity-text">Drill started by Team Alpha</div>
+            </div>
+          </div>
+
+          <!-- Evidence Section -->
+          <div class="card">
+            <div class="card-header">
+              <h3 class="card-title">Evidence</h3>
+            </div>
+            <div class="grid grid-3">
+              <div style="background: var(--bg-tertiary); padding: var(--space-lg); border-radius: 4px; text-align: center;">
+                <div style="font-size: 32px; margin-bottom: var(--space-sm);">📸</div>
+                <div style="font-size: 12px; color: var(--text-secondary);">screenshot_001.png</div>
+                <button class="btn btn-secondary btn-sm" style="margin-top: var(--space-sm);">Download</button>
+              </div>
+              <div style="background: var(--bg-tertiary); padding: var(--space-lg); border-radius: 4px; text-align: center;">
+                <div style="font-size: 32px; margin-bottom: var(--space-sm);">📸</div>
+                <div style="font-size: 12px; color: var(--text-secondary);">screenshot_002.png</div>
+                <button class="btn btn-secondary btn-sm" style="margin-top: var(--space-sm);">Download</button>
+              </div>
+              <div style="background: var(--bg-tertiary); padding: var(--space-lg); border-radius: 4px; text-align: center;">
+                <div style="font-size: 32px; margin-bottom: var(--space-sm);">📄</div>
+                <div style="font-size: 12px; color: var(--text-secondary);">access_logs.txt</div>
+                <button class="btn btn-secondary btn-sm" style="margin-top: var(--space-sm);">Download</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+
+        <!-- Learning Path Page -->
+          <div class="page-header">
+            <h1 class="page-title">Learning Path</h1>
+          </div>
+
+          <!-- Skill Tree Visualization -->
+          <div class="card" style="margin-bottom: var(--space-xl);">
+            <div class="card-header">
+              <h3 class="card-title">Skill Tree</h3>
+            </div>
+            <div style="padding: var(--space-xl);">
+              <div style="text-align: center; margin-bottom: var(--space-xl);">
+                <div style="display: inline-block; background: var(--bg-tertiary); padding: var(--space-md) var(--space-lg); border-radius: 4px; font-weight: 600;">
+                  Web Security <span style="font-family: var(--font-mono); margin-left: 8px;">80%</span>
+                </div>
+              </div>
+              <div style="display: flex; justify-content: center; gap: var(--space-3xl); margin-bottom: var(--space-xl);">
+                <div style="text-align: center;">
+                  <div style="display: inline-block; background: var(--bg-tertiary); padding: var(--space-md) var(--space-lg); border-radius: 4px; font-weight: 600;">
+                    Network <span style="font-family: var(--font-mono); margin-left: 8px;">70%</span>
+                  </div>
+                </div>
+                <div style="text-align: center;">
+                  <div style="display: inline-block; background: var(--bg-tertiary); padding: var(--space-md) var(--space-lg); border-radius: 4px; font-weight: 600;">
+                    Active Directory <span style="font-family: var(--font-mono); margin-left: 8px;">60%</span>
+                  </div>
+                </div>
+              </div>
+              <div style="display: flex; justify-content: center; gap: var(--space-3xl);">
+                <div style="text-align: center;">
+                  <div style="display: inline-block; background: var(--bg-tertiary); padding: var(--space-md) var(--space-lg); border-radius: 4px; font-weight: 600;">
+                    Linux <span style="font-family: var(--font-mono); margin-left: 8px;">90%</span>
+                  </div>
+                </div>
+                <div style="text-align: center;">
+                  <div style="display: inline-block; background: var(--bg-tertiary); padding: var(--space-md) var(--space-lg); border-radius: 4px; font-weight: 600;">
+                    Windows <span style="font-family: var(--font-mono); margin-left: 8px;">70%</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Progress by Category -->
+          <div class="card" style="margin-bottom: var(--space-xl);">
+            <div class="card-header">
+              <h3 class="card-title">Progress by Category</h3>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: var(--space-lg);">
+              <div>
+                <div style="display: flex; justify-content: space-between; margin-bottom: var(--space-sm);">
+                  <span style="font-weight: 600;">Web Security</span>
+                  <span style="font-family: var(--font-mono); font-size: 12px;">80% (12/15 labs)</span>
+                </div>
+                <div class="progress-bar">
+                  <div class="progress-fill" style="width: 80%;"></div>
+                </div>
+              </div>
+              <div>
+                <div style="display: flex; justify-content: space-between; margin-bottom: var(--space-sm);">
+                  <span style="font-weight: 600;">Network Security</span>
+                  <span style="font-family: var(--font-mono); font-size: 12px;">70% (7/10 labs)</span>
+                </div>
+                <div class="progress-bar">
+                  <div class="progress-fill" style="width: 70%;"></div>
+                </div>
+              </div>
+              <div>
+                <div style="display: flex; justify-content: space-between; margin-bottom: var(--space-sm);">
+                  <span style="font-weight: 600;">Active Directory</span>
+                  <span style="font-family: var(--font-mono); font-size: 12px;">60% (6/10 labs)</span>
+                </div>
+                <div class="progress-bar">
+                  <div class="progress-fill" style="width: 60%;"></div>
+                </div>
+              </div>
+              <div>
+                <div style="display: flex; justify-content: space-between; margin-bottom: var(--space-sm);">
+                  <span style="font-weight: 600;">Linux Privilege Escalation</span>
+                  <span style="font-family: var(--font-mono); font-size: 12px;">90% (9/10 labs)</span>
+                </div>
+                <div class="progress-bar">
+                  <div class="progress-fill" style="width: 90%;"></div>
+                </div>
+              </div>
+              <div>
+                <div style="display: flex; justify-content: space-between; margin-bottom: var(--space-sm);">
+                  <span style="font-weight: 600;">Windows Security</span>
+                  <span style="font-family: var(--font-mono); font-size: 12px;">70% (7/10 labs)</span>
+                </div>
+                <div class="progress-bar">
+                  <div class="progress-fill" style="width: 70%;"></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Recommended Next Labs -->
+          <div class="card">
+            <div class="card-header">
+              <h3 class="card-title">Recommended Next Labs</h3>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: var(--space-md);">
+              <div style="display: flex; align-items: center; gap: var(--space-md); padding: var(--space-md); background: var(--bg-tertiary); border-radius: 4px;">
+                <div style="font-size: 18px; font-weight: 700; font-family: var(--font-mono); color: var(--text-secondary); width: 30px;">1.</div>
+                <div style="flex: 1;">
+                  <div style="font-weight: 600;">SQL Injection Advanced</div>
+                  <div style="font-size: 12px; color: var(--text-secondary);">Web, Hard, 2h</div>
+                </div>
+                <button class="btn btn-primary btn-sm">Start</button>
+              </div>
+              <div style="display: flex; align-items: center; gap: var(--space-md); padding: var(--space-md); background: var(--bg-tertiary); border-radius: 4px;">
+                <div style="font-size: 18px; font-weight: 700; font-family: var(--font-mono); color: var(--text-secondary); width: 30px;">2.</div>
+                <div style="flex: 1;">
+                  <div style="font-weight: 600;">Kerberoasting</div>
+                  <div style="font-size: 12px; color: var(--text-secondary);">Active Directory, Hard, 1.5h</div>
+                </div>
+                <button class="btn btn-primary btn-sm">Start</button>
+              </div>
+              <div style="display: flex; align-items: center; gap: var(--space-md); padding: var(--space-md); background: var(--bg-tertiary); border-radius: 4px;">
+                <div style="font-size: 18px; font-weight: 700; font-family: var(--font-mono); color: var(--text-secondary); width: 30px;">3.</div>
+                <div style="flex: 1;">
+                  <div style="font-weight: 600;">Buffer Overflow Basics</div>
+                  <div style="font-size: 12px; color: var(--text-secondary);">Binary, Medium, 1h</div>
+                </div>
+                <button class="btn btn-primary btn-sm">Start</button>
+              </div>
+            </div>
+          </div>

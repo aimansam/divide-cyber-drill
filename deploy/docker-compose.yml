@@ -1,10 +1,36 @@
 name: divide-cyber-drill
 
-# Note on networking: this host already has nginx-proxy-manager bound to :80/:443.
-# We expose the API directly on :8000 for Phase 0. Traefik still runs (used for
-# service discovery + ACME) but is reachable only via the divide-net bridge.
+# Architecture: Flask portal (port 80) serves frontend + proxies /api/* to FastAPI (internal port 8000)
+# Single entry point for users: http://localhost
 
 services:
+  # Flask portal - serves frontend and proxies API requests
+  portal:
+    build:
+      context: ../services/portal
+      dockerfile: Dockerfile
+    image: divide/portal:dev
+    container_name: divide-portal
+    restart: unless-stopped
+    ports:
+      - "5000:80"
+    environment:
+      API_BACKEND: http://api:8000
+    depends_on:
+      api:
+        condition: service_healthy
+    networks: [divide-net]
+    volumes:
+      # Serve static files directly (no build step — plain HTML/CSS/JS)
+      - ${DIVIDE_REPO_ROOT:-..}/services/portal/app:/app/app:ro
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:80/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # FastAPI backend - internal only, accessed via Flask portal proxy
   api:
     build:
       context: ..
@@ -12,8 +38,8 @@ services:
     image: divide/api:dev
     container_name: divide-api
     restart: unless-stopped
-    ports:
-      - "8000:8000"
+    expose:
+      - "8000"
     environment:
       DIVIDE_ENV: ${DIVIDE_ENV:-dev}
       DIVIDE_LOG_LEVEL: ${DIVIDE_LOG_LEVEL:-INFO}
@@ -32,7 +58,7 @@ services:
       # API can sync them into the DB on startup.
       DIVIDE_SCENARIOS_DIR: ${DIVIDE_SCENARIOS_DIR:-/workdir/examples/scenarios}
       DIVIDE_SYNC_ON_STARTUP: ${DIVIDE_SYNC_ON_STARTUP:-true}
-      # F3-prep credential login. See docs/USERS.md for the operator
+      # F3-prep credential login. See README.md §8 for the operator
       # guide. Set BOTH to bootstrap the first admin user on API
       # startup; empty defaults mean no auto-admin. Remove both vars
       # from the env after the first admin exists.
@@ -65,16 +91,6 @@ services:
       # Repo root mounted read-only so the api container can read scenario
       # YAMLs from /workdir/examples/scenarios at startup.
       - ${DIVIDE_REPO_ROOT:-..}:/workdir:ro
-      # User portal (React/Vite) build output. Bind-mounted so `npm run
-      # build` in services/portal/app/ on the host is reflected on the
-      # next browser refresh without rebuilding the API image. The
-      # container's /app/portal/app/build is otherwise image-baked via
-      # the Dockerfile's `COPY services/portal`.
-      # NOTE: the target subdir `build` does not yet exist inside the
-      # image's baked portal (it's .gitignored and excluded by the
-      # build context). Compose creates it on mount. The mount also
-      # shadows the source-tree `index.html` we don't want served.
-      - ${DIVIDE_REPO_ROOT:-..}/services/portal/app/build:/app/portal/app/build:ro
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:8000/healthz"]
       interval: 15s

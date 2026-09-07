@@ -156,7 +156,7 @@ _HINT = (
     "    On the PVE host, run:\n"
     "      pveum acl modify /v2/vm --userid divide@pve@pam --role PVEVMAdmin\n"
     "    (or grant PVEAdmin at / for a broader token).\n"
-    "    See docs/PROXMOX-SETUP.md §6 for the full procedure."
+    "    See README.md §8 §6 for the full procedure."
 )
 
 

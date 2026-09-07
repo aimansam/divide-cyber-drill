@@ -216,7 +216,7 @@ def test_start_drill_maps_proxmox_api_error_to_502(client):
         "-- create it via the wizard's Step 0 "
         "(POST /api/v1/admin/pve-setup-bridges) or via "
         "`pvesh create /cluster/sdn/vnets -vnet vmbr100 -zone divide` "
-        "(see docs/PROXMOX-SETUP.md §4)"
+        "(see README.md §8)"
     )
 
     with patch(

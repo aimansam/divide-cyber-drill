@@ -3,7 +3,7 @@
 These verify the JSON-shape tolerance and check functions without
 hitting the live API. The actual verify run is exercised by hand
 after `make live-drill` against a real PVE -- see
-docs/LIVE-DRILL-RUNBOOK.md.
+README.md §3.
 """
 from __future__ import annotations
 

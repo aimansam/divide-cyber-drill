@@ -20,7 +20,7 @@ RBAC (L2 2.9):
 The visibility filter is implemented in
 :mod:`app.services.authorization` and applied uniformly across
 list / detail / audit / (future) report endpoints. The matrix
-table is the source of truth for ``docs/USER-REQUIREMENTS.md`` §2.
+table is the source of truth for ``README.md §2`` §2.
 """
 from __future__ import annotations
 

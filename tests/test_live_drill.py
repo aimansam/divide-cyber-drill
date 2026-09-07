@@ -2,7 +2,7 @@
 
 These verify the JSON-shape tolerance without hitting the live API.
 The actual live drill is exercised by `make live-drill` against a real
-PVE with PVEVMAdmin privileges — see docs/PROXMOX-SETUP.md §6.
+PVE with PVEVMAdmin privileges — see README.md §8.
 """
 from __future__ import annotations
 

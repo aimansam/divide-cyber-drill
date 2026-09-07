@@ -21,7 +21,7 @@ Security note: this whole module used to be LAN-only. As of L2 2.9
 it's hard-gated on admin role. The setup wizard runs in the
 operator's browser, mints an admin token via ``tools/issue_token.py``
 during step 1, and forwards it on every ``fetch()`` call (see
-``docs/SETUP-UI.md``). The user-facing portals (``/``)
+``README.md §8``). The user-facing portals (``/``)
 do not hit any ``/admin/*`` endpoint.
 """
 from __future__ import annotations

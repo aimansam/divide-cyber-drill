@@ -91,8 +91,8 @@ fi
 
 # --- 2. Verify the portal bundle exists --------------------------------
 if ! curl -fsS --max-time 3 "${PORTAL_URL}" -o /dev/null; then
-  warn "Portal ${PORTAL_URL} not responding — may not be built yet."
-  echo "       Run:  cd services/portal/app && npm run build"
+  warn "Portal ${PORTAL_URL} not responding — start the stack first."
+  echo "       Run:  docker compose -f deploy/docker-compose.yml up -d portal"
 else
   ok "Portal served at ${PORTAL_URL}"
 fi

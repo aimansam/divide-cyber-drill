@@ -142,6 +142,7 @@ class RealProxmoxAdapter(ProxmoxAdapter):
                 token_value=self._token_secret,
                 verify_ssl=self._verify_ssl,
                 backend="https",
+                timeout=300,  # 5 minutes for clone operations
             )
         return self._client
 
@@ -168,7 +169,7 @@ class RealProxmoxAdapter(ProxmoxAdapter):
             if "403" in msg or "Permission check failed" in msg:
                 raise ProxmoxAPIError(
                     f"{type(exc).__name__}: {exc} — token needs PVEVMAdmin "
-                    f"(or PVEAdmin) on /v2/vm; see docs/PROXMOX-SETUP.md §6"
+                    f"(or PVEAdmin) on /v2/vm; see README.md §8 §6"
                 ) from exc
             raise ProxmoxAPIError(f"{type(exc).__name__}: {exc}") from exc
 
@@ -218,7 +219,16 @@ class RealProxmoxAdapter(ProxmoxAdapter):
         # Allocate VMID BEFORE cloning to ensure we know the exact VMID
         new_vmid = int(spec.new_vmid) if spec.new_vmid is not None else await self.allocate_vmid()
         
-        clone_params: dict[str, Any] = {"name": spec.name, "newid": new_vmid}
+        # Force full clones for compatibility with all storage types.
+        # Linked clones require thin-provisioned disks; if the template
+        # disk was created before LVM-to-thin conversion, linked clones fail.
+        # Explicitly specify storage to avoid ambiguity.
+        clone_params: dict[str, Any] = {
+            "name": spec.name,
+            "newid": new_vmid,
+            "full": 1,  # PVE API expects 1 for boolean true in form data
+            "storage": "local-lvm",
+        }
 
         def _do() -> None:
             self._get_client().nodes(node).qemu(spec.source_vmid).clone.post(**clone_params)
@@ -573,7 +583,7 @@ class RealProxmoxAdapter(ProxmoxAdapter):
         consistently use a single node for the whole drill so we only
         need to create it on that node. Bridges are managed via PVE's
         Software-Defined Networking stack (see
-        ``docs/PROXMOX-SETUP.md §4``): the wizard's Step 0 creates
+        ``README.md §8 §4``): the wizard's Step 0 creates
         the ``divide`` zone + one VNet per declared network via
         ``POST /cluster/sdn/{zones,vnets}``.
 
@@ -599,7 +609,7 @@ class RealProxmoxAdapter(ProxmoxAdapter):
                     f"{node_name!r} -- create it via the wizard's Step 0 "
                     f"(POST /api/v1/admin/pve-setup-bridges) or via "
                     f"`pvesh create /cluster/sdn/vnets -vnet {spec.bridge} "
-                    f"-zone divide` (see docs/PROXMOX-SETUP.md §4)"
+                    f"-zone divide` (see README.md §8 §4)"
                 )
 
         await self._call(_do)

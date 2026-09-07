@@ -1,0 +1,303 @@
+
+          <div class="page-header">
+            <h1 class="page-title">Drills</h1>
+            <button class="btn btn-primary" onclick="app.showCreateDrillModal()">+ Create Drill</button>
+          </div>
+
+          <!-- Drill List View (default) -->
+          <div id="drills-list-view">
+            <div class="grid grid-3" id="drills-grid">
+              <!-- Populated by loadDrills() -->
+            </div>
+          </div>
+
+          <!-- Active Drill View (shown when playing) -->
+          <div id="drills-active-view" style="display: none;">
+            <div style="margin-bottom: var(--space-lg);">
+              <button class="btn btn-secondary btn-sm" onclick="app.backToDrillList()">&larr; Back to Drills</button>
+            </div>
+
+            <div class="grid grid-6-6" style="margin-bottom: var(--space-xl);">
+              <!-- Left Column -->
+              <div>
+                <div class="card" style="margin-bottom: var(--space-lg);">
+                  <div class="card-header">
+                    <h3 class="card-title">Drill Overview</h3>
+                  </div>
+                  <div style="margin-bottom: var(--space-md);">
+                    <div style="color: var(--text-secondary); font-size: 12px; margin-bottom: 4px;">Description</div>
+                    <div id="active-drill-description" style="font-size: 13px; line-height: 1.6;">Loading...</div>
+                  </div>
+                  <div style="display: flex; gap: var(--space-xl); margin-top: var(--space-lg);">
+                    <div>
+                      <div style="color: var(--text-secondary); font-size: 12px;">Status</div>
+                      <div id="active-drill-status" style="font-size: 18px; font-weight: 700; font-family: var(--font-mono);">Active</div>
+                    </div>
+                    <div>
+                      <div style="color: var(--text-secondary); font-size: 12px;">Duration Limit</div>
+                      <div id="active-drill-duration" style="font-size: 18px; font-weight: 700; font-family: var(--font-mono);">-- min</div>
+                    </div>
+                    <div>
+                      <div style="color: var(--text-secondary); font-size: 12px;">Elapsed</div>
+                      <div id="active-drill-elapsed" class="timer" style="font-size: 18px; font-weight: 700; font-family: var(--font-mono);">00:00:00</div>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="card">
+                  <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
+                    <h3 class="card-title">Drill Info</h3>
+                    <div style="display: flex; gap: var(--space-sm);">
+                      <button class="btn btn-secondary btn-sm" onclick="app.exportDrillData(app.currentDrillId, 'json')">Export JSON</button>
+                      <button class="btn btn-secondary btn-sm" onclick="app.exportDrillData(app.currentDrillId, 'csv')">Export CSV</button>
+                    </div>
+                  </div>
+                  <div style="display: flex; flex-direction: column; gap: var(--space-md);">
+                    <div style="display: flex; justify-content: space-between;">
+                      <span style="color: var(--text-secondary); font-size: 12px;">Type</span>
+                      <span id="active-drill-type" style="font-weight: 600;">--</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between;">
+                      <span style="color: var(--text-secondary); font-size: 12px;">Max Participants</span>
+                      <span id="active-drill-participants" style="font-weight: 600;">--</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between;">
+                      <span style="color: var(--text-secondary); font-size: 12px;">Started At</span>
+                      <span id="active-drill-started" style="font-weight: 600; font-family: var(--font-mono);">--</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Right Column -->
+              <div>
+                <div class="card" style="margin-bottom: var(--space-lg);">
+                  <div class="card-header">
+                    <h3 class="card-title">Actions</h3>
+                  </div>
+                  <div style="display: flex; flex-direction: column; gap: var(--space-md);">
+                    <button id="btn-pause-drill" class="btn btn-secondary" onclick="app.pauseDrill()">Pause Drill</button>
+                    <button id="btn-stop-drill" class="btn btn-secondary" style="color: var(--danger);" onclick="app.stopDrill()">Stop Drill</button>
+                  </div>
+                </div>
+
+                <div class="card">
+                  <div class="card-header">
+                    <h3 class="card-title">Flag Submission</h3>
+                  </div>
+                  <div style="margin-bottom: var(--space-md);">
+                    <input type="text" id="flag-input" placeholder="FLAG{...}" style="width: 100%; font-family: var(--font-mono);">
+                  </div>
+                  <button class="btn btn-primary" style="width: 100%;" onclick="app.submitFlag()">Submit Flag</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Drill Stats -->
+            <div class="card" style="margin-bottom: var(--space-lg);">
+              <div class="card-header">
+                <h3 class="card-title">Drill Statistics</h3>
+              </div>
+              <div id="drill-stats" style="padding: var(--space-md);">
+                <div style="text-align: center; color: var(--text-secondary);">Loading stats...</div>
+              </div>
+            </div>
+
+            <!-- Objectives -->
+            <div class="card" style="margin-bottom: var(--space-lg);">
+              <div class="card-header">
+                <h3 class="card-title">Objectives</h3>
+              </div>
+              <div id="drill-objectives" style="padding: var(--space-md);">
+                <div style="text-align: center; color: var(--text-secondary);">Loading objectives...</div>
+              </div>
+            </div>
+
+            <!-- Participants -->
+            <div class="card" style="margin-bottom: var(--space-lg);">
+              <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
+                <h3 class="card-title">Participants</h3>
+                <button class="btn btn-primary btn-sm" onclick="app.showAddParticipantModal()">+ Add</button>
+              </div>
+              <div id="drill-participants" style="padding: var(--space-md);">
+                <div style="text-align: center; color: var(--text-secondary);">Loading participants...</div>
+              </div>
+            </div>
+
+            <!-- Scores -->
+            <div class="card" style="margin-bottom: var(--space-lg);">
+              <div class="card-header">
+                <h3 class="card-title">Scores</h3>
+              </div>
+              <div id="drill-scores" style="padding: var(--space-md);">
+                <div style="text-align: center; color: var(--text-secondary);">Loading scores...</div>
+              </div>
+            </div>
+
+            <!-- First Bloods -->
+            <div class="card" style="margin-bottom: var(--space-lg);">
+              <div class="card-header">
+                <h3 class="card-title"> First Bloods</h3>
+              </div>
+              <div id="drill-first-bloods" style="padding: var(--space-md);">
+                <div style="text-align: center; color: var(--text-secondary);">Loading first bloods...</div>
+              </div>
+            </div>
+
+            <!-- Submissions Feed -->
+            <div class="card" style="margin-bottom: var(--space-lg);">
+              <div class="card-header">
+                <h3 class="card-title">Submissions Feed</h3>
+              </div>
+              <div id="drill-submissions" style="padding: var(--space-md);">
+                <div style="text-align: center; color: var(--text-secondary);">Loading submissions...</div>
+              </div>
+            </div>
+
+            <!-- Announcements -->
+            <div class="card" style="margin-bottom: var(--space-lg);">
+              <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
+                <h3 class="card-title">Announcements</h3>
+                <button class="btn btn-primary btn-sm" onclick="app.showAddAnnouncementModal()">+ Add</button>
+              </div>
+              <div id="drill-announcements" style="padding: var(--space-md);">
+                <div style="text-align: center; color: var(--text-secondary);">Loading announcements...</div>
+              </div>
+            </div>
+
+            <!-- Add Announcement Modal -->
+            <div id="add-announcement-modal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); z-index: 1000; justify-content: center; align-items: center;">
+              <div style="background: var(--bg-secondary); border-radius: 4px; border: 1px solid var(--border); width: 500px; max-width: 90vw;">
+                <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
+                  <h3 class="card-title">Add Announcement</h3>
+                  <button onclick="app.hideAddAnnouncementModal()" style="background: none; border: none; color: var(--text-secondary); cursor: pointer; font-size: 20px;">&times;</button>
+                </div>
+                <div style="padding: var(--space-lg);">
+                  <textarea id="announcement-text" rows="4" placeholder="Enter announcement... (Markdown supported: **bold**, *italic*, `code`, [links](url))" style="width: 100%; padding: var(--space-sm); background: var(--bg-primary); border: 1px solid var(--border); border-radius: 4px; color: var(--text-primary); font-family: var(--font-mono);"></textarea>
+                  <div style="font-size: 11px; color: var(--text-tertiary); margin-top: 4px;">💡 Markdown formatting supported</div>
+                </div>
+                <div style="padding: var(--space-md) var(--space-lg); border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: var(--space-sm);">
+                  <button class="btn btn-secondary" onclick="app.hideAddAnnouncementModal()">Cancel</button>
+                  <button class="btn btn-primary" onclick="app.addAnnouncement()">Post</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Teams -->
+            <div class="card" style="margin-bottom: var(--space-lg);">
+              <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
+                <h3 class="card-title">Teams</h3>
+                <button class="btn btn-primary btn-sm" onclick="app.showCreateTeamModal()">+ Create Team</button>
+              </div>
+              <div id="drill-teams" style="padding: var(--space-md);">
+                <div style="text-align: center; color: var(--text-secondary);">Loading teams...</div>
+              </div>
+            </div>
+
+            <!-- Hints -->
+            <div class="card" style="margin-bottom: var(--space-lg);">
+              <div class="card-header">
+                <h3 class="card-title">Hints</h3>
+              </div>
+              <div id="drill-hints" style="padding: var(--space-md);">
+                <div style="text-align: center; color: var(--text-secondary);">Loading hints...</div>
+              </div>
+            </div>
+
+            <!-- Progress -->
+            <div class="card" style="margin-bottom: var(--space-lg);">
+              <div class="card-header">
+                <h3 class="card-title">Progress</h3>
+              </div>
+              <div id="drill-progress" style="padding: var(--space-md);">
+                <div style="text-align: center; color: var(--text-secondary);">Loading progress...</div>
+              </div>
+            </div>
+
+            <!-- Reports -->
+            <div class="card" style="margin-bottom: var(--space-lg);">
+              <div class="card-header">
+                <h3 class="card-title">Reports</h3>
+              </div>
+              <div id="drill-reports" style="padding: var(--space-md);">
+                <div style="text-align: center; color: var(--text-secondary);">Loading reports...</div>
+              </div>
+            </div>
+
+            <!-- Create Team Modal -->
+            <div id="create-team-modal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); z-index: 1000; justify-content: center; align-items: center;">
+              <div style="background: var(--bg-secondary); border-radius: 4px; border: 1px solid var(--border); width: 500px; max-width: 90vw;">
+                <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
+                  <h3 class="card-title">Create Team</h3>
+                  <button onclick="app.hideCreateTeamModal()" style="background: none; border: none; color: var(--text-secondary); cursor: pointer; font-size: 20px;">&times;</button>
+                </div>
+                <div style="padding: var(--space-lg);">
+                  <div style="margin-bottom: var(--space-md);">
+                    <label style="display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">Team Name *</label>
+                    <input type="text" id="team-name" required style="width: 100%; padding: var(--space-sm); background: var(--bg-primary); border: 1px solid var(--border); border-radius: 4px; color: var(--text-primary);">
+                  </div>
+                </div>
+                <div style="padding: var(--space-md) var(--space-lg); border-top: 1px solid var(--border); display: flex; justify-content: flex-end; gap: var(--space-sm);">
+                  <button class="btn btn-secondary" onclick="app.hideCreateTeamModal()">Cancel</button>
+                  <button class="btn btn-primary" onclick="app.createTeam()">Create Team</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Activity Log -->
+            <div class="card">
+              <div class="card-header">
+                <h3 class="card-title">Activity Log</h3>
+              </div>
+              <div id="active-drill-activity">
+                <div style="text-align: center; padding: 40px; color: var(--text-secondary);">No activity yet</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+
+        <!-- Create Drill Modal -->
+        <div id="create-drill-modal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7); z-index: 1000; justify-content: center; align-items: center;">
+          <div style="background: var(--bg-secondary); border-radius: 4px; border: 1px solid var(--border); width: 600px; max-width: 90vw; max-height: 90vh; overflow-y: auto;">
+            <div class="card-header" style="display: flex; justify-content: space-between; align-items: center;">
+              <h3 class="card-title">Create New Drill</h3>
+              <button onclick="app.hideCreateDrillModal()" style="background: none; border: none; color: var(--text-secondary); cursor: pointer; font-size: 20px;">&times;</button>
+            </div>
+            <div style="padding: var(--space-lg);">
+              <form id="create-drill-form">
+                <div style="margin-bottom: var(--space-md);">
+                  <label style="display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">Title *</label>
+                  <input type="text" id="drill-title" required style="width: 100%; padding: var(--space-sm); background: var(--bg-primary); border: 1px solid var(--border); border-radius: 4px; color: var(--text-primary);">
+                </div>
+                <div style="margin-bottom: var(--space-md);">
+                  <label style="display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">Description</label>
+                  <textarea id="drill-description" rows="3" style="width: 100%; padding: var(--space-sm); background: var(--bg-primary); border: 1px solid var(--border); border-radius: 4px; color: var(--text-primary); font-family: var(--font-mono);"></textarea>
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-md); margin-bottom: var(--space-md);">
+                  <div>
+                    <label style="display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">Type *</label>
+                    <select id="drill-type" required style="width: 100%; padding: var(--space-sm); background: var(--bg-primary); border: 1px solid var(--border); border-radius: 4px; color: var(--text-primary);">
+                      <option value="individual">Individual</option>
+                      <option value="team">Team</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label style="display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">Duration (minutes)</label>
+                    <input type="number" id="drill-duration" min="1" value="60" style="width: 100%; padding: var(--space-sm); background: var(--bg-primary); border: 1px solid var(--border); border-radius: 4px; color: var(--text-primary);">
+                  </div>
+                </div>
+                <div style="margin-bottom: var(--space-md);">
+                  <label style="display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">Max Participants</label>
+                  <input type="number" id="drill-max-participants" min="1" value="50" style="width: 100%; padding: var(--space-sm); background: var(--bg-primary); border: 1px solid var(--border); border-radius: 4px; color: var(--text-primary);">
+                </div>
+              </form>
+            </div>
+            <div style="padding: var(--space-md) var(--space-lg); border-top: 1px solid var(--border); display: flex; justify-content: space-between; gap: var(--space-sm);">
+              <button class="btn btn-secondary" onclick="app.hideCreateDrillModal()">Cancel</button>
+              <div style="display: flex; gap: var(--space-sm);">
+                <button class="btn btn-secondary" onclick="if(app._editingDrillId){app.duplicateDrill(app._editingDrillId);}else{app.createDrill();}" style="display:none;" id="duplicate-drill-btn">Duplicate</button>
+                <button class="btn btn-primary" onclick="app.createDrill()">Create Drill</button>
+              </div>
+            </div>
+          </div>

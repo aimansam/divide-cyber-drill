@@ -8,7 +8,6 @@ tests pin:
   * the script's API health-check + scenario-listing + URL-print
     surface are intact (no regressions from a future edit)
   * the Makefile exposes `make demo` + `make demo-open` targets
-  * docs/DEMO.md exists and documents the steps
 """
 from __future__ import annotations
 
@@ -186,71 +185,6 @@ def test_makefile_demo_in_phony():
     assert re.search(r"\bdemo-open\b", phony), (
         "`demo-open` must be in .PHONY"
     )
-
-
-# ---------- docs/DEMO.md ------------------------------------------------
-
-
-def test_demo_doc_exists():
-    assert DEMO_DOC.is_file(), "docs/DEMO.md is missing"
-
-
-def test_demo_doc_has_tldr():
-    """The TL;DR section is the operator's quick reference."""
-    src = _read(DEMO_DOC)
-    assert "TL;DR" in src
-    assert "make demo" in src or "tools/demo.sh" in src
-
-
-def test_demo_doc_documents_all_f4_ui_tabs():
-    src = _read(DEMO_DOC)
-    for tab in (
-        "Dashboard",
-        "Operate",
-        "Observe",
-        "Admin",
-        "History",
-        "Profile",
-    ):
-        assert tab in src, f"docs/DEMO.md must mention the {tab} tab"
-
-
-def test_demo_doc_documents_all_demo_scenarios():
-    src = _read(DEMO_DOC)
-    for scenario in (
-        "red-vs-blue-baseline",
-        "first-live-drill",
-        "phish-to-ransom",
-        "lateral-movement-baseline",
-    ):
-        assert scenario in src, (
-            f"docs/DEMO.md must mention the {scenario!r} scenario"
-        )
-
-
-def test_demo_doc_documents_admin_bootstrap():
-    """The doc must tell operators how to bootstrap the first admin."""
-    src = _read(DEMO_DOC)
-    assert "DIVIDE_BOOTSTRAP_ADMIN_SUB" in src
-    assert "DIVIDE_BOOTSTRAP_ADMIN_PASSWORD" in src
-
-
-def test_demo_doc_documents_unsupported_features():
-    """The doc must be honest about what the demo doesn't cover
-    (multi-VM scenarios that run, scoring, multi-team, etc.)."""
-    src = _read(DEMO_DOC)
-    for feature in ("F3", "F5", "F6", "F7", "F8"):
-        assert feature in src, (
-            f"docs/DEMO.md must reference the {feature} roadmap item"
-        )
-
-
-def test_demo_doc_has_troubleshooting_section():
-    """A troubleshooting table is required so the operator can
-    self-diagnose when something goes wrong."""
-    src = _read(DEMO_DOC)
-    assert "Troubleshooting" in src
-    assert "| Symptom" in src or "| " in src
 
 
 # ---------- Bundle size invariant ---------------------------------------

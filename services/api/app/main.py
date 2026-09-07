@@ -10,7 +10,6 @@ import structlog
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
@@ -20,7 +19,7 @@ from app.core.config import settings
 from app.core.logging import configure_logging
 from app.db import models
 from app.observability.middleware import PrometheusMiddleware
-from app.routers import admin, audit, auth, debrief, drills, events, exercises, health, me, proxmox, reports, scenarios, templates
+from app.routers import admin, audit, auth, debrief, drills, events, exercises, health, me, proxmox, reports, scenarios, templates, user_profiles, labs_v2, drills_v2, learning_paths_v2, submissions_v2, reports_v2
 from app.services import orphan_cleanup as orphan_svc
 from app.services.scenario_sync import sync_files
 from app.runners.runner import build_runner
@@ -499,73 +498,18 @@ def create_app() -> FastAPI:
     app.include_router(events.router, prefix="/api/v1", tags=["events"])
     # Q21: global audit search across all runs.
     app.include_router(audit.router, prefix="/api/v1/audit", tags=["audit"])
+    
+    # v2 API endpoints (new schema)
+    app.include_router(user_profiles.router, tags=["user_profiles_v2"])
+    app.include_router(labs_v2.router, tags=["labs_v2"])
+    app.include_router(drills_v2.router, tags=["drills_v2"])
+    app.include_router(learning_paths_v2.router, tags=["learning_paths_v2"])
+    app.include_router(submissions_v2.router, tags=["submissions_v2"])
+    app.include_router(reports_v2.router, tags=["reports_v2"])
 
-    # Mount the React-based user portal at / (root). API routes are
-    # registered first so /api/v1/* takes precedence. The hash router
-    # (/#/operate, /#/observe, etc.) means the browser only ever
-    # requests / from the server — all view routing is client-side.
-    #
-    # The Vite source tree (services/portal/app/) has its own
-    # index.html at the root that references /src/main.tsx — that's
-    # only useful for `npm run dev`, not for production serving. We
-    # serve `build/index.html` (the Vite-built artifact) here. Bind
-    # mount in compose.yml guarantees a host-side rebuild propagates
-    # without an image rebuild.
-    portal_path = Path(settings.portal_dir)
-    if portal_path.is_dir():
-        app_build = portal_path / "app" / "build"
-        if app_build.is_dir():
-            # Explicit route for the portal root. More reliable than
-            # relying on StaticFiles html=True for the bare / path.
-            from fastapi.responses import FileResponse
-
-            @app.get("/")
-            async def serve_portal_root():
-                """Serve the portal's index.html at the root path."""
-                index = app_build / "index.html"
-                if index.is_file():
-                    return FileResponse(str(index))
-                raise HTTPException(404, "Portal build not found")
-
-            # StaticFiles mount for assets and other static files.
-            app.mount(
-                "/",
-                StaticFiles(directory=str(app_build), html=True),
-                name="portal_app",
-            )
-        else:
-            log.warning(
-                "divide_api.portal_app_build_skipped",
-                build_dir=str(app_build),
-                reason=(
-                    "run `npm run build` in services/portal/app; "
-                    "user portal not served"
-                ),
-            )
-
-        # Setup wizard (vanilla HTML+JS). Mounted at /setup/ so it
-        # doesn't conflict with the SPA at /.
-        setup_wizard = portal_path / "setup"
-        if setup_wizard.is_dir():
-            app.mount(
-                "/setup",
-                StaticFiles(directory=str(setup_wizard), html=True),
-                name="setup_wizard",
-            )
-        else:
-            # Fall back to the old layout: the wizard lives at the
-            # root of the portal dir (services/portal/index.html).
-            app.mount(
-                "/setup",
-                StaticFiles(directory=str(portal_path), html=True),
-                name="setup_wizard",
-            )
-    else:
-        log.warning(
-            "divide_api.portal_skipped",
-            portal_dir=str(portal_path),
-            reason="directory does not exist; admin endpoints still work via API",
-        )
+    # Frontend is now served by Flask portal (separate service on port 80)
+    # which proxies /api/* requests to this FastAPI backend.
+    # No need to mount static files here anymore.
 
     return app
 
